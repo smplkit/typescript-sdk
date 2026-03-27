@@ -33,7 +33,7 @@ export interface SmplkitClientOptions {
  *
  * @example
  * ```typescript
- * import { SmplkitClient } from "smplkit";
+ * import { SmplkitClient } from "@smplkit/sdk";
  *
  * const client = new SmplkitClient({ apiKey: "sk_api_..." });
  * const cfg = await client.config.get({ key: "common" });

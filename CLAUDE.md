@@ -53,8 +53,8 @@ The SDK supports Node.js 18 through 22. Development uses Node.js 22 (the latest 
 
 ## Package Naming
 
-- **npm package name:** `smplkit` (install via `npm install smplkit`)
-- **Import:** `import { SmplkitClient } from "smplkit"`
+- **npm package name:** `@smplkit/sdk` (install via `npm install @smplkit/sdk`)
+- **Import:** `import { SmplkitClient } from "@smplkit/sdk"`
 
 ## Publishing
 

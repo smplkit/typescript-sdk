@@ -5,13 +5,13 @@ Official TypeScript SDK for the [smplkit](https://docs.smplkit.com) platform.
 ## Installation
 
 ```bash
-npm install smplkit
+npm install @smplkit/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { SmplkitClient } from "smplkit";
+import { SmplkitClient } from "@smplkit/sdk";
 
 const client = new SmplkitClient({ apiKey: "sk_api_..." });
 
@@ -56,7 +56,7 @@ import {
   SmplValidationError,
   SmplConnectionError,
   SmplTimeoutError,
-} from "smplkit";
+} from "@smplkit/sdk";
 
 try {
   const config = await client.config.get({ key: "nonexistent" });
