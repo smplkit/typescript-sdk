@@ -311,5 +311,31 @@ describe("ConfigClient", () => {
       expect(config.updatedAt).toBeInstanceOf(Date);
       expect(config.updatedAt?.toISOString()).toBe("2024-01-16T14:00:00.000Z");
     });
+
+    it("should use empty string fallback when key is null", async () => {
+      const resource = {
+        ...SAMPLE_RESOURCE,
+        attributes: { ...SAMPLE_RESOURCE.attributes, key: null },
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
+
+      const client = new ConfigClient(makeTransport());
+      const config = await client.get({ id: SAMPLE_RESOURCE.id });
+
+      expect(config.key).toBe("");
+    });
+  });
+
+  describe("create with optional fields", () => {
+    it("should include parent in request body when provided", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
+
+      const client = new ConfigClient(makeTransport());
+      await client.create({ name: "Child Config", parent: "parent-uuid-123" });
+
+      const [, options] = mockFetch.mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.data.attributes.parent).toBe("parent-uuid-123");
+    });
   });
 });

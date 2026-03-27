@@ -170,6 +170,12 @@ describe("Transport", () => {
       await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplConnectionError);
     });
 
+    it("should throw SmplConnectionError with String(error) when thrown value is not an Error", async () => {
+      mockFetch.mockRejectedValueOnce("plain string error");
+
+      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplConnectionError);
+    });
+
     it("should throw SmplError on invalid JSON response", async () => {
       mockFetch.mockResolvedValueOnce(new Response("not json", { status: 200 }));
 
