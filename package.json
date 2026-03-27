@@ -41,6 +41,14 @@
     "config",
     "configuration"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smplkit/typescript-sdk"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "author": "smplkit",
   "license": "MIT",
   "devDependencies": {
@@ -52,6 +60,7 @@
     "eslint-config-prettier": "^9.0.0",
     "openapi-typescript": "^7.0.0",
     "prettier": "^3.0.0",
+    "semantic-release": "^25.0.3",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
