@@ -1,5 +1,5 @@
 {
-  "name": "smplkit",
+  "name": "@smplkit/sdk",
   "version": "0.0.0",
   "description": "Official TypeScript SDK for the smplkit platform",
   "main": "./dist/index.cjs",
