@@ -3,3 +3,8 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
+
+# Claude Code
+CLAUDE.md
+CLAUDE.local.md
+.claude/
