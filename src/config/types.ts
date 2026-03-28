@@ -260,22 +260,24 @@ export class Config {
    */
   private async _buildChain(
     _timeout: number,
-  ): Promise<Array<{ id: string; values: Record<string, unknown>; environments: Record<string, unknown> }>> {
+  ): Promise<
+    Array<{ id: string; values: Record<string, unknown>; environments: Record<string, unknown> }>
+  > {
     const chain: Array<{
       id: string;
       values: Record<string, unknown>;
       environments: Record<string, unknown>;
     }> = [{ id: this.id, values: this.values, environments: this.environments }];
 
-    let current: Config = this;
-    while (current.parent !== null) {
-      const parentConfig = await this._client.get({ id: current.parent });
+    let parentId = this.parent;
+    while (parentId !== null) {
+      const parentConfig = await this._client.get({ id: parentId });
       chain.push({
         id: parentConfig.id,
         values: parentConfig.values,
         environments: parentConfig.environments,
       });
-      current = parentConfig;
+      parentId = parentConfig.parent;
     }
 
     return chain;

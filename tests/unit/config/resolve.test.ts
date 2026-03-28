@@ -80,9 +80,7 @@ describe("resolveChain", () => {
   });
 
   it("should resolve single config with base values only", () => {
-    const chain: ChainConfig[] = [
-      { id: "a", values: { x: 1, y: 2 }, environments: {} },
-    ];
+    const chain: ChainConfig[] = [{ id: "a", values: { x: 1, y: 2 }, environments: {} }];
     expect(resolveChain(chain, "production")).toEqual({ x: 1, y: 2 });
   });
 

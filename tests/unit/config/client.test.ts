@@ -181,9 +181,9 @@ describe("ConfigClient", () => {
       expect(config.name).toBe("User Service");
       expect(config.key).toBe("user_service");
 
-      const body = await calledBodyJson() as Record<string, unknown>;
+      const body = (await calledBodyJson()) as Record<string, unknown>;
       const data = body.data as Record<string, unknown>;
-      const attrs = (data.attributes as Record<string, unknown>);
+      const attrs = data.attributes as Record<string, unknown>;
       expect(data.type).toBe("config");
       expect(attrs.name).toBe("User Service");
       expect(attrs.key).toBe("user_service");
@@ -197,8 +197,8 @@ describe("ConfigClient", () => {
       const client = makeClient();
       await client.create({ name: "Minimal Config" });
 
-      const body = await calledBodyJson() as Record<string, unknown>;
-      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      const body = (await calledBodyJson()) as Record<string, unknown>;
+      const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
       expect(attrs.name).toBe("Minimal Config");
       expect(attrs.key).toBeUndefined();
       expect(attrs.description).toBeUndefined();
@@ -363,8 +363,8 @@ describe("ConfigClient", () => {
       const client = makeClient();
       await client.create({ name: "Child Config", parent: "parent-uuid-123" });
 
-      const body = await calledBodyJson() as Record<string, unknown>;
-      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      const body = (await calledBodyJson()) as Record<string, unknown>;
+      const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
       expect(attrs.parent).toBe("parent-uuid-123");
     });
   });
@@ -454,8 +454,8 @@ describe("ConfigClient", () => {
         environments: { production: { values: { x: 1 } } },
       });
 
-      const body = await calledBodyJson() as Record<string, unknown>;
-      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      const body = (await calledBodyJson()) as Record<string, unknown>;
+      const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
       expect(attrs.environments).toEqual({ production: { values: { x: 1 } } });
     });
   });
@@ -486,7 +486,9 @@ describe("ConfigClient", () => {
     });
 
     it("should throw on JSON error for create", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422));
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422),
+      );
 
       const client = makeClient();
       await expect(client.create({ name: "test" })).rejects.toThrow(SmplValidationError);
@@ -500,7 +502,9 @@ describe("ConfigClient", () => {
     });
 
     it("should throw on JSON error for _updateConfig", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422));
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422),
+      );
 
       const client = makeClient();
       await expect(

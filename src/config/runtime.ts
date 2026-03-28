@@ -13,11 +13,7 @@
 import WebSocket from "ws";
 import { resolveChain } from "./resolve.js";
 import type { ChainConfig } from "./resolve.js";
-import type {
-  ConfigChangeEvent,
-  ConfigStats,
-  ConnectionStatus,
-} from "./runtime-types.js";
+import type { ConfigChangeEvent, ConfigStats, ConnectionStatus } from "./runtime-types.js";
 
 /** @internal */
 interface ChangeListener {
@@ -163,10 +159,7 @@ export class ConfigRuntime {
    * @param options.key - If provided, the listener fires only for this key.
    *   If omitted, the listener fires for all changes.
    */
-  onChange(
-    callback: (event: ConfigChangeEvent) => void,
-    options?: { key?: string },
-  ): void {
+  onChange(callback: (event: ConfigChangeEvent) => void, options?: { key?: string }): void {
     this._listeners.push({
       callback,
       key: options?.key ?? null,

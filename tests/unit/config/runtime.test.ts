@@ -332,7 +332,10 @@ describe("ConfigRuntime", () => {
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit("message", JSON.stringify({ type: "subscribed", config_id: "cfg-1", environment: "production" }));
+      ws._emit(
+        "message",
+        JSON.stringify({ type: "subscribed", config_id: "cfg-1", environment: "production" }),
+      );
       ws._emit("message", JSON.stringify({ type: "error", message: "some error" }));
 
       expect(events).toHaveLength(0);

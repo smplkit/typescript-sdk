@@ -4,298 +4,298 @@
  */
 
 export interface paths {
-    "/api/v1/configs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Configs */
-        get: operations["list_configs"];
-        put?: never;
-        /** Create Config */
-        post: operations["create_config"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  "/api/v1/configs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/v1/configs/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Config */
-        get: operations["get_config"];
-        /** Update Config */
-        put: operations["update_config"];
-        post?: never;
-        /** Delete Config */
-        delete: operations["delete_config"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** List Configs */
+    get: operations["list_configs"];
+    put?: never;
+    /** Create Config */
+    post: operations["create_config"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/configs/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    /** Get Config */
+    get: operations["get_config"];
+    /** Update Config */
+    put: operations["update_config"];
+    post?: never;
+    /** Delete Config */
+    delete: operations["delete_config"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        /**
-         * Config
-         * @example {
-         *       "description": "Configuration for the user service.",
-         *       "environments": {},
-         *       "key": "user_service",
-         *       "name": "User Service",
-         *       "parent": "c837fa31-9c27-47e6-85e6-6e4c06bcf642",
-         *       "values": {
-         *         "max_retries": 3
-         *       }
-         *     }
-         */
-        Config: {
-            /** Key */
-            key?: string | null;
-            /** Name */
-            name: string;
-            /** Description */
-            description?: string | null;
-            /** Parent */
-            parent?: string | null;
-            /** Values */
-            values?: {
-                [key: string]: unknown;
-            } | null;
-            /** Environments */
-            environments?: {
-                [key: string]: unknown;
-            } | null;
-            /** Created At */
-            readonly created_at?: string | null;
-            /** Updated At */
-            readonly updated_at?: string | null;
-        };
-        /** ConfigListResponse */
-        ConfigListResponse: {
-            /** Data */
-            data: components["schemas"]["ConfigResource"][];
-        };
-        /** ConfigResource */
-        ConfigResource: {
-            /** Id */
-            id?: string | null;
-            /**
-             * Type
-             * @constant
-             */
-            type: "config";
-            attributes: components["schemas"]["Config"];
-        };
-        /** ConfigResponse */
-        ConfigResponse: {
-            data: components["schemas"]["ConfigResource"];
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
-        };
-        /** Resource[Config] */
-        Resource_Config_: {
-            /** Id */
-            id?: string | null;
-            /**
-             * Type
-             * @default
-             */
-            type: string;
-            attributes: components["schemas"]["Config"];
-        };
-        /** Response[Config] */
-        Response_Config_: {
-            data: components["schemas"]["Resource_Config_"];
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-        };
+  schemas: {
+    /**
+     * Config
+     * @example {
+     *       "description": "Configuration for the user service.",
+     *       "environments": {},
+     *       "key": "user_service",
+     *       "name": "User Service",
+     *       "parent": "c837fa31-9c27-47e6-85e6-6e4c06bcf642",
+     *       "values": {
+     *         "max_retries": 3
+     *       }
+     *     }
+     */
+    Config: {
+      /** Key */
+      key?: string | null;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Parent */
+      parent?: string | null;
+      /** Values */
+      values?: {
+        [key: string]: unknown;
+      } | null;
+      /** Environments */
+      environments?: {
+        [key: string]: unknown;
+      } | null;
+      /** Created At */
+      readonly created_at?: string | null;
+      /** Updated At */
+      readonly updated_at?: string | null;
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    /** ConfigListResponse */
+    ConfigListResponse: {
+      /** Data */
+      data: components["schemas"]["ConfigResource"][];
+    };
+    /** ConfigResource */
+    ConfigResource: {
+      /** Id */
+      id?: string | null;
+      /**
+       * Type
+       * @constant
+       */
+      type: "config";
+      attributes: components["schemas"]["Config"];
+    };
+    /** ConfigResponse */
+    ConfigResponse: {
+      data: components["schemas"]["ConfigResource"];
+    };
+    /** HTTPValidationError */
+    HTTPValidationError: {
+      /** Detail */
+      detail?: components["schemas"]["ValidationError"][];
+    };
+    /** Resource[Config] */
+    Resource_Config_: {
+      /** Id */
+      id?: string | null;
+      /**
+       * Type
+       * @default
+       */
+      type: string;
+      attributes: components["schemas"]["Config"];
+    };
+    /** Response[Config] */
+    Response_Config_: {
+      data: components["schemas"]["Resource_Config_"];
+    };
+    /** ValidationError */
+    ValidationError: {
+      /** Location */
+      loc: (string | number)[];
+      /** Message */
+      msg: string;
+      /** Error Type */
+      type: string;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_configs: {
-        parameters: {
-            query?: {
-                "filter[key]"?: string | null;
-                "filter[parent]"?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+  list_configs: {
+    parameters: {
+      query?: {
+        "filter[key]"?: string | null;
+        "filter[parent]"?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    create_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Response_Config_"];
-            };
+        content: {
+          "application/json": components["schemas"]["ConfigListResponse"];
         };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
     };
-    get_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+  };
+  create_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    update_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Response_Config_"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["Response_Config_"];
+      };
     };
-    delete_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["ConfigResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
     };
+  };
+  get_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["Response_Config_"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
 }
