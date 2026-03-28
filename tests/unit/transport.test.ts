@@ -34,14 +34,13 @@ function textResponse(body: string, status: number): Response {
 describe("Transport", () => {
   const transport = new Transport({
     apiKey: "sk_api_test",
-    baseUrl: "https://config.smplkit.com",
   });
 
   describe("get", () => {
     it("should send a GET request with auth headers", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      await transport.get("/api/v1/configs");
+      await transport.get("https://config.smplkit.com/api/v1/configs");
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, options] = mockFetch.mock.calls[0];
@@ -54,7 +53,7 @@ describe("Transport", () => {
     it("should append query parameters", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      await transport.get("/api/v1/configs", { "filter[key]": "common" });
+      await transport.get("https://config.smplkit.com/api/v1/configs", { "filter[key]": "common" });
 
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain("filter%5Bkey%5D=common");
@@ -64,7 +63,7 @@ describe("Transport", () => {
       const body = { data: { id: "abc", type: "config", attributes: {} } };
       mockFetch.mockResolvedValueOnce(jsonResponse(body));
 
-      const result = await transport.get("/api/v1/configs/abc");
+      const result = await transport.get("https://config.smplkit.com/api/v1/configs/abc");
       expect(result).toEqual(body);
     });
   });
@@ -76,7 +75,7 @@ describe("Transport", () => {
         jsonResponse({ data: { id: "new-id", type: "config", attributes: { name: "test" } } }),
       );
 
-      await transport.post("/api/v1/configs", requestBody);
+      await transport.post("https://config.smplkit.com/api/v1/configs", requestBody);
 
       const [, options] = mockFetch.mock.calls[0];
       expect(options.method).toBe("POST");
@@ -90,7 +89,7 @@ describe("Transport", () => {
       const requestBody = { data: { type: "config", attributes: { name: "updated" } } };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { id: "abc", type: "config" } }));
 
-      await transport.put("/api/v1/configs/abc", requestBody);
+      await transport.put("https://config.smplkit.com/api/v1/configs/abc", requestBody);
 
       const [, options] = mockFetch.mock.calls[0];
       expect(options.method).toBe("PUT");
@@ -101,7 +100,7 @@ describe("Transport", () => {
     it("should send a DELETE request", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-      const result = await transport.delete("/api/v1/configs/abc");
+      const result = await transport.delete("https://config.smplkit.com/api/v1/configs/abc");
 
       const [, options] = mockFetch.mock.calls[0];
       expect(options.method).toBe("DELETE");
@@ -113,36 +112,42 @@ describe("Transport", () => {
     it("should throw SmplNotFoundError on 404", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
-      await expect(transport.get("/api/v1/configs/missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(
+        transport.get("https://config.smplkit.com/api/v1/configs/missing"),
+      ).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplConflictError on 409", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
 
-      await expect(transport.delete("/api/v1/configs/has-children")).rejects.toThrow(
-        SmplConflictError,
-      );
+      await expect(
+        transport.delete("https://config.smplkit.com/api/v1/configs/has-children"),
+      ).rejects.toThrow(SmplConflictError);
     });
 
     it("should throw SmplValidationError on 422", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
       await expect(
-        transport.post("/api/v1/configs", { data: { type: "config", attributes: {} } }),
+        transport.post("https://config.smplkit.com/api/v1/configs", {
+          data: { type: "config", attributes: {} },
+        }),
       ).rejects.toThrow(SmplValidationError);
     });
 
     it("should throw SmplError on other 4xx/5xx", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplError);
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplError,
+      );
     });
 
     it("should include status code and body in error", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
       try {
-        await transport.get("/api/v1/configs/missing");
+        await transport.get("https://config.smplkit.com/api/v1/configs/missing");
         expect.fail("should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(SmplNotFoundError);
@@ -155,46 +160,41 @@ describe("Transport", () => {
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplConnectionError);
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplConnectionError,
+      );
     });
 
     it("should throw SmplTimeoutError on abort", async () => {
       mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplTimeoutError);
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplTimeoutError,
+      );
     });
 
     it("should throw SmplConnectionError on unknown errors", async () => {
       mockFetch.mockRejectedValueOnce(new Error("unexpected"));
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplConnectionError);
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplConnectionError,
+      );
     });
 
     it("should throw SmplConnectionError with String(error) when thrown value is not an Error", async () => {
       mockFetch.mockRejectedValueOnce("plain string error");
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplConnectionError);
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplConnectionError,
+      );
     });
 
     it("should throw SmplError on invalid JSON response", async () => {
       mockFetch.mockResolvedValueOnce(new Response("not json", { status: 200 }));
 
-      await expect(transport.get("/api/v1/configs")).rejects.toThrow(SmplError);
-    });
-  });
-
-  describe("trailing slash handling", () => {
-    it("should strip trailing slashes from baseUrl", async () => {
-      const t = new Transport({
-        apiKey: "sk_api_test",
-        baseUrl: "https://config.smplkit.com///",
-      });
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-      await t.get("/api/v1/configs");
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toBe("https://config.smplkit.com/api/v1/configs");
+      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
+        SmplError,
+      );
     });
   });
 });

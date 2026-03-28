@@ -9,6 +9,7 @@ import { SmplNotFoundError, SmplValidationError } from "../errors.js";
 import type { Transport } from "../transport.js";
 import type { Config, CreateConfigOptions, GetConfigOptions } from "./types.js";
 
+const BASE_URL = "https://config.smplkit.com";
 const CONFIGS_PATH = "/api/v1/configs";
 
 /**
@@ -75,7 +76,7 @@ export class ConfigClient {
    * @returns An array of config objects.
    */
   async list(): Promise<Config[]> {
-    const response = await this.transport.get(CONFIGS_PATH);
+    const response = await this.transport.get(`${BASE_URL}${CONFIGS_PATH}`);
     const resources = response.data as JsonApiResource[];
     return resources.map((r) => this.resourceToModel(r));
   }
@@ -89,7 +90,7 @@ export class ConfigClient {
    */
   async create(options: CreateConfigOptions): Promise<Config> {
     const body = this.buildRequestBody(options);
-    const response = await this.transport.post(CONFIGS_PATH, body);
+    const response = await this.transport.post(`${BASE_URL}${CONFIGS_PATH}`, body);
 
     if (!response.data) {
       throw new SmplValidationError("Failed to create config");
@@ -106,12 +107,12 @@ export class ConfigClient {
    * @throws {SmplConflictError} If the config has children.
    */
   async delete(configId: string): Promise<void> {
-    await this.transport.delete(`${CONFIGS_PATH}/${configId}`);
+    await this.transport.delete(`${BASE_URL}${CONFIGS_PATH}/${configId}`);
   }
 
   /** Fetch a config by UUID. */
   private async getById(configId: string): Promise<Config> {
-    const response = await this.transport.get(`${CONFIGS_PATH}/${configId}`);
+    const response = await this.transport.get(`${BASE_URL}${CONFIGS_PATH}/${configId}`);
 
     if (!response.data) {
       throw new SmplNotFoundError(`Config ${configId} not found`);
@@ -122,7 +123,7 @@ export class ConfigClient {
 
   /** Fetch a config by key using the list endpoint with a filter. */
   private async getByKey(key: string): Promise<Config> {
-    const response = await this.transport.get(CONFIGS_PATH, { "filter[key]": key });
+    const response = await this.transport.get(`${BASE_URL}${CONFIGS_PATH}`, { "filter[key]": key });
     const resources = response.data as JsonApiResource[];
 
     if (!resources || resources.length === 0) {

@@ -23,7 +23,6 @@ afterEach(() => {
 function makeTransport() {
   return new Transport({
     apiKey: "sk_api_test",
-    baseUrl: "https://config.smplkit.com",
   });
 }
 

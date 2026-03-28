@@ -8,18 +8,10 @@
 import { ConfigClient } from "./config/client.js";
 import { Transport } from "./transport.js";
 
-const DEFAULT_BASE_URL = "https://config.smplkit.com";
-
 /** Configuration options for the {@link SmplkitClient}. */
 export interface SmplkitClientOptions {
   /** API key for authenticating with the smplkit platform. */
   apiKey: string;
-
-  /**
-   * Base URL for all API requests.
-   * @default "https://config.smplkit.com"
-   */
-  baseUrl?: string;
 
   /**
    * Request timeout in milliseconds.
@@ -53,7 +45,6 @@ export class SmplkitClient {
 
     this.transport = new Transport({
       apiKey: options.apiKey,
-      baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
       timeout: options.timeout,
     });
 

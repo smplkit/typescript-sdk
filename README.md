@@ -39,7 +39,6 @@ await client.config.delete(newConfig.id);
 ```typescript
 const client = new SmplkitClient({
   apiKey: "sk_api_...",                        // Required
-  baseUrl: "https://config.smplkit.com",       // Optional (default shown)
   timeout: 30000,                               // Optional, in milliseconds (default: 30000)
 });
 ```

@@ -17,14 +17,6 @@ describe("SmplkitClient", () => {
     expect(client.config).toBeInstanceOf(ConfigClient);
   });
 
-  it("should accept a custom baseUrl", () => {
-    const client = new SmplkitClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://custom.example.com",
-    });
-    expect(client).toBeInstanceOf(SmplkitClient);
-  });
-
   it("should accept a custom timeout", () => {
     const client = new SmplkitClient({
       apiKey: "sk_api_test",
@@ -36,7 +28,6 @@ describe("SmplkitClient", () => {
   it("should accept all options together", () => {
     const client = new SmplkitClient({
       apiKey: "sk_api_test",
-      baseUrl: "https://custom.example.com",
       timeout: 10000,
     });
     expect(client).toBeInstanceOf(SmplkitClient);
