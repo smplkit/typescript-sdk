@@ -123,7 +123,7 @@ export class ConfigRuntime {
   /**
    * Return the value as a number, or `defaultValue` if absent or not a number.
    */
-  getNumber(key: string, defaultValue: number | null = null): number | null {
+  getInt(key: string, defaultValue: number | null = null): number | null {
     const value = this._cache[key];
     return typeof value === "number" ? value : defaultValue;
   }

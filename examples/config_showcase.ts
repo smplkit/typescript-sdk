@@ -4,7 +4,7 @@
  *
  * Demonstrates the smplkit TypeScript SDK for Smpl Config, covering:
  *
- * - Client initialization (`SmplkitClient`)
+ * - Client initialization (`SmplClient`)
  * - Management-plane CRUD: create, update, list, and delete configs
  * - Environment-specific overrides and multi-level inheritance
  * - Runtime value resolution: `connect()`, `get()`, typed accessors
@@ -26,7 +26,7 @@
  *   npx tsx examples/config_showcase.ts
  */
 
-import { SmplkitClient } from "@smplkit/sdk";
+import { SmplClient } from "@smplkit/sdk";
 
 // ---------------------------------------------------------------------------
 // Configuration — set your API key via the SMPLKIT_API_KEY env var
@@ -66,10 +66,10 @@ async function main(): Promise<void> {
   // ======================================================================
   section("1. SDK Initialization");
 
-  // SmplkitClient is the entry point for the TypeScript SDK.
+  // SmplClient is the entry point for the TypeScript SDK.
   // API key is the only required argument.
-  const client = new SmplkitClient({ apiKey: API_KEY });
-  step("SmplkitClient initialized");
+  const client = new SmplClient({ apiKey: API_KEY });
+  step("SmplClient initialized");
 
   // ======================================================================
   // 2. MANAGEMENT PLANE — Set up the configuration hierarchy
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
   step(`enable_signup (bool) = ${signupEnabled}`);
   // Expected: false (user_service production override via setValue)
 
-  const timeoutMs = runtime.getNumber("request_timeout_ms", 3000);
+  const timeoutMs = runtime.getInt("request_timeout_ms", 3000);
   step(`request_timeout_ms (number) = ${timeoutMs}`);
   // Expected: 10000 (common production override)
 

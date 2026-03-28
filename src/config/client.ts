@@ -118,7 +118,7 @@ function buildRequestBody(options: {
  * All methods are async and return `Promise<T>`. Network and server
  * errors are mapped to typed SDK exceptions.
  *
- * Obtained via `SmplkitClient.config`.
+ * Obtained via `SmplClient.config`.
  */
 export class ConfigClient {
   /** @internal — used by Config instances for reconnecting and WebSocket auth. */

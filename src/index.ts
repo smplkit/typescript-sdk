@@ -5,8 +5,8 @@
  */
 
 // Main client
-export { SmplkitClient } from "./client.js";
-export type { SmplkitClientOptions } from "./client.js";
+export { SmplClient } from "./client.js";
+export type { SmplClientOptions } from "./client.js";
 
 // Config — management plane
 export { ConfigClient } from "./config/client.js";

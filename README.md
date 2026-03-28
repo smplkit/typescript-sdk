@@ -1,32 +1,35 @@
-# smplkit
+# smplkit TypeScript SDK
 
-Official TypeScript SDK for the [smplkit](https://docs.smplkit.com) platform.
+The official TypeScript SDK for [smplkit](https://smplkit.com) — simple application infrastructure for developers.
 
 ## Installation
 
 ```bash
-npm install @smplkit/sdk
+npm install smplkit-sdk
 ```
+
+## Requirements
+
+- Node.js 18+
 
 ## Quick Start
 
 ```typescript
-import { SmplkitClient } from "@smplkit/sdk";
+import { SmplClient } from "smplkit-sdk";
 
-const client = new SmplkitClient({ apiKey: "sk_api_..." });
+const client = new SmplClient({ apiKey: "sk_api_..." });
 
-// Fetch a config by key
-const config = await client.config.get({ key: "user_service" });
-console.log(config.values);
+// Get a config by key
+const config = await client.config.getByKey("user_service");
 
 // List all configs
 const configs = await client.config.list();
 
 // Create a config
 const newConfig = await client.config.create({
-  name: "Payment Service",
-  key: "payment_service",
-  description: "Configuration for the payment service",
+  name: "My Service",
+  key: "my_service",
+  description: "Configuration for my service",
   values: { timeout: 30, retries: 3 },
 });
 
@@ -37,9 +40,9 @@ await client.config.delete(newConfig.id);
 ## Configuration
 
 ```typescript
-const client = new SmplkitClient({
-  apiKey: "sk_api_...",                        // Required
-  timeout: 30000,                               // Optional, in milliseconds (default: 30000)
+const client = new SmplClient({
+  apiKey: "sk_api_...",
+  timeout: 30_000, // default (ms)
 });
 ```
 
@@ -48,35 +51,33 @@ const client = new SmplkitClient({
 All SDK errors extend `SmplError`:
 
 ```typescript
-import {
-  SmplError,
-  SmplNotFoundError,
-  SmplConflictError,
-  SmplValidationError,
-  SmplConnectionError,
-  SmplTimeoutError,
-} from "@smplkit/sdk";
+import { SmplError, SmplNotFoundError } from "smplkit-sdk";
 
 try {
-  const config = await client.config.get({ key: "nonexistent" });
-} catch (error) {
-  if (error instanceof SmplNotFoundError) {
-    console.log("Config not found");
-  } else if (error instanceof SmplValidationError) {
-    console.log("Invalid request:", error.message);
-  } else if (error instanceof SmplConnectionError) {
-    console.log("Network error:", error.message);
-  } else if (error instanceof SmplTimeoutError) {
-    console.log("Request timed out");
-  } else if (error instanceof SmplError) {
-    console.log("SDK error:", error.statusCode, error.message);
+  const config = await client.config.getByKey("nonexistent");
+} catch (err) {
+  if (err instanceof SmplNotFoundError) {
+    console.log("Not found:", err.message);
+  } else if (err instanceof SmplError) {
+    console.log("SDK error:", err.statusCode, err.responseBody);
   }
 }
 ```
 
+| Error                  | Cause                        |
+|------------------------|------------------------------|
+| `SmplNotFoundError`    | HTTP 404 — resource not found |
+| `SmplConflictError`    | HTTP 409 — conflict           |
+| `SmplValidationError`  | HTTP 422 — validation error   |
+| `SmplTimeoutError`     | Request timed out             |
+| `SmplConnectionError`  | Network connectivity issue    |
+| `SmplError`            | Any other SDK error           |
+
 ## Documentation
 
-Full documentation is available at [docs.smplkit.com](https://docs.smplkit.com).
+- [Getting Started](https://docs.smplkit.com/getting-started)
+- [TypeScript SDK Guide](https://docs.smplkit.com/sdks/typescript)
+- [API Reference](https://docs.smplkit.com/api)
 
 ## License
 

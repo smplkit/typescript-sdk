@@ -135,12 +135,12 @@ describe("ConfigRuntime", () => {
       await rt.close();
     });
 
-    it("getNumber should return number or default", async () => {
+    it("getInt should return number or default", async () => {
       const rt = new ConfigRuntime(makeOptions());
-      expect(rt.getNumber("timeout")).toBe(60);
-      expect(rt.getNumber("name")).toBeNull();
-      expect(rt.getNumber("name", 99)).toBe(99);
-      expect(rt.getNumber("nonexistent")).toBeNull();
+      expect(rt.getInt("timeout")).toBe(60);
+      expect(rt.getInt("name")).toBeNull();
+      expect(rt.getInt("name", 99)).toBe(99);
+      expect(rt.getInt("nonexistent")).toBeNull();
       await rt.close();
     });
 

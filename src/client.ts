@@ -1,5 +1,5 @@
 /**
- * Top-level SDK client — SmplkitClient.
+ * Top-level SDK client — SmplClient.
  *
  * The main entry point for the smplkit TypeScript SDK. Provides access
  * to sub-clients for each API domain (config, flags, logging, etc.).
@@ -7,8 +7,8 @@
 
 import { ConfigClient } from "./config/client.js";
 
-/** Configuration options for the {@link SmplkitClient}. */
-export interface SmplkitClientOptions {
+/** Configuration options for the {@link SmplClient}. */
+export interface SmplClientOptions {
   /** API key for authenticating with the smplkit platform. */
   apiKey: string;
 
@@ -24,17 +24,17 @@ export interface SmplkitClientOptions {
  *
  * @example
  * ```typescript
- * import { SmplkitClient } from "@smplkit/sdk";
+ * import { SmplClient } from "@smplkit/sdk";
  *
- * const client = new SmplkitClient({ apiKey: "sk_api_..." });
+ * const client = new SmplClient({ apiKey: "sk_api_..." });
  * const cfg = await client.config.get({ key: "common" });
  * ```
  */
-export class SmplkitClient {
+export class SmplClient {
   /** Client for config management-plane operations. */
   readonly config: ConfigClient;
 
-  constructor(options: SmplkitClientOptions) {
+  constructor(options: SmplClientOptions) {
     if (!options.apiKey) {
       throw new Error("apiKey is required");
     }
