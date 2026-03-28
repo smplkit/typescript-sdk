@@ -341,6 +341,19 @@ describe("ConfigClient", () => {
 
       expect(config.key).toBe("");
     });
+
+    it("should use empty string fallback when id is null", async () => {
+      const resource = {
+        ...SAMPLE_RESOURCE,
+        id: null,
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
+
+      const client = makeClient();
+      const config = await client.get({ id: "some-id" });
+
+      expect(config.id).toBe("");
+    });
   });
 
   describe("create with optional fields", () => {
@@ -353,6 +366,227 @@ describe("ConfigClient", () => {
       const body = await calledBodyJson() as Record<string, unknown>;
       const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
       expect(attrs.parent).toBe("parent-uuid-123");
+    });
+  });
+
+  describe("_updateConfig", () => {
+    it("should send a PUT request and return the updated config", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
+
+      const client = makeClient();
+      const config = await client._updateConfig({
+        configId: SAMPLE_RESOURCE.id,
+        name: "User Service",
+        key: "user_service",
+        description: "Updated description",
+        parent: null,
+        values: { timeout: 30 },
+        environments: {},
+      });
+
+      expect(config.name).toBe("User Service");
+      expect(calledUrl()).toContain(`/api/v1/configs/${SAMPLE_RESOURCE.id}`);
+      expect(calledMethod()).toBe("PUT");
+    });
+
+    it("should throw SmplValidationError when update returns no data", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({}));
+
+      const client = makeClient();
+      await expect(
+        client._updateConfig({
+          configId: "cfg-1",
+          name: "Test",
+          key: "test",
+          description: null,
+          parent: null,
+          values: {},
+          environments: {},
+        }),
+      ).rejects.toThrow(SmplValidationError);
+    });
+
+    it("should throw on 422 error from server", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
+
+      const client = makeClient();
+      await expect(
+        client._updateConfig({
+          configId: "cfg-1",
+          name: "",
+          key: "test",
+          description: null,
+          parent: null,
+          values: {},
+          environments: {},
+        }),
+      ).rejects.toThrow(SmplValidationError);
+    });
+
+    it("should throw on network failure", async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+      const client = makeClient();
+      await expect(
+        client._updateConfig({
+          configId: "cfg-1",
+          name: "Test",
+          key: "test",
+          description: null,
+          parent: null,
+          values: {},
+          environments: {},
+        }),
+      ).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should include environments in the PUT body", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
+
+      const client = makeClient();
+      await client._updateConfig({
+        configId: SAMPLE_RESOURCE.id,
+        name: "User Service",
+        key: "user_service",
+        description: null,
+        parent: null,
+        values: {},
+        environments: { production: { values: { x: 1 } } },
+      });
+
+      const body = await calledBodyJson() as Record<string, unknown>;
+      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      expect(attrs.environments).toEqual({ production: { values: { x: 1 } } });
+    });
+  });
+
+  describe("checkError via result.error path", () => {
+    // openapi-fetch sets result.error when the response has JSON content type
+    // and the status is non-2xx. This exercises the checkError path.
+
+    it("should throw SmplNotFoundError for JSON 404 on getById", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Not Found" }] }, 404));
+
+      const client = makeClient();
+      await expect(client.get({ id: "missing" })).rejects.toThrow(SmplNotFoundError);
+    });
+
+    it("should throw SmplNotFoundError for JSON 404 on getByKey", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Not Found" }] }, 404));
+
+      const client = makeClient();
+      await expect(client.get({ key: "missing_key" })).rejects.toThrow(SmplNotFoundError);
+    });
+
+    it("should throw on JSON error for list", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Server Error" }] }, 500));
+
+      const client = makeClient();
+      await expect(client.list()).rejects.toThrow();
+    });
+
+    it("should throw on JSON error for create", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422));
+
+      const client = makeClient();
+      await expect(client.create({ name: "test" })).rejects.toThrow(SmplValidationError);
+    });
+
+    it("should throw on JSON error for delete (non-204)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Conflict" }] }, 409));
+
+      const client = makeClient();
+      await expect(client.delete("test-id")).rejects.toThrow(SmplConflictError);
+    });
+
+    it("should throw on JSON error for _updateConfig", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Validation Error" }] }, 422));
+
+      const client = makeClient();
+      await expect(
+        client._updateConfig({
+          configId: "cfg-1",
+          name: "Test",
+          key: "test",
+          description: null,
+          parent: null,
+          values: {},
+          environments: {},
+        }),
+      ).rejects.toThrow(SmplValidationError);
+    });
+  });
+
+  describe("additional error handling", () => {
+    it("should throw SmplError on unknown status code (default case)", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
+
+      const client = makeClient();
+      await expect(client.get({ id: "test" })).rejects.toThrow("HTTP 500");
+    });
+
+    it("should throw SmplConnectionError on generic error (not TypeError or DOMException)", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("some other error"));
+
+      const client = makeClient();
+      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should throw SmplConnectionError with String(err) for non-Error objects", async () => {
+      mockFetch.mockRejectedValueOnce("string error");
+
+      const client = makeClient();
+      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should throw SmplNotFoundError on 404 for getByKey", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
+
+      const client = makeClient();
+      await expect(client.get({ key: "missing_key" })).rejects.toThrow(SmplNotFoundError);
+    });
+
+    it("should throw SmplConnectionError on network failure for getByKey", async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+      const client = makeClient();
+      await expect(client.get({ key: "test" })).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should throw on error response for list", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Internal Error", 500));
+
+      const client = makeClient();
+      await expect(client.list()).rejects.toThrow("HTTP 500");
+    });
+
+    it("should throw on error response for create", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
+
+      const client = makeClient();
+      await expect(client.create({ name: "test" })).rejects.toThrow("HTTP 500");
+    });
+
+    it("should throw on error response for delete", async () => {
+      mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
+
+      const client = makeClient();
+      await expect(client.delete("test-id")).rejects.toThrow("HTTP 500");
+    });
+
+    it("should throw SmplTimeoutError on abort for getByKey", async () => {
+      mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
+
+      const client = makeClient();
+      await expect(client.get({ key: "test" })).rejects.toThrow(SmplTimeoutError);
+    });
+
+    it("should re-throw SmplError subclasses through wrapFetchError", async () => {
+      // When checkError throws, wrapFetchError should re-throw it as-is
+      mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
+
+      const client = makeClient();
+      await expect(client.get({ id: "missing" })).rejects.toThrow(SmplNotFoundError);
     });
   });
 });

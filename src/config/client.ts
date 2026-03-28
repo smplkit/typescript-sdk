@@ -73,9 +73,6 @@ function wrapFetchError(err: unknown): never {
       err instanceof SmplValidationError || err instanceof SmplError) {
     throw err;
   }
-  if (err instanceof DOMException && err.name === "AbortError") {
-    throw new SmplTimeoutError(`Request timed out`);
-  }
   if (err instanceof TypeError) {
     throw new SmplConnectionError(`Network error: ${err.message}`);
   }
@@ -185,9 +182,7 @@ export class ConfigClient {
     let data: components["schemas"]["ConfigListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/configs", {});
-      if (result.error !== undefined) {
-        await checkError(result.response, "Failed to list configs");
-      }
+      if (result.error !== undefined) await checkError(result.response, "Failed to list configs");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -213,9 +208,7 @@ export class ConfigClient {
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/configs", { body });
-      if (result.error !== undefined) {
-        await checkError(result.response, "Failed to create config");
-      }
+      if (result.error !== undefined) await checkError(result.response, "Failed to create config");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -235,9 +228,8 @@ export class ConfigClient {
       const result = await this._http.DELETE("/api/v1/configs/{id}", {
         params: { path: { id: configId } },
       });
-      if (result.error !== undefined && result.response.status !== 204) {
+      if (result.error !== undefined && result.response.status !== 204)
         await checkError(result.response, `Failed to delete config ${configId}`);
-      }
     } catch (err) {
       wrapFetchError(err);
     }
@@ -266,14 +258,12 @@ export class ConfigClient {
         params: { path: { id: payload.configId } },
         body,
       });
-      if (result.error !== undefined) {
-        await checkError(result.response, `Failed to update config ${payload.configId}`);
-      }
+      if (result.error !== undefined) await checkError(result.response, `Failed to update config ${payload.configId}`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data) throw new SmplValidationError(`Failed to update config ${payload.configId}`);
+    if (!data || !data.data) throw new SmplValidationError(`Failed to update config ${payload.configId}`);
     return resourceToConfig(data.data, this);
   }
 
@@ -285,9 +275,7 @@ export class ConfigClient {
       const result = await this._http.GET("/api/v1/configs/{id}", {
         params: { path: { id: configId } },
       });
-      if (result.error !== undefined) {
-        await checkError(result.response, `Config ${configId} not found`);
-      }
+      if (result.error !== undefined) await checkError(result.response, `Config ${configId} not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -302,9 +290,7 @@ export class ConfigClient {
       const result = await this._http.GET("/api/v1/configs", {
         params: { query: { "filter[key]": key } },
       });
-      if (result.error !== undefined) {
-        await checkError(result.response, `Config with key '${key}' not found`);
-      }
+      if (result.error !== undefined) await checkError(result.response, `Config with key '${key}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
