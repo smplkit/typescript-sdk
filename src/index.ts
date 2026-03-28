@@ -8,14 +8,19 @@
 export { SmplkitClient } from "./client.js";
 export type { SmplkitClientOptions } from "./client.js";
 
-// Config types
+// Config — management plane
 export { ConfigClient } from "./config/client.js";
+export type { CreateConfigOptions, GetConfigOptions } from "./config/types.js";
+export { Config } from "./config/types.js";
+
+// Config — runtime plane
+export { ConfigRuntime } from "./config/runtime.js";
 export type {
-  Config,
-  CreateConfigOptions,
-  GetConfigOptions,
-  UpdateConfigOptions,
-} from "./config/types.js";
+  ConfigChangeEvent,
+  ConfigStats,
+  ConnectionStatus,
+  ConnectOptions,
+} from "./config/runtime-types.js";
 
 // Error hierarchy
 export {

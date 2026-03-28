@@ -9,9 +9,10 @@
  * - Environment-specific overrides and multi-level inheritance
  * - Runtime value resolution: `connect()`, `get()`, typed accessors
  * - Real-time updates via WebSocket and change listeners
+ * - Manual refresh and cache diagnostics
  *
- * This script is designed to be read top-to-bottom as a walkthrough of the
- * SDK's full capability surface. It is runnable against a live smplkit
+ * This script is designed to be read top-to-bottom as a walkthrough of
+ * the SDK's full capability surface. It is runnable against a live smplkit
  * environment, but is *not* a test — it creates, modifies, and deletes
  * real configs.
  *
@@ -55,13 +56,17 @@ function step(description: string): void {
   console.log(`  → ${description}`);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main(): Promise<void> {
   // ======================================================================
   // 1. SDK INITIALIZATION
   // ======================================================================
   section("1. SDK Initialization");
 
-  // The SmplkitClient is the entry point for the TypeScript SDK.
+  // SmplkitClient is the entry point for the TypeScript SDK.
   // API key is the only required argument.
   const client = new SmplkitClient({ apiKey: API_KEY });
   step("SmplkitClient initialized");
@@ -84,11 +89,13 @@ async function main(): Promise<void> {
   // It serves as the default parent for all other configs. Let's populate
   // it with shared baseline values that every service in our org needs.
 
-  let common = await client.config.get({ key: "common" });
+  const common = await client.config.get({ key: "common" });
   step(`Fetched common config: id=${common.id}, key=${common.key}`);
 
   // Set base values — these apply to ALL environments by default.
-  common = await client.config.update(common.id, {
+  // update() sends a full PUT with all fields; mutates the Config object
+  // in place and returns void (mirrors Python's AsyncConfig.update).
+  await common.update({
     description: "Organization-wide shared configuration",
     values: {
       app_name: "Acme SaaS Platform",
@@ -112,8 +119,9 @@ async function main(): Promise<void> {
 
   // Override specific values for production — these flow through to every
   // config that inherits from common, unless overridden further down.
-  await client.config.setValues(
-    common.id,
+  // setValues() replaces the target environment's values sub-dict entirely
+  // while preserving other environments.
+  await common.setValues(
     {
       max_retries: 5,
       request_timeout_ms: 10000,
@@ -126,8 +134,7 @@ async function main(): Promise<void> {
   step("Common config production overrides set");
 
   // Staging gets its own tweaks.
-  await client.config.setValues(
-    common.id,
+  await common.setValues(
     {
       max_retries: 2,
       credentials: {
@@ -167,8 +174,7 @@ async function main(): Promise<void> {
   step(`Created user_service config: id=${userService.id}`);
 
   // Production overrides for the user service.
-  await client.config.setValues(
-    userService.id,
+  await userService.setValues(
     {
       database: {
         host: "prod-users-rds.internal.acme.dev",
@@ -183,8 +189,7 @@ async function main(): Promise<void> {
   step("User service production overrides set");
 
   // Staging overrides.
-  await client.config.setValues(
-    userService.id,
+  await userService.setValues(
     {
       database: {
         host: "staging-users-rds.internal.acme.dev",
@@ -197,8 +202,7 @@ async function main(): Promise<void> {
   step("User service staging overrides set");
 
   // Add keys that only exist in the development environment.
-  await client.config.setValues(
-    userService.id,
+  await userService.setValues(
     {
       debug_sql: true,
       seed_test_data: true,
@@ -208,7 +212,7 @@ async function main(): Promise<void> {
   step("User service development-only keys set");
 
   // Set a single value using the convenience method.
-  await client.config.setValue(userService.id, "enable_signup", false, "production");
+  await userService.setValue("enable_signup", false, "production");
   step("Disabled signup in production via setValue");
 
   // ------------------------------------------------------------------
@@ -232,8 +236,7 @@ async function main(): Promise<void> {
   });
   step(`Created auth_module config: id=${authModule.id}, parent=${userService.id}`);
 
-  await client.config.setValues(
-    authModule.id,
+  await authModule.setValues(
     {
       session_ttl_minutes: 30,
       mfa_enabled: true,
@@ -258,77 +261,259 @@ async function main(): Promise<void> {
   // 3. RUNTIME PLANE — Resolve configuration in a running application
   // ======================================================================
   //
-  // --- SKIPPED: Runtime plane not yet implemented in TypeScript SDK ---
+  // This is the heart of the SDK experience. A customer's application
+  // connects to a config for a specific environment, and the SDK:
   //
-  // The Python SDK provides:
-  //   - config.connect(environment) — eagerly fetch + resolve inheritance
-  //   - runtime.get(key) — synchronous local cache read
-  //   - runtime.get_str(), get_int(), get_bool() — typed accessors
-  //   - runtime.exists(key) — key existence check
-  //   - runtime.get_all() — full resolved config as dict
-  //   - runtime.stats() — cache diagnostics
-  //   - runtime.on_change() — WebSocket-driven change listeners
-  //   - runtime.connection_status() — WebSocket status
-  //   - runtime.refresh() — manual re-fetch
-  //   - runtime.close() — teardown
+  //   - Eagerly fetches the config and its entire parent chain
+  //   - Resolves values via deep merge (inheritance + env overrides)
+  //   - Caches everything in-process — get() is a local dict read
+  //   - Maintains a WebSocket for real-time server-pushed updates
+  //   - Notifies registered listeners when values change
   //
-  // These features will be added to the TypeScript SDK in a future release.
-  // When available, sections 3–5 below should be uncommented and adapted.
+  // get() and all value-access methods are SYNCHRONOUS. They never
+  // touch the network. The only async operations are connect(),
+  // refresh(), and close().
+  //
   // ======================================================================
 
-  section("3. Runtime Plane (not yet available)");
-  step("SKIPPED: connect() and runtime value resolution not yet implemented");
-  step("SKIPPED: Typed accessors (getString, getNumber, getBool) not yet implemented");
-  step("SKIPPED: Local caching and stats() not yet implemented");
-  step("SKIPPED: getAll() not yet implemented");
-  step("SKIPPED: Multi-level inheritance resolution not yet implemented");
+  // ------------------------------------------------------------------
+  // 3a. Connect to a config for runtime use
+  // ------------------------------------------------------------------
+  section("3a. Connect to Runtime Config");
+
+  // connect() eagerly fetches the config and its full parent chain,
+  // resolves all values for the given environment, and establishes
+  // a WebSocket connection for real-time updates. When it returns,
+  // the cache is fully populated and ready.
+  const runtime = await userService.connect("production", { timeout: 10_000 });
+  step("Runtime config connected and fully loaded");
+
+  // ------------------------------------------------------------------
+  // 3b. Read resolved values — all synchronous, all from local cache
+  // ------------------------------------------------------------------
+  section("3b. Read Resolved Values");
+
+  const dbConfig = runtime.get("database");
+  step(`database = ${JSON.stringify(dbConfig)}`);
+  // Expected (deep-merged): user_service prod override + user_service base
+  // { host: "prod-users-rds...", port: 5432, name: "users_prod",
+  //   pool_size: 20, ssl_mode: "require" }
+
+  const retries = runtime.get("max_retries");
+  step(`max_retries = ${retries}`);
+  // Expected: 5 (from common's production override — inherited through)
+
+  const creds = runtime.get("credentials");
+  step(`credentials = ${JSON.stringify(creds)}`);
+
+  const cacheTtl = runtime.get("cache_ttl_seconds");
+  step(`cache_ttl_seconds = ${cacheTtl}`);
+  // Expected: 600 (user_service production override)
+
+  const pageSize = runtime.get("pagination_default_page_size");
+  step(`pagination_default_page_size = ${pageSize}`);
+  // Expected: 50 (user_service base overrides common's 25)
+
+  const supportEmail = runtime.get("support_email");
+  step(`support_email = ${supportEmail}`);
+  // Expected: "support@acme.dev" (inherited all the way from common base)
+
+  const missing = runtime.get("this_key_does_not_exist");
+  step(`nonexistent key = ${missing}`);
+  // Expected: null
+
+  const withDefault = runtime.get("this_key_does_not_exist", "fallback");
+  step(`nonexistent key with default = ${withDefault}`);
+  // Expected: "fallback"
+
+  // Typed convenience accessors for common JSON types.
+  const signupEnabled = runtime.getBool("enable_signup", false);
+  step(`enable_signup (bool) = ${signupEnabled}`);
+  // Expected: false (user_service production override via setValue)
+
+  const timeoutMs = runtime.getNumber("request_timeout_ms", 3000);
+  step(`request_timeout_ms (number) = ${timeoutMs}`);
+  // Expected: 10000 (common production override)
+
+  const appName = runtime.getString("app_name", "Unknown");
+  step(`app_name (string) = ${appName}`);
+  // Expected: "Acme SaaS Platform" (common base)
+
+  // Check whether a key exists (regardless of its value).
+  step(`'database' exists = ${runtime.exists("database")}`);
+  // Expected: true
+  step(`'ghost_key' exists = ${runtime.exists("ghost_key")}`);
+  // Expected: false
+
+  // ------------------------------------------------------------------
+  // 3c. Verify local caching — no network requests on repeated reads
+  // ------------------------------------------------------------------
+  section("3c. Verify Local Caching");
+
+  // connect() fetched everything eagerly. All get() calls are pure
+  // local dict reads with zero network overhead. The stats object
+  // lets us verify this.
+  const stats = runtime.stats();
+  step(`Network fetches so far: ${stats.fetchCount}`);
+  // Expected: 2 (user_service + common, fetched during connect)
+
+  // Read a bunch of keys — none should trigger a fetch.
+  for (let i = 0; i < 100; i++) {
+    runtime.get("max_retries");
+    runtime.get("database");
+    runtime.get("credentials");
+  }
+
+  const statsAfter = runtime.stats();
+  step(`Network fetches after 300 reads: ${statsAfter.fetchCount}`);
+  // Expected: still the same — all reads served from local cache
+  if (statsAfter.fetchCount !== stats.fetchCount) {
+    throw new Error(
+      `SDK made unexpected network calls! Before: ${stats.fetchCount}, After: ${statsAfter.fetchCount}`,
+    );
+  }
+  step("PASSED — all reads served from local cache");
+
+  // ------------------------------------------------------------------
+  // 3d. Get ALL resolved values as a dictionary
+  // ------------------------------------------------------------------
+  section("3d. Get Full Resolved Configuration");
+
+  // Sometimes you want the entire resolved config as a dict — for
+  // logging at startup, passing to a framework, or debugging.
+  const allValues = runtime.getAll();
+  step(`Total resolved keys: ${Object.keys(allValues).length}`);
+  for (const key of Object.keys(allValues).sort()) {
+    step(`  ${key} = ${JSON.stringify(allValues[key])}`);
+  }
+
+  // ------------------------------------------------------------------
+  // 3e. Multi-level inheritance — connect to auth_module in production
+  // ------------------------------------------------------------------
+  section("3e. Multi-Level Inheritance (auth_module)");
+
+  const authRuntime = await authModule.connect("production", { timeout: 10_000 });
+  try {
+    const sessionTtl = authRuntime.get("session_ttl_minutes");
+    step(`session_ttl_minutes = ${sessionTtl}`);
+    // Expected: 30 (auth_module production override)
+
+    const mfa = authRuntime.get("mfa_enabled");
+    step(`mfa_enabled = ${mfa}`);
+    // Expected: true (auth_module production override)
+
+    // Keys inherited from user_service:
+    const db = authRuntime.get("database");
+    step(`database (inherited from user_service) = ${JSON.stringify(db)}`);
+
+    // Keys inherited all the way from common:
+    const app = authRuntime.get("app_name");
+    step(`app_name (inherited from common) = ${app}`);
+  } finally {
+    await authRuntime.close();
+    step("auth_runtime closed via try/finally");
+  }
 
   // ======================================================================
   // 4. REAL-TIME UPDATES — WebSocket-driven cache invalidation
   // ======================================================================
+  //
+  // The SDK maintains a WebSocket connection to the config service. When
+  // a config value is changed (via the console, API, or another SDK
+  // instance), the server pushes an update and the SDK refreshes its
+  // local cache. The application can register listeners to react to
+  // changes without polling.
+  // ======================================================================
 
-  section("4. Real-Time Updates (not yet available)");
-  step("SKIPPED: onChange() listeners not yet implemented");
-  step("SKIPPED: WebSocket connection lifecycle not yet implemented");
+  section("4. Real-Time Updates via WebSocket");
+
+  // ------------------------------------------------------------------
+  // 4a. Register a change listener
+  // ------------------------------------------------------------------
+
+  const changesReceived: Array<{ key: string; oldValue: unknown; newValue: unknown; source: string }> = [];
+
+  runtime.onChange((event) => {
+    changesReceived.push({
+      key: event.key,
+      oldValue: event.oldValue,
+      newValue: event.newValue,
+      source: event.source,
+    });
+    console.log(`    [CHANGE] ${event.key}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`);
+  });
+  step("Change listener registered");
+
+  // You can also listen for changes to a specific key.
+  const retryChanges: unknown[] = [];
+  runtime.onChange((e) => retryChanges.push(e), { key: "max_retries" });
+  step("Key-specific listener registered for 'max_retries'");
+
+  // ------------------------------------------------------------------
+  // 4b. Simulate a config change via the management API
+  // ------------------------------------------------------------------
+  step("Updating max_retries on common (production) via management API...");
+
+  await common.setValue("max_retries", 7, "production");
+
+  // Give the WebSocket a moment to deliver the update.
+  await sleep(2000);
+
+  // The runtime cache should now reflect the new value WITHOUT us
+  // having to do anything — the WebSocket pushed the update.
+  const newRetries = runtime.get("max_retries");
+  step(`max_retries after live update = ${newRetries}`);
+  // Expected: 7
+
+  step(`Changes received by listener: ${changesReceived.length}`);
+  step(`Retry-specific changes received: ${retryChanges.length}`);
+
+  // ------------------------------------------------------------------
+  // 4c. Connection lifecycle
+  // ------------------------------------------------------------------
+  section("4c. WebSocket Connection Lifecycle");
+
+  const wsStatus = runtime.connectionStatus();
+  step(`WebSocket status: ${wsStatus}`);
+  // Expected: "connected"
+
+  // The SDK reconnects automatically if the connection drops, using
+  // exponential backoff (1s, 2s, 4s, ... capped at 60s, retries forever).
+  // You can also manually force a refresh if needed.
+  await runtime.refresh();
+  step("Manual refresh completed");
+
+  const statsAfterRefresh = runtime.stats();
+  step(`Network fetches after manual refresh: ${statsAfterRefresh.fetchCount}`);
 
   // ======================================================================
   // 5. ENVIRONMENT COMPARISON
   // ======================================================================
 
-  section("5. Environment Comparison (not yet available)");
-  step("SKIPPED: Runtime connect() required for environment comparison");
+  section("5. Environment Comparison");
+
+  // A developer might want to see how the same config resolves across
+  // environments — useful for debugging "works in staging but not prod."
+
+  for (const env of ["development", "staging", "production"]) {
+    const envRuntime = await userService.connect(env, { timeout: 10_000 });
+    try {
+      const dbHost = (envRuntime.get("database") as Record<string, unknown> | null)?.host ?? "N/A";
+      const envRetries = envRuntime.get("max_retries");
+      step(`[${env.padEnd(12)}] db.host=${dbHost}, retries=${envRetries}`);
+    } finally {
+      await envRuntime.close();
+    }
+  }
 
   // ======================================================================
-  // 6. MANAGEMENT PLANE VERIFICATION
+  // 6. CLEANUP
   // ======================================================================
-  //
-  // Since the runtime plane is not yet available, let's verify the
-  // management data we set up by re-fetching configs and inspecting
-  // their stored values and environment overrides.
-  // ======================================================================
+  section("6. Cleanup");
 
-  section("6. Management Plane Verification");
-
-  // Re-fetch user_service and verify stored values.
-  const fetchedUserService = await client.config.get({ key: "user_service" });
-  step(`user_service base values: ${JSON.stringify(fetchedUserService.values, null, 2)}`);
-  step(`user_service environments: ${JSON.stringify(fetchedUserService.environments, null, 2)}`);
-
-  // Re-fetch auth_module and verify inheritance chain.
-  const fetchedAuthModule = await client.config.get({ key: "auth_module" });
-  step(`auth_module parent: ${fetchedAuthModule.parent}`);
-  step(`auth_module base values: ${JSON.stringify(fetchedAuthModule.values, null, 2)}`);
-  step(`auth_module environments: ${JSON.stringify(fetchedAuthModule.environments, null, 2)}`);
-
-  // Re-fetch common and verify overrides.
-  const fetchedCommon = await client.config.get({ key: "common" });
-  step(`common base values: ${JSON.stringify(fetchedCommon.values, null, 2)}`);
-  step(`common environments: ${JSON.stringify(fetchedCommon.environments, null, 2)}`);
-
-  // ======================================================================
-  // 7. CLEANUP
-  // ======================================================================
-  section("7. Cleanup");
+  // Close the runtime connection (WebSocket teardown).
+  await runtime.close();
+  step("Runtime connection closed");
 
   // Delete configs in dependency order (children first).
   await client.config.delete(authModule.id);
@@ -338,7 +523,7 @@ async function main(): Promise<void> {
   step(`Deleted user_service (${userService.id})`);
 
   // Restore common to empty state (can't delete, but can clear values).
-  await client.config.update(common.id, {
+  await common.update({
     description: "",
     values: {},
     environments: {},

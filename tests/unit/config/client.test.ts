@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigClient } from "../../../src/config/client.js";
-import { Transport } from "../../../src/transport.js";
 import {
   SmplNotFoundError,
   SmplConflictError,
@@ -9,7 +8,7 @@ import {
   SmplTimeoutError,
 } from "../../../src/errors.js";
 
-// Mock global fetch
+// Mock global fetch — openapi-fetch calls fetch(request: Request)
 const mockFetch = vi.fn();
 
 beforeEach(() => {
@@ -20,10 +19,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function makeTransport() {
-  return new Transport({
-    apiKey: "sk_api_test",
-  });
+const API_KEY = "sk_api_test";
+
+function makeClient() {
+  return new ConfigClient(API_KEY);
 }
 
 function jsonResponse(body: object, status = 200): Response {
@@ -35,6 +34,26 @@ function jsonResponse(body: object, status = 200): Response {
 
 function textResponse(body: string, status: number): Response {
   return new Response(body, { status });
+}
+
+/** Extract the URL string from the Request that openapi-fetch passes to fetch. */
+function calledUrl(): string {
+  return mockFetch.mock.calls[0][0].url as string;
+}
+
+/** Extract the method from the last fetch call's Request object. */
+function calledMethod(): string {
+  return mockFetch.mock.calls[0][0].method as string;
+}
+
+/** Read the body JSON from the first fetch call's Request object. */
+async function calledBodyJson(): Promise<unknown> {
+  return mockFetch.mock.calls[0][0].json();
+}
+
+/** Get an authorization header value from the first fetch call's Request. */
+function calledAuthHeader(): string {
+  return mockFetch.mock.calls[0][0].headers.get("Authorization") as string;
 }
 
 const SAMPLE_RESOURCE = {
@@ -57,7 +76,7 @@ describe("ConfigClient", () => {
     it("should fetch a config by id", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: "550e8400-e29b-41d4-a716-446655440000" });
 
       expect(config.id).toBe("550e8400-e29b-41d4-a716-446655440000");
@@ -70,33 +89,32 @@ describe("ConfigClient", () => {
       expect(config.createdAt).toBeInstanceOf(Date);
       expect(config.updatedAt).toBeInstanceOf(Date);
 
-      const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
-      expect(options.headers.Authorization).toBe("Bearer sk_api_test");
+      expect(calledUrl()).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
+      expect(calledAuthHeader()).toBe("Bearer sk_api_test");
     });
 
     it("should fetch a config by key using filter query param", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ key: "user_service" });
 
       expect(config.key).toBe("user_service");
 
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("/api/v1/configs");
-      expect(url).toContain("filter%5Bkey%5D=user_service");
+      expect(calledUrl()).toContain("/api/v1/configs");
+      // openapi-fetch passes the URL with bracket notation unencoded
+      expect(calledUrl()).toMatch(/filter\[key\]=user_service/);
     });
 
     it("should throw if neither key nor id is provided", async () => {
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.get({})).rejects.toThrow(
         "Exactly one of 'key' or 'id' must be provided.",
       );
     });
 
     it("should throw if both key and id are provided", async () => {
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.get({ key: "test", id: "abc" })).rejects.toThrow(
         "Exactly one of 'key' or 'id' must be provided.",
       );
@@ -105,14 +123,14 @@ describe("ConfigClient", () => {
     it("should throw SmplNotFoundError when get by key returns empty array", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.get({ key: "nonexistent" })).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplNotFoundError when get by id returns no data", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.get({ id: "nonexistent" })).rejects.toThrow(SmplNotFoundError);
     });
   });
@@ -130,7 +148,7 @@ describe("ConfigClient", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE, secondResource] }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const configs = await client.list();
 
       expect(configs).toHaveLength(2);
@@ -141,7 +159,7 @@ describe("ConfigClient", () => {
     it("should return an empty array when no configs exist", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const configs = await client.list();
 
       expect(configs).toEqual([]);
@@ -152,7 +170,7 @@ describe("ConfigClient", () => {
     it("should send correct body and return the created config", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.create({
         name: "User Service",
         key: "user_service",
@@ -163,32 +181,33 @@ describe("ConfigClient", () => {
       expect(config.name).toBe("User Service");
       expect(config.key).toBe("user_service");
 
-      const [, options] = mockFetch.mock.calls[0];
-      const body = JSON.parse(options.body);
-      expect(body.data.type).toBe("config");
-      expect(body.data.attributes.name).toBe("User Service");
-      expect(body.data.attributes.key).toBe("user_service");
-      expect(body.data.attributes.description).toBe("Configuration for the user service");
-      expect(body.data.attributes.values).toEqual({ timeout: 30, retries: 3 });
+      const body = await calledBodyJson() as Record<string, unknown>;
+      const data = body.data as Record<string, unknown>;
+      const attrs = (data.attributes as Record<string, unknown>);
+      expect(data.type).toBe("config");
+      expect(attrs.name).toBe("User Service");
+      expect(attrs.key).toBe("user_service");
+      expect(attrs.description).toBe("Configuration for the user service");
+      expect(attrs.values).toEqual({ timeout: 30, retries: 3 });
     });
 
     it("should create with only required fields", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await client.create({ name: "Minimal Config" });
 
-      const [, options] = mockFetch.mock.calls[0];
-      const body = JSON.parse(options.body);
-      expect(body.data.attributes.name).toBe("Minimal Config");
-      expect(body.data.attributes.key).toBeUndefined();
-      expect(body.data.attributes.description).toBeUndefined();
+      const body = await calledBodyJson() as Record<string, unknown>;
+      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      expect(attrs.name).toBe("Minimal Config");
+      expect(attrs.key).toBeUndefined();
+      expect(attrs.description).toBeUndefined();
     });
 
     it("should throw SmplValidationError when data is missing from response", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({}, 201));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.create({ name: "test" })).rejects.toThrow(SmplValidationError);
     });
   });
@@ -197,13 +216,12 @@ describe("ConfigClient", () => {
     it("should send a DELETE request and return void", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const result = await client.delete("550e8400-e29b-41d4-a716-446655440000");
 
       expect(result).toBeUndefined();
-      const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
-      expect(options.method).toBe("DELETE");
+      expect(calledUrl()).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
+      expect(calledMethod()).toBe("DELETE");
     });
   });
 
@@ -211,35 +229,35 @@ describe("ConfigClient", () => {
     it("should throw SmplNotFoundError on 404", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.get({ id: "missing" })).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplConflictError on 409", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.delete("has-children")).rejects.toThrow(SmplConflictError);
     });
 
     it("should throw SmplValidationError on 422", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.create({ name: "" })).rejects.toThrow(SmplValidationError);
     });
 
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.list()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw SmplTimeoutError on abort", async () => {
       mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await expect(client.list()).rejects.toThrow(SmplTimeoutError);
     });
   });
@@ -256,7 +274,7 @@ describe("ConfigClient", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
       expect(config.description).toBeNull();
@@ -274,7 +292,7 @@ describe("ConfigClient", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
       expect(config.values).toEqual({});
@@ -292,7 +310,7 @@ describe("ConfigClient", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
       expect(config.createdAt).toBeNull();
@@ -302,7 +320,7 @@ describe("ConfigClient", () => {
     it("should parse timestamps as Date objects", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
       expect(config.createdAt).toBeInstanceOf(Date);
@@ -318,7 +336,7 @@ describe("ConfigClient", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
       expect(config.key).toBe("");
@@ -329,12 +347,12 @@ describe("ConfigClient", () => {
     it("should include parent in request body when provided", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
-      const client = new ConfigClient(makeTransport());
+      const client = makeClient();
       await client.create({ name: "Child Config", parent: "parent-uuid-123" });
 
-      const [, options] = mockFetch.mock.calls[0];
-      const body = JSON.parse(options.body);
-      expect(body.data.attributes.parent).toBe("parent-uuid-123");
+      const body = await calledBodyJson() as Record<string, unknown>;
+      const attrs = ((body.data as Record<string, unknown>).attributes as Record<string, unknown>);
+      expect(attrs.parent).toBe("parent-uuid-123");
     });
   });
 });

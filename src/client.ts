@@ -6,7 +6,6 @@
  */
 
 import { ConfigClient } from "./config/client.js";
-import { Transport } from "./transport.js";
 
 /** Configuration options for the {@link SmplkitClient}. */
 export interface SmplkitClientOptions {
@@ -35,19 +34,11 @@ export class SmplkitClient {
   /** Client for config management-plane operations. */
   readonly config: ConfigClient;
 
-  /** @internal */
-  private readonly transport: Transport;
-
   constructor(options: SmplkitClientOptions) {
     if (!options.apiKey) {
       throw new Error("apiKey is required");
     }
 
-    this.transport = new Transport({
-      apiKey: options.apiKey,
-      timeout: options.timeout,
-    });
-
-    this.config = new ConfigClient(this.transport);
+    this.config = new ConfigClient(options.apiKey, options.timeout);
   }
 }
