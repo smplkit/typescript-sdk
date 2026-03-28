@@ -10,7 +10,12 @@ export type { SmplkitClientOptions } from "./client.js";
 
 // Config types
 export { ConfigClient } from "./config/client.js";
-export type { Config, CreateConfigOptions, GetConfigOptions } from "./config/types.js";
+export type {
+  Config,
+  CreateConfigOptions,
+  GetConfigOptions,
+  UpdateConfigOptions,
+} from "./config/types.js";
 
 // Error hierarchy
 export {

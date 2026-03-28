@@ -7,7 +7,12 @@
 
 import { SmplNotFoundError, SmplValidationError } from "../errors.js";
 import type { Transport } from "../transport.js";
-import type { Config, CreateConfigOptions, GetConfigOptions } from "./types.js";
+import type {
+  Config,
+  CreateConfigOptions,
+  GetConfigOptions,
+  UpdateConfigOptions,
+} from "./types.js";
 
 const BASE_URL = "https://config.smplkit.com";
 const CONFIGS_PATH = "/api/v1/configs";
@@ -108,6 +113,92 @@ export class ConfigClient {
    */
   async delete(configId: string): Promise<void> {
     await this.transport.delete(`${BASE_URL}${CONFIGS_PATH}/${configId}`);
+  }
+
+  /**
+   * Update an existing config.
+   *
+   * @param configId - The UUID of the config to update.
+   * @param options - Fields to update. All are optional.
+   * @returns The updated config.
+   * @throws {SmplNotFoundError} If the config does not exist.
+   * @throws {SmplValidationError} If the server rejects the request.
+   */
+  async update(configId: string, options: UpdateConfigOptions): Promise<Config> {
+    const attributes: Record<string, unknown> = {};
+
+    if (options.name !== undefined) attributes.name = options.name;
+    if (options.description !== undefined) attributes.description = options.description;
+    if (options.values !== undefined) attributes.values = options.values;
+    if (options.environments !== undefined) attributes.environments = options.environments;
+
+    const body = {
+      data: {
+        type: "config",
+        id: configId,
+        attributes,
+      },
+    };
+
+    const response = await this.transport.put(`${BASE_URL}${CONFIGS_PATH}/${configId}`, body);
+    return this.resourceToModel(response.data as JsonApiResource);
+  }
+
+  /**
+   * Set values on a config, optionally scoped to an environment.
+   *
+   * When `environment` is provided, the values are merged into that
+   * environment's overrides. When omitted, they are merged into the
+   * base values.
+   *
+   * @param configId - The UUID of the config.
+   * @param values - Key-value pairs to set.
+   * @param environment - Optional environment name.
+   * @returns The updated config.
+   */
+  async setValues(
+    configId: string,
+    values: Record<string, unknown>,
+    environment?: string,
+  ): Promise<Config> {
+    const attributes: Record<string, unknown> = {};
+
+    if (environment !== undefined) {
+      attributes.environments = { [environment]: values };
+    } else {
+      attributes.values = values;
+    }
+
+    const body = {
+      data: {
+        type: "config",
+        id: configId,
+        attributes,
+      },
+    };
+
+    const response = await this.transport.put(`${BASE_URL}${CONFIGS_PATH}/${configId}`, body);
+    return this.resourceToModel(response.data as JsonApiResource);
+  }
+
+  /**
+   * Set a single value on a config, optionally scoped to an environment.
+   *
+   * Convenience wrapper around {@link setValues}.
+   *
+   * @param configId - The UUID of the config.
+   * @param key - The key to set.
+   * @param value - The value to set.
+   * @param environment - Optional environment name.
+   * @returns The updated config.
+   */
+  async setValue(
+    configId: string,
+    key: string,
+    value: unknown,
+    environment?: string,
+  ): Promise<Config> {
+    return this.setValues(configId, { [key]: value }, environment);
   }
 
   /** Fetch a config by UUID. */

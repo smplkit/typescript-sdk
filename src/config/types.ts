@@ -53,6 +53,21 @@ export interface CreateConfigOptions {
   values?: Record<string, unknown>;
 }
 
+/** Options for updating an existing config. All fields are optional. */
+export interface UpdateConfigOptions {
+  /** Display name for the config. */
+  name?: string;
+
+  /** Description text. */
+  description?: string;
+
+  /** Base key-value pairs (replaces existing base values). */
+  values?: Record<string, unknown>;
+
+  /** Per-environment overrides (replaces existing environments). */
+  environments?: Record<string, Record<string, unknown>>;
+}
+
 /** Options for fetching a single config. Exactly one of `key` or `id` must be provided. */
 export interface GetConfigOptions {
   /** Fetch by human-readable key. */
