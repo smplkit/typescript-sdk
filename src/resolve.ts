@@ -22,9 +22,7 @@ export function resolveApiKey(explicit?: string): string {
   const configPath = join(homedir(), ".smplkit");
   try {
     const content = readFileSync(configPath, "utf-8");
-    const match = content.match(
-      /\[default\]\s*[\s\S]*?api_key\s*=\s*"([^"]+)"/,
-    );
+    const match = content.match(/\[default\]\s*[\s\S]*?api_key\s*=\s*"([^"]+)"/);
     if (match?.[1]) return match[1];
   } catch {
     // File doesn't exist or isn't readable — skip

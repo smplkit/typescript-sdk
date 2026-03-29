@@ -41,14 +41,9 @@ describe("resolveApiKey", () => {
   });
 
   it("should use config file when no explicit key and no env var", () => {
-    mockReadFileSync.mockReturnValue(
-      '[default]\napi_key = "sk_api_file"\n',
-    );
+    mockReadFileSync.mockReturnValue('[default]\napi_key = "sk_api_file"\n');
     expect(resolveApiKey()).toBe("sk_api_file");
-    expect(mockReadFileSync).toHaveBeenCalledWith(
-      join("/mock/home", ".smplkit"),
-      "utf-8",
-    );
+    expect(mockReadFileSync).toHaveBeenCalledWith(join("/mock/home", ".smplkit"), "utf-8");
   });
 
   it("should throw when no key found anywhere", () => {
@@ -73,17 +68,13 @@ describe("resolveApiKey", () => {
 
   it("should prefer env var over config file", () => {
     process.env.SMPLKIT_API_KEY = "sk_api_env";
-    mockReadFileSync.mockReturnValue(
-      '[default]\napi_key = "sk_api_file"\n',
-    );
+    mockReadFileSync.mockReturnValue('[default]\napi_key = "sk_api_file"\n');
     expect(resolveApiKey()).toBe("sk_api_env");
   });
 
   it("should treat empty env var as unset", () => {
     process.env.SMPLKIT_API_KEY = "";
-    mockReadFileSync.mockReturnValue(
-      '[default]\napi_key = "sk_api_file"\n',
-    );
+    mockReadFileSync.mockReturnValue('[default]\napi_key = "sk_api_file"\n');
     expect(resolveApiKey()).toBe("sk_api_file");
   });
 
