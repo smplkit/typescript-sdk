@@ -354,6 +354,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Limits
+         * @description Return all limit definitions as JSON:API resources.
+         */
+        get: operations["list_limits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plans
+         * @description Return all subscription plans as JSON:API resources.
+         */
+        get: operations["list_plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -453,6 +493,10 @@ export interface components {
             readonly created_at?: string | null;
             /** Updated At */
             readonly updated_at?: string | null;
+            /** Data */
+            readonly data?: {
+                [key: string]: unknown;
+            };
         };
         /** ApiKeyListResponse */
         ApiKeyListResponse: {
@@ -670,6 +714,33 @@ export interface components {
         InvitationResponse: {
             data: components["schemas"]["InvitationResource"];
         };
+        /** Limit */
+        Limit: {
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description: string;
+            /** Unit */
+            unit: string;
+            /** Display Format */
+            display_format?: string | null;
+        };
+        /** LimitListResponse */
+        LimitListResponse: {
+            /** Data */
+            data: components["schemas"]["LimitResource"][];
+        };
+        /** LimitResource */
+        LimitResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "limit";
+            attributes: components["schemas"]["Limit"];
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -685,6 +756,35 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
+        /** Plan */
+        Plan: {
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description: string;
+            /** Price Monthly Cents */
+            price_monthly_cents: number;
+            /** Limits */
+            limits: {
+                [key: string]: number;
+            };
+        };
+        /** PlanListResponse */
+        PlanListResponse: {
+            /** Data */
+            data: components["schemas"]["PlanResource"][];
+        };
+        /** PlanResource */
+        PlanResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "plan";
+            attributes: components["schemas"]["Plan"];
+        };
         /** RegisterRequest */
         RegisterRequest: {
             /**
@@ -2796,6 +2896,118 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LimitListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_plans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["PlanListResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
