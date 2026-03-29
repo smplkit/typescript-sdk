@@ -6,11 +6,16 @@
  */
 
 import { ConfigClient } from "./config/client.js";
+import { resolveApiKey } from "./resolve.js";
 
 /** Configuration options for the {@link SmplClient}. */
 export interface SmplClientOptions {
-  /** API key for authenticating with the smplkit platform. */
-  apiKey: string;
+  /**
+   * API key for authenticating with the smplkit platform.
+   * When omitted, the SDK resolves it from the `SMPLKIT_API_KEY`
+   * environment variable or the `~/.smplkit` configuration file.
+   */
+  apiKey?: string;
 
   /**
    * Request timeout in milliseconds.
@@ -34,11 +39,8 @@ export class SmplClient {
   /** Client for config management-plane operations. */
   readonly config: ConfigClient;
 
-  constructor(options: SmplClientOptions) {
-    if (!options.apiKey) {
-      throw new Error("apiKey is required");
-    }
-
-    this.config = new ConfigClient(options.apiKey, options.timeout);
+  constructor(options: SmplClientOptions = {}) {
+    const apiKey = resolveApiKey(options.apiKey);
+    this.config = new ConfigClient(apiKey, options.timeout);
   }
 }

@@ -17,6 +17,22 @@ npm install smplkit-sdk
 ```typescript
 import { SmplClient } from "smplkit-sdk";
 
+// Option 1: Explicit API key
+const client = new SmplClient({ apiKey: "sk_api_..." });
+
+// Option 2: Environment variable (SMPLKIT_API_KEY)
+// export SMPLKIT_API_KEY=sk_api_...
+const client2 = new SmplClient();
+
+// Option 3: Configuration file (~/.smplkit)
+// [default]
+// api_key = "sk_api_..."
+const client3 = new SmplClient();
+```
+
+```typescript
+import { SmplClient } from "smplkit-sdk";
+
 const client = new SmplClient({ apiKey: "sk_api_..." });
 
 // Get a config by key
@@ -38,6 +54,19 @@ await client.config.delete(newConfig.id);
 ```
 
 ## Configuration
+
+The API key is resolved using the following priority:
+
+1. **Explicit argument:** Pass `apiKey` in the constructor options.
+2. **Environment variable:** Set `SMPLKIT_API_KEY`.
+3. **Configuration file:** Add `api_key` under `[default]` in `~/.smplkit` (TOML format):
+
+```toml
+[default]
+api_key = "sk_api_..."
+```
+
+If none of these are set, the SDK throws `SmplError` with a message listing all three methods.
 
 ```typescript
 const client = new SmplClient({

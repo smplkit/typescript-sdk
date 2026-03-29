@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { SmplClient } from "../../src/client.js";
+import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
 
 describe("SmplClient", () => {
-  it("should require an apiKey", () => {
-    expect(() => new SmplClient({ apiKey: "" })).toThrow("apiKey is required");
+  it("should throw SmplError when no apiKey and no env/config fallback", () => {
+    const original = process.env.SMPLKIT_API_KEY;
+    delete process.env.SMPLKIT_API_KEY;
+    try {
+      expect(() => new SmplClient({ apiKey: "" })).toThrow(SmplError);
+    } finally {
+      if (original !== undefined) process.env.SMPLKIT_API_KEY = original;
+    }
   });
 
   it("should create a client with an apiKey", () => {
