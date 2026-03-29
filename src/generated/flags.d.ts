@@ -45,7 +45,50 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** Flag */
+        /**
+         * Flag
+         * @example {
+         *       "created_at": "2026-03-27T10:00:00Z",
+         *       "default": false,
+         *       "description": "Enable dark mode for the application UI",
+         *       "environments": {
+         *         "production": {
+         *           "default": false,
+         *           "enabled": true,
+         *           "rules": [
+         *             {
+         *               "description": "Beta users get dark mode",
+         *               "logic": {
+         *                 "attribute": "beta",
+         *                 "op": "eq",
+         *                 "value": true
+         *               },
+         *               "value": true
+         *             }
+         *           ]
+         *         },
+         *         "staging": {
+         *           "default": true,
+         *           "enabled": true,
+         *           "rules": []
+         *         }
+         *       },
+         *       "key": "dark_mode",
+         *       "name": "Dark Mode",
+         *       "type": "BOOLEAN",
+         *       "updated_at": "2026-03-27T10:00:00Z",
+         *       "values": [
+         *         {
+         *           "name": "on",
+         *           "value": true
+         *         },
+         *         {
+         *           "name": "off",
+         *           "value": false
+         *         }
+         *       ]
+         *     }
+         */
         Flag: {
             /**
              * Key
@@ -94,6 +137,68 @@ export interface components {
             default?: unknown | null;
             /** Rules */
             rules?: components["schemas"]["FlagRule"][];
+        };
+        /** FlagListResponse */
+        FlagListResponse: {
+            /** Data */
+            data: components["schemas"]["FlagResource"][];
+        };
+        /**
+         * FlagResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-03-27T10:00:00Z",
+         *         "default": false,
+         *         "description": "Enable dark mode for the application UI",
+         *         "environments": {
+         *           "production": {
+         *             "default": false,
+         *             "enabled": true,
+         *             "rules": [
+         *               {
+         *                 "description": "Beta users get dark mode",
+         *                 "logic": {
+         *                   "attribute": "beta",
+         *                   "op": "eq",
+         *                   "value": true
+         *                 },
+         *                 "value": true
+         *               }
+         *             ]
+         *           }
+         *         },
+         *         "key": "dark_mode",
+         *         "name": "Dark Mode",
+         *         "type": "BOOLEAN",
+         *         "updated_at": "2026-03-27T10:00:00Z",
+         *         "values": [
+         *           {
+         *             "name": "on",
+         *             "value": true
+         *           },
+         *           {
+         *             "name": "off",
+         *             "value": false
+         *           }
+         *         ]
+         *       },
+         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "type": "flag"
+         *     }
+         */
+        FlagResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "flag";
+            attributes: components["schemas"]["Flag"];
+        };
+        /** FlagResponse */
+        FlagResponse: {
+            data: components["schemas"]["FlagResource"];
         };
         /** FlagRule */
         FlagRule: {
@@ -169,7 +274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/vnd.api+json": components["schemas"]["FlagListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -178,7 +283,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -202,7 +307,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/vnd.api+json": components["schemas"]["FlagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -211,7 +316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -233,7 +338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/vnd.api+json": components["schemas"]["FlagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -242,7 +347,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -268,7 +373,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/vnd.api+json": components["schemas"]["FlagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -277,7 +382,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -306,7 +411,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
