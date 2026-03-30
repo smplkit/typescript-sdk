@@ -49,21 +49,37 @@ export interface components {
          * Config
          * @example {
          *       "created_at": "2026-03-27T10:00:00Z",
-         *       "description": "PostgreSQL connection string",
+         *       "description": "Database configuration",
          *       "environments": {
-         *         "production": {},
-         *         "staging": {}
+         *         "prod": {
+         *           "values": {
+         *             "host": {
+         *               "value": "db-prod.internal"
+         *             },
+         *             "pool_size": {
+         *               "value": 20
+         *             }
+         *           }
+         *         }
          *       },
-         *       "key": "database_url",
-         *       "name": "Database URL",
-         *       "updated_at": "2026-03-27T10:00:00Z",
-         *       "values": {
-         *         "production": "postgresql://prod-db:5432/smplkit",
-         *         "staging": "postgresql://staging-db:5432/smplkit_test"
-         *       }
+         *       "items": {
+         *         "host": {
+         *           "description": "Primary database hostname",
+         *           "type": "STRING",
+         *           "value": "db.internal"
+         *         },
+         *         "pool_size": {
+         *           "description": "Connection pool size",
+         *           "type": "NUMBER",
+         *           "value": 10
+         *         }
+         *       },
+         *       "key": "database",
+         *       "name": "Database",
+         *       "updated_at": "2026-03-27T10:00:00Z"
          *     }
          */
-        Config: {
+        "Config-Input": {
             /** Key */
             key?: string | null;
             /** Name */
@@ -72,18 +88,94 @@ export interface components {
             description?: string | null;
             /** Parent */
             parent?: string | null;
-            /** Values */
-            values?: {
-                [key: string]: unknown;
+            /** Items */
+            items?: {
+                [key: string]: components["schemas"]["ConfigItemDefinition"];
             } | null;
             /** Environments */
             environments?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["EnvironmentOverride"];
             } | null;
             /** Created At */
             readonly created_at?: string | null;
             /** Updated At */
             readonly updated_at?: string | null;
+        };
+        /**
+         * Config
+         * @example {
+         *       "created_at": "2026-03-27T10:00:00Z",
+         *       "description": "Database configuration",
+         *       "environments": {
+         *         "prod": {
+         *           "values": {
+         *             "host": {
+         *               "value": "db-prod.internal"
+         *             },
+         *             "pool_size": {
+         *               "value": 20
+         *             }
+         *           }
+         *         }
+         *       },
+         *       "items": {
+         *         "host": {
+         *           "description": "Primary database hostname",
+         *           "type": "STRING",
+         *           "value": "db.internal"
+         *         },
+         *         "pool_size": {
+         *           "description": "Connection pool size",
+         *           "type": "NUMBER",
+         *           "value": 10
+         *         }
+         *       },
+         *       "key": "database",
+         *       "name": "Database",
+         *       "updated_at": "2026-03-27T10:00:00Z"
+         *     }
+         */
+        "Config-Output": {
+            /** Key */
+            key?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Parent */
+            parent?: string | null;
+            /** Items */
+            items?: {
+                [key: string]: components["schemas"]["ConfigItemDefinition"];
+            } | null;
+            /** Environments */
+            environments?: {
+                [key: string]: components["schemas"]["EnvironmentOverride"];
+            } | null;
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * ConfigItemDefinition
+         * @description Schema for a single config item.
+         */
+        ConfigItemDefinition: {
+            /** Value */
+            value: unknown;
+            /** Type */
+            type?: ("STRING" | "NUMBER" | "BOOLEAN" | "JSON") | null;
+            /** Description */
+            description?: string | null;
+        };
+        /**
+         * ConfigItemOverride
+         * @description Schema for an environment override — value only, no type/description.
+         */
+        ConfigItemOverride: {
+            /** Value */
+            value: unknown;
         };
         /** ConfigListResponse */
         ConfigListResponse: {
@@ -95,18 +187,26 @@ export interface components {
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-27T10:00:00Z",
-         *         "description": "PostgreSQL connection string",
+         *         "description": "Database configuration",
          *         "environments": {
-         *           "production": {},
-         *           "staging": {}
+         *           "prod": {
+         *             "values": {
+         *               "host": {
+         *                 "value": "db-prod.internal"
+         *               }
+         *             }
+         *           }
          *         },
-         *         "key": "database_url",
-         *         "name": "Database URL",
-         *         "updated_at": "2026-03-27T10:00:00Z",
-         *         "values": {
-         *           "production": "postgresql://prod-db:5432/smplkit",
-         *           "staging": "postgresql://staging-db:5432/smplkit_test"
-         *         }
+         *         "items": {
+         *           "host": {
+         *             "description": "Primary database hostname",
+         *             "type": "STRING",
+         *             "value": "db.internal"
+         *           }
+         *         },
+         *         "key": "database",
+         *         "name": "Database",
+         *         "updated_at": "2026-03-27T10:00:00Z"
          *       },
          *       "id": "550e8400-e29b-41d4-a716-446655440000",
          *       "type": "config"
@@ -120,11 +220,21 @@ export interface components {
              * @constant
              */
             type: "config";
-            attributes: components["schemas"]["Config"];
+            attributes: components["schemas"]["Config-Output"];
         };
         /** ConfigResponse */
         ConfigResponse: {
             data: components["schemas"]["ConfigResource"];
+        };
+        /**
+         * EnvironmentOverride
+         * @description Schema for per-environment overrides.
+         */
+        EnvironmentOverride: {
+            /** Values */
+            values?: {
+                [key: string]: components["schemas"]["ConfigItemOverride"];
+            } | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -140,7 +250,7 @@ export interface components {
              * @default
              */
             type: string;
-            attributes: components["schemas"]["Config"];
+            attributes: components["schemas"]["Config-Input"];
         };
         /** Response[Config] */
         Response_Config_: {
