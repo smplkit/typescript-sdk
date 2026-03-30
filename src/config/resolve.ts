@@ -8,12 +8,12 @@
 export interface ChainConfig {
   /** Config UUID. */
   id: string;
-  /** Base key-value pairs. */
-  values: Record<string, unknown>;
+  /** Base key-value pairs (unwrapped from typed item definitions). */
+  items: Record<string, unknown>;
   /**
    * Per-environment overrides.
-   * Each entry is `{ values: { key: value, ... } }` — the server wraps
-   * environment-specific values in a nested `values` key.
+   * Each entry is `{ values: { key: value, ... } }` — values are already
+   * unwrapped from the server's `{ value: raw }` wrapper by the client layer.
    */
   environments: Record<string, unknown>;
 }
@@ -69,7 +69,7 @@ export function resolveChain(chain: ChainConfig[], environment: string): Record<
   // Walk from root to child (reverse order — chain is child-to-root)
   for (let i = chain.length - 1; i >= 0; i--) {
     const config = chain[i];
-    const baseValues: Record<string, unknown> = config.values ?? {};
+    const baseValues: Record<string, unknown> = config.items ?? {};
 
     // Environments are stored as { env_name: { values: { key: val } } }
     const envEntry = (config.environments ?? {})[environment];

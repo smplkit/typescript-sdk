@@ -19,7 +19,7 @@ export interface ConfigUpdatePayload {
   key: string | null;
   description: string | null;
   parent: string | null;
-  values: Record<string, unknown>;
+  items: Record<string, unknown>;
   environments: Record<string, unknown>;
 }
 
@@ -46,13 +46,13 @@ export class Config {
   /** Parent config UUID, or null if this is a root config. */
   parent: string | null;
 
-  /** Base key-value pairs. */
-  values: Record<string, unknown>;
+  /** Base key-value pairs (unwrapped from typed item definitions). */
+  items: Record<string, unknown>;
 
   /**
    * Per-environment overrides.
-   * Stored as `{ env_name: { values: { key: value } } }` to match the
-   * server's format.
+   * Stored as `{ env_name: { values: { key: value } } }` — values are
+   * unwrapped from the server's `{ value: raw }` wrapper.
    */
   environments: Record<string, unknown>;
 
@@ -87,7 +87,7 @@ export class Config {
       name: string;
       description: string | null;
       parent: string | null;
-      values: Record<string, unknown>;
+      items: Record<string, unknown>;
       environments: Record<string, unknown>;
       createdAt: Date | null;
       updatedAt: Date | null;
@@ -99,7 +99,7 @@ export class Config {
     this.name = fields.name;
     this.description = fields.description;
     this.parent = fields.parent;
-    this.values = fields.values;
+    this.items = fields.items;
     this.environments = fields.environments;
     this.createdAt = fields.createdAt;
     this.updatedAt = fields.updatedAt;
@@ -113,13 +113,13 @@ export class Config {
    *
    * @param options.name - New display name.
    * @param options.description - New description (pass empty string to clear).
-   * @param options.values - New base values (replaces entirely).
+   * @param options.items - New base values (replaces entirely).
    * @param options.environments - New environments dict (replaces entirely).
    */
   async update(options: {
     name?: string;
     description?: string;
-    values?: Record<string, unknown>;
+    items?: Record<string, unknown>;
     environments?: Record<string, unknown>;
   }): Promise<void> {
     const updated = await this._client._updateConfig({
@@ -128,12 +128,12 @@ export class Config {
       key: this.key,
       description: options.description !== undefined ? options.description : this.description,
       parent: this.parent,
-      values: options.values ?? this.values,
+      items: options.items ?? this.items,
       environments: options.environments ?? this.environments,
     });
     this.name = updated.name;
     this.description = updated.description;
-    this.values = updated.values;
+    this.items = updated.items;
     this.environments = updated.environments;
     this.updatedAt = updated.updatedAt;
   }
@@ -143,20 +143,20 @@ export class Config {
    *
    * When `environment` is provided, replaces that environment's `values`
    * sub-dict (other environments are preserved). When omitted, replaces
-   * the base `values`.
+   * the base `items`.
    *
    * @param values - The complete set of values to set.
    * @param environment - Target environment, or omit for base values.
    */
   async setValues(values: Record<string, unknown>, environment?: string): Promise<void> {
-    let newValues: Record<string, unknown>;
+    let newItems: Record<string, unknown>;
     let newEnvs: Record<string, unknown>;
 
     if (environment === undefined) {
-      newValues = values;
+      newItems = values;
       newEnvs = this.environments;
     } else {
-      newValues = this.values;
+      newItems = this.items;
       // Preserve any extra metadata on the environment entry (like other sub-keys),
       // but replace the `values` sub-dict entirely.
       const existingEntry =
@@ -174,10 +174,10 @@ export class Config {
       key: this.key,
       description: this.description,
       parent: this.parent,
-      values: newValues,
+      items: newItems,
       environments: newEnvs,
     });
-    this.values = updated.values;
+    this.items = updated.items;
     this.environments = updated.environments;
     this.updatedAt = updated.updatedAt;
   }
@@ -193,7 +193,7 @@ export class Config {
    */
   async setValue(key: string, value: unknown, environment?: string): Promise<void> {
     if (environment === undefined) {
-      const merged = { ...this.values, [key]: value };
+      const merged = { ...this.items, [key]: value };
       await this.setValues(merged);
     } else {
       const envEntry =
@@ -261,20 +261,20 @@ export class Config {
   private async _buildChain(
     _timeout: number,
   ): Promise<
-    Array<{ id: string; values: Record<string, unknown>; environments: Record<string, unknown> }>
+    Array<{ id: string; items: Record<string, unknown>; environments: Record<string, unknown> }>
   > {
     const chain: Array<{
       id: string;
-      values: Record<string, unknown>;
+      items: Record<string, unknown>;
       environments: Record<string, unknown>;
-    }> = [{ id: this.id, values: this.values, environments: this.environments }];
+    }> = [{ id: this.id, items: this.items, environments: this.environments }];
 
     let parentId = this.parent;
     while (parentId !== null) {
       const parentConfig = await this._client.get({ id: parentId });
       chain.push({
         id: parentConfig.id,
-        values: parentConfig.values,
+        items: parentConfig.items,
         environments: parentConfig.environments,
       });
       parentId = parentConfig.parent;
@@ -299,7 +299,7 @@ export interface CreateConfigOptions {
   /** Parent config UUID. Defaults to the account's `common` config if omitted. */
   parent?: string;
   /** Initial base values. */
-  values?: Record<string, unknown>;
+  items?: Record<string, unknown>;
 }
 
 /** Options for fetching a single config. Exactly one of `key` or `id` must be provided. */

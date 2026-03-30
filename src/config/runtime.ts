@@ -369,18 +369,18 @@ export class ConfigRuntime {
           : null;
 
       if (new_value === null || new_value === undefined) {
-        // Deletion: remove from base values and env values
-        delete chainEntry.values[key];
+        // Deletion: remove from base items and env values
+        delete chainEntry.items[key];
         if (envValues) delete envValues[key];
       } else if (envValues && key in envValues) {
         // Update existing env-specific override
         envValues[key] = new_value;
-      } else if (key in chainEntry.values) {
+      } else if (key in chainEntry.items) {
         // Update existing base value
-        chainEntry.values[key] = new_value;
+        chainEntry.items[key] = new_value;
       } else {
-        // New key — put in base values
-        chainEntry.values[key] = new_value;
+        // New key — put in base items
+        chainEntry.items[key] = new_value;
       }
     }
 

@@ -79,16 +79,16 @@ describe("resolveChain", () => {
     expect(resolveChain([], "production")).toEqual({});
   });
 
-  it("should resolve single config with base values only", () => {
-    const chain: ChainConfig[] = [{ id: "a", values: { x: 1, y: 2 }, environments: {} }];
+  it("should resolve single config with base items only", () => {
+    const chain: ChainConfig[] = [{ id: "a", items: { x: 1, y: 2 }, environments: {} }];
     expect(resolveChain(chain, "production")).toEqual({ x: 1, y: 2 });
   });
 
-  it("should apply environment overrides on top of base values", () => {
+  it("should apply environment overrides on top of base items", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1, y: 2 },
+        items: { x: 1, y: 2 },
         environments: {
           production: { values: { y: 20, z: 30 } },
         },
@@ -101,7 +101,7 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1 },
+        items: { x: 1 },
         environments: {
           production: { values: { x: 10 } },
           staging: { values: { x: 99 } },
@@ -114,8 +114,8 @@ describe("resolveChain", () => {
   it("should resolve child-to-root chain (child overrides parent)", () => {
     // Chain is child-to-root: [child, parent]
     const chain: ChainConfig[] = [
-      { id: "child", values: { x: 10, child_only: true }, environments: {} },
-      { id: "parent", values: { x: 1, parent_only: true }, environments: {} },
+      { id: "child", items: { x: 10, child_only: true }, environments: {} },
+      { id: "parent", items: { x: 1, parent_only: true }, environments: {} },
     ];
     const result = resolveChain(chain, "production");
     expect(result).toEqual({ x: 10, parent_only: true, child_only: true });
@@ -124,9 +124,9 @@ describe("resolveChain", () => {
   it("should resolve three-level chain", () => {
     // [grandchild, child, root]
     const chain: ChainConfig[] = [
-      { id: "gc", values: { level: "grandchild" }, environments: {} },
-      { id: "c", values: { level: "child", mid: true }, environments: {} },
-      { id: "r", values: { level: "root", base: true, mid: false }, environments: {} },
+      { id: "gc", items: { level: "grandchild" }, environments: {} },
+      { id: "c", items: { level: "child", mid: true }, environments: {} },
+      { id: "r", items: { level: "root", base: true, mid: false }, environments: {} },
     ];
     const result = resolveChain(chain, "any");
     expect(result).toEqual({ level: "grandchild", mid: true, base: true });
@@ -134,8 +134,8 @@ describe("resolveChain", () => {
 
   it("should deep-merge nested objects across chain levels", () => {
     const chain: ChainConfig[] = [
-      { id: "child", values: { db: { port: 3306 } }, environments: {} },
-      { id: "parent", values: { db: { host: "localhost", port: 5432 } }, environments: {} },
+      { id: "child", items: { db: { port: 3306 } }, environments: {} },
+      { id: "parent", items: { db: { host: "localhost", port: 5432 } }, environments: {} },
     ];
     const result = resolveChain(chain, "production");
     expect(result).toEqual({ db: { host: "localhost", port: 3306 } });
@@ -145,12 +145,12 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "child",
-        values: { retries: 3 },
+        items: { retries: 3 },
         environments: { prod: { values: { retries: 5 } } },
       },
       {
         id: "parent",
-        values: { timeout: 30, retries: 1 },
+        items: { timeout: 30, retries: 1 },
         environments: { prod: { values: { timeout: 60 } } },
       },
     ];
@@ -162,11 +162,11 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1 },
+        items: { x: 1 },
         environments: { staging: { values: { x: 10 } } },
       },
     ];
-    // 'production' not in environments — should use base values only
+    // 'production' not in environments — should use base items only
     expect(resolveChain(chain, "production")).toEqual({ x: 1 });
   });
 
@@ -174,7 +174,7 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1 },
+        items: { x: 1 },
         environments: { production: null },
       },
     ];
@@ -185,7 +185,7 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1 },
+        items: { x: 1 },
         environments: { production: [1, 2, 3] },
       },
     ];
@@ -196,18 +196,18 @@ describe("resolveChain", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: { x: 1 },
+        items: { x: 1 },
         environments: { production: { other: "stuff" } },
       },
     ];
     expect(resolveChain(chain, "production")).toEqual({ x: 1 });
   });
 
-  it("should handle null values in chain config", () => {
+  it("should handle null items in chain config", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
-        values: null as unknown as Record<string, unknown>,
+        items: null as unknown as Record<string, unknown>,
         environments: null as unknown as Record<string, unknown>,
       },
     ];

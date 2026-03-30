@@ -18,7 +18,7 @@ function makeMockClient(overrides?: Partial<Config>) {
       name: (payload.name as string) ?? "",
       description: (payload.description as string | null) ?? null,
       parent: (payload.parent as string | null) ?? null,
-      values: (payload.values as Record<string, unknown>) ?? {},
+      items: (payload.items as Record<string, unknown>) ?? {},
       environments: (payload.environments as Record<string, unknown>) ?? {},
       createdAt: null,
       updatedAt: new Date("2024-02-01T00:00:00Z"),
@@ -37,7 +37,7 @@ function makeConfig(
     name: string;
     description: string | null;
     parent: string | null;
-    values: Record<string, unknown>;
+    items: Record<string, unknown>;
     environments: Record<string, unknown>;
     createdAt: Date | null;
     updatedAt: Date | null;
@@ -49,7 +49,7 @@ function makeConfig(
     name: "My Config",
     description: "A test config",
     parent: null,
-    values: { timeout: 30 },
+    items: { timeout: 30 },
     environments: {},
     createdAt: new Date("2024-01-01T00:00:00Z"),
     updatedAt: new Date("2024-01-02T00:00:00Z"),
@@ -67,7 +67,7 @@ describe("Config", () => {
       expect(config.name).toBe("My Config");
       expect(config.description).toBe("A test config");
       expect(config.parent).toBeNull();
-      expect(config.values).toEqual({ timeout: 30 });
+      expect(config.items).toEqual({ timeout: 30 });
       expect(config.environments).toEqual({});
       expect(config.createdAt).toBeInstanceOf(Date);
       expect(config.updatedAt).toBeInstanceOf(Date);
@@ -95,7 +95,7 @@ describe("Config", () => {
         key: "my_config",
         description: "A test config",
         parent: null,
-        values: { timeout: 30 },
+        items: { timeout: 30 },
         environments: {},
       });
     });
@@ -122,14 +122,14 @@ describe("Config", () => {
       );
     });
 
-    it("should replace values entirely when provided", async () => {
+    it("should replace items entirely when provided", async () => {
       const client = makeMockClient();
       const config = makeConfig(client);
 
-      await config.update({ values: { new_key: "new_val" } });
+      await config.update({ items: { new_key: "new_val" } });
 
       expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ values: { new_key: "new_val" } }),
+        expect.objectContaining({ items: { new_key: "new_val" } }),
       );
     });
 
@@ -146,14 +146,14 @@ describe("Config", () => {
   });
 
   describe("setValues", () => {
-    it("should replace base values when no environment is given", async () => {
+    it("should replace base items when no environment is given", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client, { values: { old: true } });
+      const config = makeConfig(client, { items: { old: true } });
 
       await config.setValues({ new_key: "val" });
 
       expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ values: { new_key: "val" } }),
+        expect.objectContaining({ items: { new_key: "val" } }),
       );
     });
 
@@ -165,8 +165,8 @@ describe("Config", () => {
 
       const call = client._updateConfig.mock.calls[0][0];
       expect(call.environments.production).toEqual({ values: { retries: 5 } });
-      // base values should be preserved
-      expect(call.values).toEqual({ timeout: 30 });
+      // base items should be preserved
+      expect(call.items).toEqual({ timeout: 30 });
     });
 
     it("should preserve existing environment entries when setting a different environment", async () => {
@@ -210,26 +210,26 @@ describe("Config", () => {
       expect(call.environments.production).toEqual({ values: { x: 1 } });
     });
 
-    it("should update local values/environments after success", async () => {
+    it("should update local items/environments after success", async () => {
       const client = makeMockClient();
       const config = makeConfig(client);
 
       await config.setValues({ new_val: 42 });
 
-      expect(config.values).toEqual({ new_val: 42 });
+      expect(config.items).toEqual({ new_val: 42 });
       expect(config.updatedAt).toBeInstanceOf(Date);
     });
   });
 
   describe("setValue", () => {
-    it("should merge a single key into base values when no environment is given", async () => {
+    it("should merge a single key into base items when no environment is given", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client, { values: { a: 1 } });
+      const config = makeConfig(client, { items: { a: 1 } });
 
       await config.setValue("b", 2);
 
       const call = client._updateConfig.mock.calls[0][0];
-      expect(call.values).toEqual({ a: 1, b: 2 });
+      expect(call.items).toEqual({ a: 1, b: 2 });
     });
 
     it("should merge a single key into environment values", async () => {
@@ -290,7 +290,7 @@ describe("Config", () => {
       const config = makeConfig(client, {
         id: "child-id",
         parent: "parent-id",
-        values: { child_val: 1 },
+        items: { child_val: 1 },
         environments: {},
       });
 
@@ -302,7 +302,7 @@ describe("Config", () => {
           name: "Parent",
           description: null,
           parent: null,
-          values: { parent_val: 2 },
+          items: { parent_val: 2 },
           environments: {},
           createdAt: null,
           updatedAt: null,
@@ -326,7 +326,7 @@ describe("Config", () => {
       const grandchild = makeConfig(client, {
         id: "gc-id",
         parent: "c-id",
-        values: { level: "grandchild" },
+        items: { level: "grandchild" },
       });
 
       const child = new Config(client, {
@@ -335,7 +335,7 @@ describe("Config", () => {
         name: "Child",
         description: null,
         parent: "root-id",
-        values: { level: "child", mid: true },
+        items: { level: "child", mid: true },
         environments: {},
         createdAt: null,
         updatedAt: null,
@@ -347,7 +347,7 @@ describe("Config", () => {
         name: "Root",
         description: null,
         parent: null,
-        values: { level: "root", base: true },
+        items: { level: "root", base: true },
         environments: {},
         createdAt: null,
         updatedAt: null,
@@ -390,12 +390,12 @@ describe("Config", () => {
 
     it("should provide a working fetchChain for runtime refresh", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client, { parent: null, values: { x: 1 } });
+      const config = makeConfig(client, { parent: null, items: { x: 1 } });
 
       const runtime = await config.connect("production");
 
-      // Modify the config's values to simulate server-side change
-      config.values = { x: 99 };
+      // Modify the config's items to simulate server-side change
+      config.items = { x: 99 };
 
       // refresh() calls the fetchChain lambda, which calls _buildChain
       await runtime.refresh();

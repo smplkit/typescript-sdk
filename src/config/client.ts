@@ -21,20 +21,63 @@ import type { ConfigUpdatePayload, CreateConfigOptions, GetConfigOptions } from 
 
 const BASE_URL = "https://config.smplkit.com";
 
-type ApiConfig = components["schemas"]["Config"];
+type ApiConfig = components["schemas"]["Config-Input"];
+type ApiConfigOutput = components["schemas"]["Config-Output"];
 type ConfigResource = components["schemas"]["ConfigResource"];
+
+/**
+ * Extract raw values from typed items: `{key: {value, type?, description?}}` -> `{key: rawValue}`.
+ * @internal
+ */
+function extractItemValues(
+  items: Record<string, { value: unknown }> | null | undefined,
+): Record<string, unknown> {
+  if (!items) return {};
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(items)) {
+    result[key] = item && typeof item === "object" && "value" in item ? item.value : item;
+  }
+  return result;
+}
+
+/**
+ * Extract raw values from environment overrides.
+ * Wire format: `{ env: { values: { key: { value: raw } } } }`
+ * SDK format:  `{ env: { values: { key: raw } } }`
+ * @internal
+ */
+function extractEnvironments(
+  environments: Record<string, { values?: Record<string, { value: unknown }> | null }> | null | undefined,
+): Record<string, unknown> {
+  if (!environments) return {};
+  const result: Record<string, unknown> = {};
+  for (const [envName, envEntry] of Object.entries(environments)) {
+    if (envEntry && typeof envEntry === "object" && envEntry.values) {
+      const unwrapped: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(envEntry.values)) {
+        unwrapped[key] = item && typeof item === "object" && "value" in item ? item.value : item;
+      }
+      result[envName] = { values: unwrapped };
+    } else {
+      result[envName] = envEntry;
+    }
+  }
+  return result;
+}
 
 /** @internal */
 function resourceToConfig(resource: ConfigResource, client: ConfigClient): Config {
-  const attrs: ApiConfig = resource.attributes;
+  const attrs: ApiConfigOutput = resource.attributes;
   return new Config(client, {
     id: resource.id ?? "",
     key: attrs.key ?? "",
     name: attrs.name,
     description: attrs.description ?? null,
     parent: attrs.parent ?? null,
-    values: (attrs.values ?? {}) as Record<string, unknown>,
-    environments: (attrs.environments ?? {}) as Record<string, unknown>,
+    items: extractItemValues(attrs.items as Record<string, { value: unknown }> | null | undefined),
+    environments: extractEnvironments(
+      attrs.environments as Record<string, { values?: Record<string, { value: unknown }> | null }> | null | undefined,
+    ),
     createdAt: attrs.created_at ? new Date(attrs.created_at) : null,
     updatedAt: attrs.updated_at ? new Date(attrs.updated_at) : null,
   });
@@ -80,6 +123,52 @@ function wrapFetchError(err: unknown): never {
 }
 
 /**
+ * Wrap plain values into typed item format for the API.
+ * `{key: rawValue}` -> `{key: {value: rawValue}}`
+ * @internal
+ */
+function wrapItemValues(
+  values: Record<string, unknown> | null | undefined,
+): Record<string, { value: unknown }> | null {
+  if (!values) return null;
+  const result: Record<string, { value: unknown }> = {};
+  for (const [key, val] of Object.entries(values)) {
+    result[key] = { value: val };
+  }
+  return result;
+}
+
+/**
+ * Wrap plain environment values into the API wire format.
+ * SDK format:  `{ env: { values: { key: raw } } }`
+ * Wire format: `{ env: { values: { key: { value: raw } } } }`
+ * @internal
+ */
+function wrapEnvironments(
+  environments: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!environments) return null;
+  const result: Record<string, unknown> = {};
+  for (const [envName, envEntry] of Object.entries(environments)) {
+    if (envEntry && typeof envEntry === "object" && !Array.isArray(envEntry)) {
+      const entry = envEntry as Record<string, unknown>;
+      if (entry.values && typeof entry.values === "object" && !Array.isArray(entry.values)) {
+        const wrapped: Record<string, { value: unknown }> = {};
+        for (const [key, val] of Object.entries(entry.values as Record<string, unknown>)) {
+          wrapped[key] = { value: val };
+        }
+        result[envName] = { ...entry, values: wrapped };
+      } else {
+        result[envName] = envEntry;
+      }
+    } else {
+      result[envName] = envEntry;
+    }
+  }
+  return result;
+}
+
+/**
  * Build a JSON:API request body for create/update operations.
  * @internal
  */
@@ -89,7 +178,7 @@ function buildRequestBody(options: {
   key?: string | null;
   description?: string | null;
   parent?: string | null;
-  values?: Record<string, unknown> | null;
+  items?: Record<string, unknown> | null;
   environments?: Record<string, unknown> | null;
 }): operations["create_config"]["requestBody"]["content"]["application/json"] {
   const attrs: ApiConfig = {
@@ -98,10 +187,10 @@ function buildRequestBody(options: {
   if (options.key !== undefined) attrs.key = options.key;
   if (options.description !== undefined) attrs.description = options.description;
   if (options.parent !== undefined) attrs.parent = options.parent;
-  if (options.values !== undefined)
-    attrs.values = options.values as { [key: string]: unknown } | null;
+  if (options.items !== undefined)
+    attrs.items = wrapItemValues(options.items) as ApiConfig["items"];
   if (options.environments !== undefined)
-    attrs.environments = options.environments as { [key: string]: unknown } | null;
+    attrs.environments = wrapEnvironments(options.environments) as ApiConfig["environments"];
 
   return {
     data: {
@@ -200,7 +289,7 @@ export class ConfigClient {
       key: options.key,
       description: options.description,
       parent: options.parent,
-      values: options.values,
+      items: options.items,
     });
 
     let data: components["schemas"]["ConfigResponse"] | undefined;
@@ -246,7 +335,7 @@ export class ConfigClient {
       key: payload.key,
       description: payload.description,
       parent: payload.parent,
-      values: payload.values,
+      items: payload.items,
       environments: payload.environments,
     });
 

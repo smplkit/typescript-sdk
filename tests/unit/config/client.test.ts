@@ -64,8 +64,17 @@ const SAMPLE_RESOURCE = {
     key: "user_service",
     description: "Configuration for the user service",
     parent: null,
-    values: { timeout: 30, retries: 3 },
-    environments: { production: { timeout: 60 } },
+    items: {
+      timeout: { value: 30, type: "NUMBER" },
+      retries: { value: 3, type: "NUMBER" },
+    },
+    environments: {
+      production: {
+        values: {
+          timeout: { value: 60 },
+        },
+      },
+    },
     created_at: "2024-01-15T10:30:00Z",
     updated_at: "2024-01-16T14:00:00Z",
   },
@@ -84,8 +93,8 @@ describe("ConfigClient", () => {
       expect(config.key).toBe("user_service");
       expect(config.description).toBe("Configuration for the user service");
       expect(config.parent).toBeNull();
-      expect(config.values).toEqual({ timeout: 30, retries: 3 });
-      expect(config.environments).toEqual({ production: { timeout: 60 } });
+      expect(config.items).toEqual({ timeout: 30, retries: 3 });
+      expect(config.environments).toEqual({ production: { values: { timeout: 60 } } });
       expect(config.createdAt).toBeInstanceOf(Date);
       expect(config.updatedAt).toBeInstanceOf(Date);
 
@@ -175,7 +184,7 @@ describe("ConfigClient", () => {
         name: "User Service",
         key: "user_service",
         description: "Configuration for the user service",
-        values: { timeout: 30, retries: 3 },
+        items: { timeout: 30, retries: 3 },
       });
 
       expect(config.name).toBe("User Service");
@@ -188,7 +197,10 @@ describe("ConfigClient", () => {
       expect(attrs.name).toBe("User Service");
       expect(attrs.key).toBe("user_service");
       expect(attrs.description).toBe("Configuration for the user service");
-      expect(attrs.values).toEqual({ timeout: 30, retries: 3 });
+      expect(attrs.items).toEqual({
+        timeout: { value: 30 },
+        retries: { value: 3 },
+      });
     });
 
     it("should create with only required fields", async () => {
@@ -281,12 +293,12 @@ describe("ConfigClient", () => {
       expect(config.parent).toBeNull();
     });
 
-    it("should handle null values and environments", async () => {
+    it("should handle null items and environments", async () => {
       const resource = {
         ...SAMPLE_RESOURCE,
         attributes: {
           ...SAMPLE_RESOURCE.attributes,
-          values: null,
+          items: null,
           environments: null,
         },
       };
@@ -295,7 +307,7 @@ describe("ConfigClient", () => {
       const client = makeClient();
       const config = await client.get({ id: SAMPLE_RESOURCE.id });
 
-      expect(config.values).toEqual({});
+      expect(config.items).toEqual({});
       expect(config.environments).toEqual({});
     });
 
@@ -380,7 +392,7 @@ describe("ConfigClient", () => {
         key: "user_service",
         description: "Updated description",
         parent: null,
-        values: { timeout: 30 },
+        items: { timeout: 30 },
         environments: {},
       });
 
@@ -400,7 +412,7 @@ describe("ConfigClient", () => {
           key: "test",
           description: null,
           parent: null,
-          values: {},
+          items: {},
           environments: {},
         }),
       ).rejects.toThrow(SmplValidationError);
@@ -417,7 +429,7 @@ describe("ConfigClient", () => {
           key: "test",
           description: null,
           parent: null,
-          values: {},
+          items: {},
           environments: {},
         }),
       ).rejects.toThrow(SmplValidationError);
@@ -434,7 +446,7 @@ describe("ConfigClient", () => {
           key: "test",
           description: null,
           parent: null,
-          values: {},
+          items: {},
           environments: {},
         }),
       ).rejects.toThrow(SmplConnectionError);
@@ -450,13 +462,13 @@ describe("ConfigClient", () => {
         key: "user_service",
         description: null,
         parent: null,
-        values: {},
+        items: {},
         environments: { production: { values: { x: 1 } } },
       });
 
       const body = (await calledBodyJson()) as Record<string, unknown>;
       const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
-      expect(attrs.environments).toEqual({ production: { values: { x: 1 } } });
+      expect(attrs.environments).toEqual({ production: { values: { x: { value: 1 } } } });
     });
   });
 
@@ -514,7 +526,7 @@ describe("ConfigClient", () => {
           key: "test",
           description: null,
           parent: null,
-          values: {},
+          items: {},
           environments: {},
         }),
       ).rejects.toThrow(SmplValidationError);

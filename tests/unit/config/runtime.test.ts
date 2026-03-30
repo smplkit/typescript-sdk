@@ -57,7 +57,7 @@ function makeChain(overrides?: Partial<ChainConfig>): ChainConfig[] {
   return [
     {
       id: "cfg-1",
-      values: { timeout: 30, retries: 3, name: "test" },
+      items: { timeout: 30, retries: 3, name: "test" },
       environments: {
         production: { values: { timeout: 60, retries: 5 } },
       },
@@ -145,7 +145,7 @@ describe("ConfigRuntime", () => {
     });
 
     it("getBool should return boolean or default", async () => {
-      const chain = makeChain({ values: { flag: true, timeout: 30 } });
+      const chain = makeChain({ items: { flag: true, timeout: 30 } });
       const rt = new ConfigRuntime(makeOptions({ chain }));
       expect(rt.getBool("flag")).toBe(true);
       expect(rt.getBool("timeout")).toBeNull();
@@ -440,7 +440,7 @@ describe("ConfigRuntime", () => {
       const chain: ChainConfig[] = [
         {
           id: "cfg-1",
-          values: { x: 1 },
+          items: { x: 1 },
           environments: { production: null as unknown as Record<string, unknown> },
         },
       ];
@@ -587,7 +587,7 @@ describe("ConfigRuntime", () => {
       const updatedChain: ChainConfig[] = [
         {
           id: "cfg-1",
-          values: { timeout: 30, retries: 10, name: "updated" },
+          items: { timeout: 30, retries: 10, name: "updated" },
           environments: {
             production: { values: { timeout: 120, retries: 15 } },
           },
@@ -681,7 +681,7 @@ describe("ConfigRuntime", () => {
       const updatedChain: ChainConfig[] = [
         {
           id: "cfg-1",
-          values: { timeout: 999, retries: 3, name: "refreshed" },
+          items: { timeout: 999, retries: 3, name: "refreshed" },
           environments: { production: { values: { timeout: 1000 } } },
         },
       ];
