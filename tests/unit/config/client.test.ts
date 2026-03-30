@@ -311,6 +311,28 @@ describe("ConfigClient", () => {
       expect(config.environments).toEqual({});
     });
 
+    it("should pass through environment entries without values when parsing response", async () => {
+      const resource = {
+        ...SAMPLE_RESOURCE,
+        attributes: {
+          ...SAMPLE_RESOURCE.attributes,
+          environments: {
+            staging: { description: "no values key" },
+            legacy: null,
+          },
+        },
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
+
+      const client = makeClient();
+      const config = await client.get({ id: SAMPLE_RESOURCE.id });
+
+      expect(config.environments).toEqual({
+        staging: { description: "no values key" },
+        legacy: null,
+      });
+    });
+
     it("should handle null timestamps", async () => {
       const resource = {
         ...SAMPLE_RESOURCE,
@@ -450,6 +472,44 @@ describe("ConfigClient", () => {
           environments: {},
         }),
       ).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should pass through environment entries without values property", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
+
+      const client = makeClient();
+      await client._updateConfig({
+        configId: SAMPLE_RESOURCE.id,
+        name: "User Service",
+        key: "user_service",
+        description: null,
+        parent: null,
+        items: {},
+        environments: { staging: { description: "no values here" } },
+      });
+
+      const body = (await calledBodyJson()) as Record<string, unknown>;
+      const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
+      expect(attrs.environments).toEqual({ staging: { description: "no values here" } });
+    });
+
+    it("should pass through non-object environment entries (e.g. null or primitive)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
+
+      const client = makeClient();
+      await client._updateConfig({
+        configId: SAMPLE_RESOURCE.id,
+        name: "User Service",
+        key: "user_service",
+        description: null,
+        parent: null,
+        items: {},
+        environments: { staging: null as unknown, legacy: "disabled" as unknown },
+      });
+
+      const body = (await calledBodyJson()) as Record<string, unknown>;
+      const attrs = (body.data as Record<string, unknown>).attributes as Record<string, unknown>;
+      expect(attrs.environments).toEqual({ staging: null, legacy: "disabled" });
     });
 
     it("should include environments in the PUT body", async () => {
