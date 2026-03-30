@@ -47,7 +47,10 @@ function extractItemValues(
  * @internal
  */
 function extractEnvironments(
-  environments: Record<string, { values?: Record<string, { value: unknown }> | null }> | null | undefined,
+  environments:
+    | Record<string, { values?: Record<string, { value: unknown }> | null }>
+    | null
+    | undefined,
 ): Record<string, unknown> {
   if (!environments) return {};
   const result: Record<string, unknown> = {};
@@ -76,7 +79,10 @@ function resourceToConfig(resource: ConfigResource, client: ConfigClient): Confi
     parent: attrs.parent ?? null,
     items: extractItemValues(attrs.items as Record<string, { value: unknown }> | null | undefined),
     environments: extractEnvironments(
-      attrs.environments as Record<string, { values?: Record<string, { value: unknown }> | null }> | null | undefined,
+      attrs.environments as
+        | Record<string, { values?: Record<string, { value: unknown }> | null }>
+        | null
+        | undefined,
     ),
     createdAt: attrs.created_at ? new Date(attrs.created_at) : null,
     updatedAt: attrs.updated_at ? new Date(attrs.updated_at) : null,
