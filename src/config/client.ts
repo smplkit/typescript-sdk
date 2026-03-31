@@ -21,8 +21,8 @@ import type { ConfigUpdatePayload, CreateConfigOptions, GetConfigOptions } from 
 
 const BASE_URL = "https://config.smplkit.com";
 
-type ApiConfig = components["schemas"]["Config-Input"];
-type ApiConfigOutput = components["schemas"]["Config-Output"];
+type ApiConfig = components["schemas"]["Config"];
+type ApiConfigOutput = components["schemas"]["Config"];
 type ConfigResource = components["schemas"]["ConfigResource"];
 
 /**

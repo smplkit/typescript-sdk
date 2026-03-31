@@ -79,7 +79,9 @@ describe("resolveApiKey", () => {
   });
 
   it("should ignore comments", () => {
-    mockReadFileSync.mockReturnValue("# comment\n[default]\n# another comment\napi_key = sk_api_comment\n");
+    mockReadFileSync.mockReturnValue(
+      "# comment\n[default]\n# another comment\napi_key = sk_api_comment\n",
+    );
     expect(resolveApiKey()).toBe("sk_api_comment");
   });
 
