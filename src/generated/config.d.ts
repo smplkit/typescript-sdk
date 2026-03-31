@@ -79,63 +79,7 @@ export interface components {
          *       "updated_at": "2026-03-27T10:00:00Z"
          *     }
          */
-        "Config-Input": {
-            /** Key */
-            key?: string | null;
-            /** Name */
-            name: string;
-            /** Description */
-            description?: string | null;
-            /** Parent */
-            parent?: string | null;
-            /** Items */
-            items?: {
-                [key: string]: components["schemas"]["ConfigItemDefinition"];
-            } | null;
-            /** Environments */
-            environments?: {
-                [key: string]: components["schemas"]["EnvironmentOverride"];
-            } | null;
-            /** Created At */
-            readonly created_at?: string | null;
-            /** Updated At */
-            readonly updated_at?: string | null;
-        };
-        /**
-         * Config
-         * @example {
-         *       "created_at": "2026-03-27T10:00:00Z",
-         *       "description": "Database configuration",
-         *       "environments": {
-         *         "prod": {
-         *           "values": {
-         *             "host": {
-         *               "value": "db-prod.internal"
-         *             },
-         *             "pool_size": {
-         *               "value": 20
-         *             }
-         *           }
-         *         }
-         *       },
-         *       "items": {
-         *         "host": {
-         *           "description": "Primary database hostname",
-         *           "type": "STRING",
-         *           "value": "db.internal"
-         *         },
-         *         "pool_size": {
-         *           "description": "Connection pool size",
-         *           "type": "NUMBER",
-         *           "value": 10
-         *         }
-         *       },
-         *       "key": "database",
-         *       "name": "Database",
-         *       "updated_at": "2026-03-27T10:00:00Z"
-         *     }
-         */
-        "Config-Output": {
+        Config: {
             /** Key */
             key?: string | null;
             /** Name */
@@ -220,7 +164,7 @@ export interface components {
              * @constant
              */
             type: "config";
-            attributes: components["schemas"]["Config-Output"];
+            attributes: components["schemas"]["Config"];
         };
         /** ConfigResponse */
         ConfigResponse: {
@@ -250,7 +194,7 @@ export interface components {
              * @default
              */
             type: string;
-            attributes: components["schemas"]["Config-Input"];
+            attributes: components["schemas"]["Config"];
         };
         /** Response[Config] */
         Response_Config_: {
