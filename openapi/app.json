@@ -2663,83 +2663,21 @@
         }
       }
     },
-    "/api/v1/limits": {
+    "/api/v1/products": {
       "get": {
         "tags": [
-          "Plans"
+          "Products"
         ],
-        "summary": "List Limits",
-        "description": "Return all limit definitions as JSON:API resources.",
-        "operationId": "list_limits",
+        "summary": "List Products",
+        "description": "Return all products with their plans and limits as JSON:API resources.",
+        "operationId": "list_products",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/vnd.api+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LimitListResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error or malformed request",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid authentication",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/plans": {
-      "get": {
-        "tags": [
-          "Plans"
-        ],
-        "summary": "List Plans",
-        "description": "Return all subscription plans as JSON:API resources.",
-        "operationId": "list_plans",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlanListResponse"
+                  "$ref": "#/components/schemas/ProductListResponse"
                 }
               }
             }
@@ -3479,7 +3417,7 @@
         ],
         "title": "InvitationResponse"
       },
-      "Limit": {
+      "LimitDefinition": {
         "properties": {
           "display_name": {
             "type": "string",
@@ -3511,52 +3449,7 @@
           "description",
           "unit"
         ],
-        "title": "Limit"
-      },
-      "LimitListResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/LimitResource"
-            },
-            "type": "array",
-            "title": "Data"
-          }
-        },
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "title": "LimitListResponse"
-      },
-      "LimitResource": {
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "type": {
-            "type": "string",
-            "const": "limit",
-            "title": "Type"
-          },
-          "attributes": {
-            "$ref": "#/components/schemas/Limit"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "attributes"
-        ],
-        "title": "LimitResource"
+        "title": "LimitDefinition"
       },
       "LoginRequest": {
         "properties": {
@@ -3587,7 +3480,7 @@
         ],
         "title": "OidcProvider"
       },
-      "Plan": {
+      "PlanDefinition": {
         "properties": {
           "display_name": {
             "type": "string",
@@ -3616,13 +3509,47 @@
           "price_monthly_cents",
           "limits"
         ],
-        "title": "Plan"
+        "title": "PlanDefinition"
       },
-      "PlanListResponse": {
+      "Product": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "limits": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LimitDefinition"
+            },
+            "type": "object",
+            "title": "Limits"
+          },
+          "plans": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanDefinition"
+            },
+            "type": "object",
+            "title": "Plans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "description",
+          "limits",
+          "plans"
+        ],
+        "title": "Product"
+      },
+      "ProductListResponse": {
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/PlanResource"
+              "$ref": "#/components/schemas/ProductResource"
             },
             "type": "array",
             "title": "Data"
@@ -3632,9 +3559,9 @@
         "required": [
           "data"
         ],
-        "title": "PlanListResponse"
+        "title": "ProductListResponse"
       },
-      "PlanResource": {
+      "ProductResource": {
         "properties": {
           "id": {
             "anyOf": [
@@ -3649,11 +3576,11 @@
           },
           "type": {
             "type": "string",
-            "const": "plan",
+            "const": "product",
             "title": "Type"
           },
           "attributes": {
-            "$ref": "#/components/schemas/Plan"
+            "$ref": "#/components/schemas/Product"
           }
         },
         "type": "object",
@@ -3661,7 +3588,7 @@
           "type",
           "attributes"
         ],
-        "title": "PlanResource"
+        "title": "ProductResource"
       },
       "RegisterRequest": {
         "properties": {
@@ -4001,7 +3928,7 @@
       "name": "Users"
     },
     {
-      "name": "Plans"
+      "name": "Products"
     }
   ]
 }
