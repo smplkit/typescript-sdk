@@ -11,7 +11,9 @@ const NO_API_KEY_MESSAGE =
   "No API key provided. Set one of:\n" +
   "  1. Pass apiKey to the constructor\n" +
   "  2. Set the SMPLKIT_API_KEY environment variable\n" +
-  "  3. Add api_key to [default] in ~/.smplkit";
+  "  3. Create a ~/.smplkit file with:\n" +
+  "     [default]\n" +
+  "     api_key = your_key_here";
 
 export function resolveApiKey(explicit?: string): string {
   if (explicit) return explicit;
@@ -22,8 +24,22 @@ export function resolveApiKey(explicit?: string): string {
   const configPath = join(homedir(), ".smplkit");
   try {
     const content = readFileSync(configPath, "utf-8");
-    const match = content.match(/\[default\]\s*[\s\S]*?api_key\s*=\s*"([^"]+)"/);
-    if (match?.[1]) return match[1];
+    let inDefaultSection = false;
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      if (trimmed.startsWith("[")) {
+        inDefaultSection = trimmed.toLowerCase() === "[default]";
+        continue;
+      }
+      if (inDefaultSection && trimmed.startsWith("api_key")) {
+        const eqIndex = trimmed.indexOf("=");
+        if (eqIndex !== -1) {
+          const value = trimmed.slice(eqIndex + 1).trim();
+          if (value) return value;
+        }
+      }
+    }
   } catch {
     // File doesn't exist or isn't readable — skip
   }

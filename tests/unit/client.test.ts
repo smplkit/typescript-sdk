@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SmplClient } from "../../src/client.js";
 import { SmplError } from "../../src/errors.js";
@@ -5,6 +8,8 @@ import { ConfigClient } from "../../src/config/client.js";
 
 describe("SmplClient", () => {
   it("should throw SmplError when no apiKey and no env/config fallback", () => {
+    // Skip if a config file exists on this machine (CI has no ~/.smplkit)
+    if (existsSync(join(homedir(), ".smplkit"))) return;
     const original = process.env.SMPLKIT_API_KEY;
     delete process.env.SMPLKIT_API_KEY;
     try {
