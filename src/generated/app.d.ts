@@ -354,6 +354,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plans
+         * @description Return all plan tier definitions as JSON:API resources.
+         */
+        get: operations["list_plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products": {
         parameters: {
             query?: never;
@@ -720,18 +740,39 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
-        /** PlanDefinition */
-        PlanDefinition: {
+        /** Plan */
+        Plan: {
             /** Display Name */
             display_name: string;
             /** Description */
             description: string;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** PlanDefinition */
+        PlanDefinition: {
             /** Price Monthly Cents */
             price_monthly_cents: number;
             /** Limits */
             limits: {
                 [key: string]: number;
             };
+        };
+        /** PlanListResponse */
+        PlanListResponse: {
+            /** Data */
+            data: components["schemas"]["PlanResource"][];
+        };
+        /** PlanResource */
+        PlanResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "plan";
+            attributes: components["schemas"]["Plan"];
         };
         /** Product */
         Product: {
@@ -2875,6 +2916,62 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_plans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["PlanListResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
