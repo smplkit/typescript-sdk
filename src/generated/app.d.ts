@@ -212,6 +212,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/context_types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Context Types */
+        get: operations["list_context_types"];
+        put?: never;
+        /** Create Context Type */
+        post: operations["create_context_type"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/context_types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Context Type */
+        get: operations["get_context_type"];
+        /** Update Context Type */
+        put: operations["update_context_type"];
+        post?: never;
+        /** Delete Context Type */
+        delete: operations["delete_context_type"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contexts/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Register Contexts */
+        post: operations["bulk_register_contexts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contexts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contexts */
+        get: operations["list_contexts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contexts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Context */
+        get: operations["get_context"];
+        put?: never;
+        post?: never;
+        /** Delete Context */
+        delete: operations["delete_context"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/services": {
         parameters: {
             query?: never;
@@ -543,6 +632,153 @@ export interface components {
             expires_in: number;
         };
         /**
+         * Context
+         * @example {
+         *       "attributes": {
+         *         "first_name": "Alice",
+         *         "plan": "enterprise"
+         *       },
+         *       "context_type": "user",
+         *       "created_at": "2026-03-31T10:00:00Z",
+         *       "key": "123",
+         *       "name": "Alice Smith",
+         *       "updated_at": "2026-03-31T10:00:00Z"
+         *     }
+         */
+        Context: {
+            /**
+             * Key
+             * @description Entity identifier: user-123, acme-corp
+             */
+            key: string;
+            /**
+             * Name
+             * @description Human-readable display name
+             * @default
+             */
+            name: string;
+            /**
+             * Context Type
+             * @description Context type key (e.g., 'user', 'account')
+             */
+            context_type: string;
+            /**
+             * Attributes
+             * @description Observed attributes
+             */
+            attributes?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+        };
+        /** ContextBatchResponse */
+        ContextBatchResponse: {
+            /** Registered */
+            registered: number;
+        };
+        /** ContextBulkItem */
+        ContextBulkItem: {
+            /**
+             * Id
+             * @description Composite logical ID: type:key (e.g., 'user:123')
+             */
+            id: string;
+            /**
+             * Name
+             * @description Human-readable display name; defaults to key
+             */
+            name?: string | null;
+            /** Attributes */
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ContextBulkRegister */
+        ContextBulkRegister: {
+            /** Contexts */
+            contexts: components["schemas"]["ContextBulkItem"][];
+        };
+        /** ContextListResponse */
+        ContextListResponse: {
+            /** Data */
+            data: components["schemas"]["ContextResource"][];
+        };
+        /** ContextResource */
+        ContextResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "context";
+            attributes: components["schemas"]["Context"];
+        };
+        /** ContextResponse */
+        ContextResponse: {
+            data: components["schemas"]["ContextResource"];
+        };
+        /**
+         * ContextType
+         * @example {
+         *       "attributes": {
+         *         "beta_tester": {},
+         *         "first_name": {},
+         *         "plan": {}
+         *       },
+         *       "created_at": "2026-03-31T10:00:00Z",
+         *       "key": "user",
+         *       "name": "User",
+         *       "updated_at": "2026-03-31T10:00:00Z"
+         *     }
+         */
+        ContextType: {
+            /**
+             * Key
+             * @description Programmatic identifier: user, account, device
+             */
+            key: string;
+            /**
+             * Name
+             * @description Display label: User, Account, Device
+             */
+            name: string;
+            /**
+             * Attributes
+             * @description Known attribute keys with metadata objects
+             */
+            attributes?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+        };
+        /** ContextTypeListResponse */
+        ContextTypeListResponse: {
+            /** Data */
+            data: components["schemas"]["ContextTypeResource"][];
+        };
+        /** ContextTypeResource */
+        ContextTypeResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "context_type";
+            attributes: components["schemas"]["ContextType"];
+        };
+        /** ContextTypeResponse */
+        ContextTypeResponse: {
+            data: components["schemas"]["ContextTypeResource"];
+        };
+        /**
          * Environment
          * @example {
          *       "color": "#2ecc71",
@@ -780,6 +1016,11 @@ export interface components {
             display_name: string;
             /** Description */
             description: string;
+            /**
+             * Coming Soon
+             * @default false
+             */
+            coming_soon: boolean;
             /** Limits */
             limits: {
                 [key: string]: components["schemas"]["LimitDefinition"];
@@ -2096,6 +2337,530 @@ export interface operations {
                 content: {
                     "application/vnd.api+json": components["schemas"]["ApiKeyResponse"];
                 };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_context_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextTypeListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_context_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_context_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_context_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_context_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bulk_register_contexts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ContextBulkRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextBatchResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_contexts: {
+        parameters: {
+            query?: {
+                "filter[context_type_id]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_context: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_context: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
