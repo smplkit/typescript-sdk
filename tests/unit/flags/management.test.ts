@@ -331,7 +331,7 @@ describe("FlagsClient management", () => {
       await client._updateFlag({ flag, default: true });
 
       const body = JSON.parse(await mockFetch.mock.calls[1][0].text());
-      expect(body.data.attributes.description).toBeUndefined();
+      expect(body.data.attributes.description).toBe("");
     });
 
     it("should include new description when provided", async () => {

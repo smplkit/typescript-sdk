@@ -460,10 +460,10 @@ export class FlagsClient {
         attributes: {
           key,
           name: options.name,
+          description: options.description ?? "",
           type: options.type,
           default: options.default,
           values: values ?? [],
-          ...(options.description !== undefined ? { description: options.description } : {}),
         },
       },
     };
@@ -546,11 +546,8 @@ export class FlagsClient {
           type: flag.type,
           default: options.default !== undefined ? options.default : flag.default,
           values: options.values !== undefined ? options.values : flag.values,
-          ...(options.description !== undefined
-            ? { description: options.description }
-            : flag.description !== null
-              ? { description: flag.description }
-              : {}),
+          description:
+            options.description !== undefined ? options.description : (flag.description ?? ""),
           ...(options.environments !== undefined
             ? { environments: options.environments }
             : flag.environments && Object.keys(flag.environments).length > 0

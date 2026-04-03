@@ -403,9 +403,7 @@ describe("ConfigRuntime", () => {
 
       const fetchChain = vi.fn().mockResolvedValue(updatedChain);
       const ws = createMockSharedWs();
-      const rt = new ConfigRuntime(
-        makeOptions({ sharedWs: ws as never, fetchChain }),
-      );
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never, fetchChain }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
@@ -434,9 +432,7 @@ describe("ConfigRuntime", () => {
 
       const fetchChain = vi.fn().mockRejectedValue(new Error("network error"));
       const ws = createMockSharedWs();
-      const rt = new ConfigRuntime(
-        makeOptions({ sharedWs: ws as never, fetchChain }),
-      );
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never, fetchChain }));
 
       // Emit config_changed without changes — triggers re-fetch which fails
       ws._emit("config_changed", { config_id: "cfg-1" });
