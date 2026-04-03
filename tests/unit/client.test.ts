@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SmplClient } from "../../src/client.js";
 import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
+import { FlagsClient } from "../../src/flags/client.js";
 
 describe("SmplClient", () => {
   it("should throw SmplError when no apiKey and no env/config fallback", () => {
@@ -44,5 +45,15 @@ describe("SmplClient", () => {
     });
     expect(client).toBeInstanceOf(SmplClient);
     expect(client.config).toBeInstanceOf(ConfigClient);
+  });
+
+  it("should expose a flags sub-client", () => {
+    const client = new SmplClient({ apiKey: "sk_api_test" });
+    expect(client.flags).toBeInstanceOf(FlagsClient);
+  });
+
+  it("should close without error when no WS is active", () => {
+    const client = new SmplClient({ apiKey: "sk_api_test" });
+    expect(() => client.close()).not.toThrow();
   });
 });

@@ -68,6 +68,7 @@
     "vitest": "^1.0.0"
   },
   "dependencies": {
+    "json-logic-js": "^2.0.5",
     "openapi-fetch": "^0.17.0",
     "ws": "^8.20.0"
   }

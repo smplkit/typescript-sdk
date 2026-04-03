@@ -225,6 +225,9 @@ export class ConfigClient {
   /** @internal */
   private readonly _http: ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
 
+  /** @internal — returns the shared WebSocket for real-time updates. */
+  _getSharedWs?: () => import("../ws.js").SharedWebSocket;
+
   /** @internal */
   constructor(apiKey: string, timeout?: number) {
     this._apiKey = apiKey;

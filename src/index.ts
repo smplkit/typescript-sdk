@@ -22,6 +22,27 @@ export type {
   ConnectOptions,
 } from "./config/runtime-types.js";
 
+// Flags — public types
+export { Context, Rule } from "./flags/types.js";
+export type { FlagType } from "./flags/types.js";
+
+// Flags — management plane
+export { FlagsClient } from "./flags/client.js";
+export { Flag, ContextType } from "./flags/models.js";
+
+// Flags — runtime plane
+export {
+  BoolFlagHandle,
+  StringFlagHandle,
+  NumberFlagHandle,
+  JsonFlagHandle,
+  FlagChangeEvent,
+  FlagStats,
+} from "./flags/client.js";
+
+// Shared WebSocket
+export { SharedWebSocket } from "./ws.js";
+
 // Error hierarchy
 export {
   SmplError,

@@ -71,6 +71,7 @@ export class Config {
     get(options: { id: string }): Promise<Config>;
     readonly _apiKey: string;
     readonly _baseUrl: string;
+    _getSharedWs?: () => import("../ws.js").SharedWebSocket;
   };
 
   /** @internal */
@@ -80,6 +81,7 @@ export class Config {
       get(options: { id: string }): Promise<Config>;
       readonly _apiKey: string;
       readonly _baseUrl: string;
+      _getSharedWs?: () => import("../ws.js").SharedWebSocket;
     },
     fields: {
       id: string;
@@ -251,6 +253,7 @@ export class Config {
       apiKey: this._client._apiKey,
       baseUrl: this._client._baseUrl,
       fetchChain: () => this._buildChain(timeout),
+      sharedWs: this._client._getSharedWs ? this._client._getSharedWs() : null,
     });
   }
 

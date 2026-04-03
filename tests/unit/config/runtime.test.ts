@@ -3,55 +3,45 @@ import type { ConfigRuntimeOptions } from "../../../src/config/runtime.js";
 import type { ChainConfig } from "../../../src/config/resolve.js";
 import type { ConfigChangeEvent } from "../../../src/config/runtime-types.js";
 
-// Track all created mock WS instances
-let wsInstances: MockWsInstance[] = [];
-
-interface MockWsInstance {
+// Create a mock SharedWebSocket to pass into ConfigRuntime
+interface MockSharedWs {
   on: ReturnType<typeof vi.fn>;
-  send: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  _listeners: Record<string, ((...args: unknown[]) => void)[]>;
-  _emit: (event: string, ...args: unknown[]) => void;
+  off: ReturnType<typeof vi.fn>;
+  connectionStatus: string;
+  _listeners: Record<string, Array<(data: Record<string, unknown>) => void>>;
+  _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
-function createMockWs(): MockWsInstance {
-  const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
-  const instance: MockWsInstance = {
-    on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+function createMockSharedWs(): MockSharedWs {
+  const listeners: Record<string, Array<(data: Record<string, unknown>) => void>> = {};
+  const mock: MockSharedWs = {
+    on: vi.fn((event: string, cb: (data: Record<string, unknown>) => void) => {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(cb);
     }),
-    send: vi.fn(),
-    close: vi.fn(),
+    off: vi.fn((event: string, cb: (data: Record<string, unknown>) => void) => {
+      const list = listeners[event];
+      if (list) {
+        const idx = list.indexOf(cb);
+        if (idx !== -1) list.splice(idx, 1);
+      }
+    }),
+    connectionStatus: "connected",
     _listeners: listeners,
-    _emit: (event: string, ...args: unknown[]) => {
-      for (const cb of listeners[event] ?? []) cb(...args);
+    _emit: (event: string, data: Record<string, unknown>) => {
+      for (const cb of listeners[event] ?? []) cb(data);
     },
   };
-  wsInstances.push(instance);
-  return instance;
+  return mock;
 }
 
-let shouldThrowOnConstruct = false;
-
+// Mock the ws module so ConfigRuntime doesn't try to import it
 vi.mock("ws", () => {
-  const MockWebSocket = vi.fn().mockImplementation(() => {
-    if (shouldThrowOnConstruct) {
-      shouldThrowOnConstruct = false;
-      throw new Error("connection refused");
-    }
-    return createMockWs();
-  });
-  return { default: MockWebSocket };
+  return { default: vi.fn() };
 });
 
-// Must import AFTER vi.mock
-import WebSocket from "ws";
+// Import ConfigRuntime after mock
 const { ConfigRuntime } = await import("../../../src/config/runtime.js");
-
-function getLastWsInstance(): MockWsInstance {
-  return wsInstances[wsInstances.length - 1];
-}
 
 function makeChain(overrides?: Partial<ChainConfig>): ChainConfig[] {
   return [
@@ -81,9 +71,6 @@ function makeOptions(overrides?: Partial<ConfigRuntimeOptions>): ConfigRuntimeOp
 
 beforeEach(() => {
   vi.useFakeTimers();
-  wsInstances = [];
-  (WebSocket as unknown as ReturnType<typeof vi.fn>).mockClear();
-  shouldThrowOnConstruct = false;
 });
 
 afterEach(async () => {
@@ -108,11 +95,11 @@ describe("ConfigRuntime", () => {
       await rt.close();
     });
 
-    it("should start WebSocket connection", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      expect(WebSocket).toHaveBeenCalledTimes(1);
-      const wsUrl = (WebSocket as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(wsUrl).toBe("wss://config.smplkit.com/api/ws/v1/configs?api_key=sk_test");
+    it("should register on shared WebSocket when provided", async () => {
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
+      expect(ws.on).toHaveBeenCalledWith("config_changed", expect.any(Function));
+      expect(ws.on).toHaveBeenCalledWith("config_deleted", expect.any(Function));
       await rt.close();
     });
   });
@@ -172,101 +159,40 @@ describe("ConfigRuntime", () => {
   });
 
   describe("connectionStatus", () => {
-    it("should report connecting initially", async () => {
+    it("should report disconnected when no shared WS", async () => {
       const rt = new ConfigRuntime(makeOptions());
-      expect(rt.connectionStatus()).toBe("connecting");
+      expect(rt.connectionStatus()).toBe("disconnected");
       await rt.close();
     });
 
-    it("should report connected after WebSocket open", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+    it("should report shared WS status when shared WS is provided", async () => {
+      const ws = createMockSharedWs();
+      ws.connectionStatus = "connected";
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
       expect(rt.connectionStatus()).toBe("connected");
       await rt.close();
     });
 
     it("should report disconnected after close", async () => {
-      const rt = new ConfigRuntime(makeOptions());
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
       await rt.close();
       expect(rt.connectionStatus()).toBe("disconnected");
     });
   });
 
-  describe("WebSocket URL building", () => {
-    it("should convert https to wss", async () => {
-      const rt = new ConfigRuntime(makeOptions({ baseUrl: "https://example.com" }));
-      const wsUrl = (WebSocket as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(wsUrl).toMatch(/^wss:\/\/example\.com/);
-      await rt.close();
-    });
-
-    it("should convert http to ws", async () => {
-      const rt = new ConfigRuntime(makeOptions({ baseUrl: "http://localhost:3000" }));
-      const wsUrl = (WebSocket as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(wsUrl).toMatch(/^ws:\/\/localhost:3000/);
-      await rt.close();
-    });
-
-    it("should default to wss for bare hostnames", async () => {
-      const rt = new ConfigRuntime(makeOptions({ baseUrl: "config.smplkit.com" }));
-      const wsUrl = (WebSocket as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(wsUrl).toMatch(/^wss:\/\/config\.smplkit\.com/);
-      await rt.close();
-    });
-
-    it("should strip trailing slash from base URL", async () => {
-      const rt = new ConfigRuntime(makeOptions({ baseUrl: "https://example.com/" }));
-      const wsUrl = (WebSocket as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(wsUrl).toContain("wss://example.com/api/ws/v1/configs");
-      expect(wsUrl).not.toContain("//api");
-      await rt.close();
-    });
-  });
-
-  describe("WebSocket open sends subscribe", () => {
-    it("should send subscribe message on open", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
-
-      expect(ws.send).toHaveBeenCalledWith(
-        JSON.stringify({
-          type: "subscribe",
-          config_id: "cfg-1",
-          environment: "production",
-        }),
-      );
-      await rt.close();
-    });
-
-    it("should close ws immediately if runtime was closed before open fires", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      await rt.close();
-
-      ws._emit("open");
-      expect(ws.close).toHaveBeenCalled();
-    });
-  });
-
-  describe("WebSocket message handling", () => {
-    it("should apply config_changed messages and fire listeners", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+  describe("SharedWebSocket event handling", () => {
+    it("should apply config_changed events and fire listeners", async () => {
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "retries", old_value: 5, new_value: 10 }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "retries", old_value: 5, new_value: 10 }],
+      });
 
       expect(rt.get("retries")).toBe(10);
       expect(events).toHaveLength(1);
@@ -278,65 +204,25 @@ describe("ConfigRuntime", () => {
     });
 
     it("should handle config_deleted by closing", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_deleted",
-          config_id: "cfg-1",
-        }),
-      );
+      ws._emit("config_deleted", { config_id: "cfg-1" });
 
       expect(rt.connectionStatus()).toBe("disconnected");
     });
 
-    it("should ignore messages for unknown config IDs", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+    it("should ignore changes for unknown config IDs", async () => {
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "unknown-id",
-          changes: [{ key: "x", old_value: 1, new_value: 2 }],
-        }),
-      );
-
-      expect(events).toHaveLength(0);
-      await rt.close();
-    });
-
-    it("should ignore unparseable messages", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
-
-      ws._emit("message", "not json {{{");
-      expect(rt.get("timeout")).toBe(60);
-      await rt.close();
-    });
-
-    it("should ignore subscribed and error message types", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
-
-      const events: ConfigChangeEvent[] = [];
-      rt.onChange((e: ConfigChangeEvent) => events.push(e));
-
-      ws._emit(
-        "message",
-        JSON.stringify({ type: "subscribed", config_id: "cfg-1", environment: "production" }),
-      );
-      ws._emit("message", JSON.stringify({ type: "error", message: "some error" }));
+      ws._emit("config_changed", {
+        config_id: "unknown-id",
+        changes: [{ key: "x", old_value: 1, new_value: 2 }],
+      });
 
       expect(events).toHaveLength(0);
       await rt.close();
@@ -345,98 +231,72 @@ describe("ConfigRuntime", () => {
 
   describe("_applyChanges edge cases", () => {
     it("should handle deletion (new_value null)", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "retries", old_value: 5, new_value: null }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "retries", old_value: 5, new_value: null }],
+      });
 
       expect(rt.exists("retries")).toBe(false);
       await rt.close();
     });
 
     it("should handle deletion with undefined new_value", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "retries", old_value: 5 }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "retries", old_value: 5 }],
+      });
 
-      // undefined serializes to absent in JSON, which becomes undefined on parse
-      // The code checks `new_value === null || new_value === undefined`
       expect(rt.exists("retries")).toBe(false);
       await rt.close();
     });
 
     it("should add new keys to base values", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "brand_new_key", old_value: null, new_value: "hello" }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "brand_new_key", old_value: null, new_value: "hello" }],
+      });
 
       expect(rt.get("brand_new_key")).toBe("hello");
       await rt.close();
     });
 
     it("should update env-specific overrides when key exists in env values", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "timeout", old_value: 60, new_value: 120 }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "timeout", old_value: 60, new_value: 120 }],
+      });
 
       expect(rt.get("timeout")).toBe(120);
       await rt.close();
     });
 
     it("should update base values when key exists only in base", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "name", old_value: "test", new_value: "updated" }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "name", old_value: "test", new_value: "updated" }],
+      });
 
       expect(rt.get("name")).toBe("updated");
       await rt.close();
     });
 
     it("should handle changes when environment entry is null", async () => {
+      const ws = createMockSharedWs();
       const chain: ChainConfig[] = [
         {
           id: "cfg-1",
@@ -444,36 +304,25 @@ describe("ConfigRuntime", () => {
           environments: { production: null as unknown as Record<string, unknown> },
         },
       ];
-      const rt = new ConfigRuntime(makeOptions({ chain }));
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const rt = new ConfigRuntime(makeOptions({ chain, sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "x", old_value: 1, new_value: 2 }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "x", old_value: 1, new_value: 2 }],
+      });
 
       expect(rt.get("x")).toBe(2);
       await rt.close();
     });
 
     it("should handle deletion from env values", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "timeout", old_value: 60, new_value: null }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "timeout", old_value: 60, new_value: null }],
+      });
 
       expect(rt.exists("timeout")).toBe(false);
       await rt.close();
@@ -482,48 +331,38 @@ describe("ConfigRuntime", () => {
 
   describe("onChange listeners", () => {
     it("should fire for all changes when no key filter", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [
-            { key: "retries", old_value: 5, new_value: 7 },
-            { key: "name", old_value: "test", new_value: "updated" },
-          ],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [
+          { key: "retries", old_value: 5, new_value: 7 },
+          { key: "name", old_value: "test", new_value: "updated" },
+        ],
+      });
 
       expect(events).toHaveLength(2);
       await rt.close();
     });
 
     it("should fire only for specific key when key filter is set", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e), { key: "retries" });
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [
-            { key: "retries", old_value: 5, new_value: 7 },
-            { key: "name", old_value: "test", new_value: "updated" },
-          ],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [
+          { key: "retries", old_value: 5, new_value: 7 },
+          { key: "name", old_value: "test", new_value: "updated" },
+        ],
+      });
 
       expect(events).toHaveLength(1);
       expect(events[0].key).toBe("retries");
@@ -531,9 +370,8 @@ describe("ConfigRuntime", () => {
     });
 
     it("should not crash if a listener throws", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange(() => {
@@ -541,35 +379,89 @@ describe("ConfigRuntime", () => {
       });
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "retries", old_value: 5, new_value: 7 }],
-        }),
-      );
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "retries", old_value: 5, new_value: 7 }],
+      });
 
       expect(events).toHaveLength(1);
       await rt.close();
     });
 
-    it("should not fire if values did not actually change", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-      ws._emit("open");
+    it("should full re-fetch when config_changed has no granular changes", async () => {
+      vi.useRealTimers();
+
+      const updatedChain: ChainConfig[] = [
+        {
+          id: "cfg-1",
+          items: { timeout: 99, retries: 3, name: "test" },
+          environments: {
+            production: { values: { timeout: 200, retries: 50 } },
+          },
+        },
+      ];
+
+      const fetchChain = vi.fn().mockResolvedValue(updatedChain);
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(
+        makeOptions({ sharedWs: ws as never, fetchChain }),
+      );
 
       const events: ConfigChangeEvent[] = [];
       rt.onChange((e: ConfigChangeEvent) => events.push(e));
 
-      ws._emit(
-        "message",
-        JSON.stringify({
-          type: "config_changed",
-          config_id: "cfg-1",
-          changes: [{ key: "retries", old_value: 5, new_value: 5 }],
-        }),
+      // Emit config_changed WITHOUT changes array (no granular changes)
+      ws._emit("config_changed", { config_id: "cfg-1" });
+
+      // Wait for the async re-fetch promise chain to settle
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(fetchChain).toHaveBeenCalledOnce();
+      expect(rt.get("timeout")).toBe(200);
+      expect(rt.get("retries")).toBe(50);
+      expect(events.length).toBeGreaterThan(0);
+      expect(events[0].source).toBe("websocket");
+
+      const stats = rt.stats();
+      expect(stats.fetchCount).toBe(2); // initial + re-fetch
+
+      await rt.close();
+      vi.useFakeTimers();
+    });
+
+    it("should ignore fetch errors during re-fetch on config_changed", async () => {
+      vi.useRealTimers();
+
+      const fetchChain = vi.fn().mockRejectedValue(new Error("network error"));
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(
+        makeOptions({ sharedWs: ws as never, fetchChain }),
       );
+
+      // Emit config_changed without changes — triggers re-fetch which fails
+      ws._emit("config_changed", { config_id: "cfg-1" });
+
+      // Wait for the promise to settle
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(fetchChain).toHaveBeenCalledOnce();
+      // Should not throw, values unchanged
+      expect(rt.get("timeout")).toBe(60);
+      await rt.close();
+      vi.useFakeTimers();
+    });
+
+    it("should not fire if values did not actually change", async () => {
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
+
+      const events: ConfigChangeEvent[] = [];
+      rt.onChange((e: ConfigChangeEvent) => events.push(e));
+
+      ws._emit("config_changed", {
+        config_id: "cfg-1",
+        changes: [{ key: "retries", old_value: 5, new_value: 5 }],
+      });
 
       expect(events).toHaveLength(0);
       await rt.close();
@@ -618,28 +510,21 @@ describe("ConfigRuntime", () => {
   });
 
   describe("close", () => {
-    it("should close WebSocket and clear timers", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
+    it("should unregister from shared WS on close", async () => {
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
 
       await rt.close();
 
-      expect(ws.close).toHaveBeenCalled();
+      expect(ws.off).toHaveBeenCalledWith("config_changed", expect.any(Function));
+      expect(ws.off).toHaveBeenCalledWith("config_deleted", expect.any(Function));
       expect(rt.connectionStatus()).toBe("disconnected");
     });
 
     it("should be safe to call multiple times", async () => {
-      const rt = new ConfigRuntime(makeOptions());
+      const ws = createMockSharedWs();
+      const rt = new ConfigRuntime(makeOptions({ sharedWs: ws as never }));
       await rt.close();
-      await rt.close();
-      expect(rt.connectionStatus()).toBe("disconnected");
-    });
-
-    it("should cancel pending reconnect timer", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-
-      ws._emit("close");
       await rt.close();
       expect(rt.connectionStatus()).toBe("disconnected");
     });
@@ -650,144 +535,6 @@ describe("ConfigRuntime", () => {
       const rt = new ConfigRuntime(makeOptions());
       await rt[Symbol.asyncDispose]();
       expect(rt.connectionStatus()).toBe("disconnected");
-    });
-  });
-
-  describe("reconnect behavior", () => {
-    it("should schedule reconnect on close event", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-
-      ws._emit("close");
-      expect(rt.connectionStatus()).toBe("connecting");
-
-      await rt.close();
-    });
-
-    it("should not reconnect if closed", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-
-      await rt.close();
-
-      const initialCallCount = wsInstances.length;
-      ws._emit("close");
-
-      vi.advanceTimersByTime(60_000);
-      expect(wsInstances.length).toBe(initialCallCount);
-    });
-
-    it("should resync cache on reconnect when fetchChain is available", async () => {
-      const updatedChain: ChainConfig[] = [
-        {
-          id: "cfg-1",
-          items: { timeout: 999, retries: 3, name: "refreshed" },
-          environments: { production: { values: { timeout: 1000 } } },
-        },
-      ];
-      const fetchChain = vi.fn().mockResolvedValue(updatedChain);
-      const rt = new ConfigRuntime(makeOptions({ fetchChain }));
-      const ws = getLastWsInstance();
-
-      ws._emit("close");
-
-      await vi.advanceTimersByTimeAsync(1100);
-
-      expect(fetchChain).toHaveBeenCalled();
-      expect(rt.get("timeout")).toBe(1000);
-
-      await rt.close();
-    });
-
-    it("should reconnect without fetchChain (no resync)", async () => {
-      const rt = new ConfigRuntime(makeOptions({ fetchChain: null }));
-      const ws = getLastWsInstance();
-
-      const initialCount = wsInstances.length;
-      ws._emit("close");
-
-      vi.advanceTimersByTime(1100);
-      expect(wsInstances.length).toBe(initialCount + 1);
-
-      await rt.close();
-    });
-
-    it("should handle fetchChain failure gracefully during reconnect", async () => {
-      const fetchChain = vi.fn().mockRejectedValue(new Error("network error"));
-      const rt = new ConfigRuntime(makeOptions({ fetchChain }));
-      const ws = getLastWsInstance();
-
-      ws._emit("close");
-      await vi.advanceTimersByTimeAsync(1100);
-
-      expect(wsInstances.length).toBeGreaterThan(1);
-
-      await rt.close();
-    });
-
-    it("should use exponential backoff", async () => {
-      const rt = new ConfigRuntime(makeOptions({ fetchChain: null }));
-
-      // First disconnect
-      getLastWsInstance()._emit("close");
-      vi.advanceTimersByTime(1100); // backoff[0] = 1000ms
-
-      getLastWsInstance()._emit("close");
-      vi.advanceTimersByTime(2100); // backoff[1] = 2000ms
-
-      expect(wsInstances.length).toBe(3);
-
-      await rt.close();
-    });
-
-    it("should not schedule reconnect if _scheduleReconnect is called after close", async () => {
-      const rt = new ConfigRuntime(makeOptions({ fetchChain: null }));
-      await rt.close();
-
-      const callCount = wsInstances.length;
-      vi.advanceTimersByTime(120_000);
-      expect(wsInstances.length).toBe(callCount);
-    });
-  });
-
-  describe("WebSocket constructor failure", () => {
-    it("should schedule reconnect if WebSocket constructor throws", async () => {
-      shouldThrowOnConstruct = true;
-
-      const rt = new ConfigRuntime(makeOptions({ fetchChain: null }));
-
-      // Should have tried once and failed, then schedule reconnect
-      vi.advanceTimersByTime(1100);
-
-      // A second WS attempt should have been made
-      expect(wsInstances.length).toBe(1); // only the reconnect succeeded
-
-      await rt.close();
-    });
-  });
-
-  describe("WebSocket error event", () => {
-    it("should handle error event (close will follow)", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const ws = getLastWsInstance();
-
-      ws._emit("error", new Error("ws error"));
-      ws._emit("close");
-
-      expect(rt.connectionStatus()).toBe("connecting");
-      await rt.close();
-    });
-  });
-
-  describe("_connectWebSocket when already closed", () => {
-    it("should not create WebSocket when already closed", async () => {
-      const rt = new ConfigRuntime(makeOptions());
-      const initialCount = wsInstances.length;
-
-      await rt.close();
-
-      vi.advanceTimersByTime(120_000);
-      expect(wsInstances.length).toBe(initialCount);
     });
   });
 });

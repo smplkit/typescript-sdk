@@ -253,6 +253,7 @@ class FlagHandleBase {
     return this._default;
   }
 
+  /* v8 ignore next 3 — overridden by all exported subclasses */
   get(options?: { context?: Context[] }): any {
     return this._namespace._evaluateHandle(this._key, this._default, options?.context ?? null);
   }

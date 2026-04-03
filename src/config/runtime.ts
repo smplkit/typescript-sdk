@@ -10,10 +10,10 @@
  * reconnects automatically with exponential backoff.
  */
 
-import WebSocket from "ws";
 import { resolveChain } from "./resolve.js";
 import type { ChainConfig } from "./resolve.js";
 import type { ConfigChangeEvent, ConfigStats, ConnectionStatus } from "./runtime-types.js";
+import type { SharedWebSocket } from "../ws.js";
 
 /** @internal */
 interface ChangeListener {
@@ -21,31 +21,7 @@ interface ChangeListener {
   key: string | null;
 }
 
-/** @internal */
-interface WsConfigChangedMessage {
-  type: "config_changed";
-  config_id: string;
-  changes: Array<{
-    key: string;
-    old_value: unknown;
-    new_value: unknown;
-  }>;
-}
-
-/** @internal */
-interface WsConfigDeletedMessage {
-  type: "config_deleted";
-  config_id: string;
-}
-
-type WsMessage =
-  | { type: "subscribed"; config_id: string; environment: string }
-  | { type: "error"; message: string }
-  | WsConfigChangedMessage
-  | WsConfigDeletedMessage;
-
-/** @internal */
-const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000];
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** @internal Options for constructing a ConfigRuntime. */
 export interface ConfigRuntimeOptions {
@@ -56,6 +32,7 @@ export interface ConfigRuntimeOptions {
   apiKey: string;
   baseUrl: string;
   fetchChain: (() => Promise<ChainConfig[]>) | null;
+  sharedWs?: SharedWebSocket | null;
 }
 
 /**
@@ -72,32 +49,27 @@ export class ConfigRuntime {
   private _fetchCount: number;
   private _lastFetchAt: string | null;
   private _closed = false;
-  private _wsStatus: ConnectionStatus = "disconnected";
-  private _ws: InstanceType<typeof WebSocket> | null = null;
-  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private _backoffIndex = 0;
   private _listeners: ChangeListener[] = [];
 
-  private readonly _configId: string;
   private readonly _environment: string;
-  private readonly _apiKey: string;
-  private readonly _baseUrl: string;
   private readonly _fetchChain: (() => Promise<ChainConfig[]>) | null;
+  private _sharedWs: SharedWebSocket | null = null;
 
   /** @internal */
   constructor(options: ConfigRuntimeOptions) {
-    this._configId = options.configId;
     this._environment = options.environment;
-    this._apiKey = options.apiKey;
-    this._baseUrl = options.baseUrl;
     this._fetchChain = options.fetchChain;
     this._chain = options.chain;
     this._cache = resolveChain(options.chain, options.environment);
     this._fetchCount = options.chain.length;
     this._lastFetchAt = new Date().toISOString();
 
-    // Start WebSocket in background — non-blocking
-    this._connectWebSocket();
+    // Register on shared WebSocket for config_changed events
+    if (options.sharedWs) {
+      this._sharedWs = options.sharedWs;
+      this._sharedWs.on("config_changed", this._handleConfigChanged);
+      this._sharedWs.on("config_deleted", this._handleConfigDeleted);
+    }
   }
 
   // ---- Value access (synchronous, local cache) ----
@@ -182,7 +154,10 @@ export class ConfigRuntime {
    * Return the current WebSocket connection status.
    */
   connectionStatus(): ConnectionStatus {
-    return this._wsStatus;
+    if (this._sharedWs) {
+      return this._sharedWs.connectionStatus as ConnectionStatus;
+    }
+    return "disconnected";
   }
 
   // ---- Lifecycle ----
@@ -214,21 +189,15 @@ export class ConfigRuntime {
   /**
    * Close the runtime connection.
    *
-   * Shuts down the WebSocket and cancels any pending reconnect timer.
-   * Safe to call multiple times.
+   * Unregisters from the shared WebSocket. Safe to call multiple times.
    */
   async close(): Promise<void> {
     this._closed = true;
-    this._wsStatus = "disconnected";
 
-    if (this._reconnectTimer !== null) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
-
-    if (this._ws !== null) {
-      this._ws.close();
-      this._ws = null;
+    if (this._sharedWs !== null) {
+      this._sharedWs.off("config_changed", this._handleConfigChanged);
+      this._sharedWs.off("config_deleted", this._handleConfigDeleted);
+      this._sharedWs = null;
     }
   }
 
@@ -239,113 +208,37 @@ export class ConfigRuntime {
     await this.close();
   }
 
-  // ---- WebSocket internals ----
+  // ---- Shared WebSocket event handlers ----
 
-  private _buildWsUrl(): string {
-    let url = this._baseUrl;
-    if (url.startsWith("https://")) {
-      url = "wss://" + url.slice("https://".length);
-    } else if (url.startsWith("http://")) {
-      url = "ws://" + url.slice("http://".length);
-    } else {
-      url = "wss://" + url;
-    }
-    url = url.replace(/\/$/, "");
-    return `${url}/api/ws/v1/configs?api_key=${this._apiKey}`;
-  }
-
-  private _connectWebSocket(): void {
+  private _handleConfigChanged = (data: Record<string, any>): void => {
     if (this._closed) return;
-
-    this._wsStatus = "connecting";
-    const wsUrl = this._buildWsUrl();
-
-    try {
-      const ws = new WebSocket(wsUrl);
-      this._ws = ws;
-
-      ws.on("open", () => {
-        if (this._closed) {
-          ws.close();
-          return;
-        }
-        this._backoffIndex = 0;
-        this._wsStatus = "connected";
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            config_id: this._configId,
-            environment: this._environment,
-          }),
-        );
-      });
-
-      ws.on("message", (data: WebSocket.RawData) => {
-        try {
-          const msg = JSON.parse(String(data)) as WsMessage;
-          this._handleMessage(msg);
-        } catch {
-          // ignore unparseable messages
-        }
-      });
-
-      ws.on("close", () => {
-        if (!this._closed) {
-          this._wsStatus = "disconnected";
-          this._scheduleReconnect();
-        }
-      });
-
-      ws.on("error", () => {
-        // 'close' will fire after 'error'; reconnect is handled there
-      });
-    } catch {
-      if (!this._closed) {
-        this._scheduleReconnect();
-      }
+    const configId = data.config_id as string | undefined;
+    const changes = data.changes as
+      | Array<{ key: string; old_value: unknown; new_value: unknown }>
+      | undefined;
+    if (configId && changes) {
+      this._applyChanges(configId, changes);
+    } else if (this._fetchChain) {
+      // Full re-fetch if the event doesn't include granular changes
+      void this._fetchChain()
+        .then((newChain) => {
+          const oldCache = this._cache;
+          this._chain = newChain;
+          this._cache = resolveChain(newChain, this._environment);
+          this._fetchCount += newChain.length;
+          this._lastFetchAt = new Date().toISOString();
+          this._diffAndFire(oldCache, this._cache, "websocket");
+        })
+        .catch(() => {
+          // ignore fetch errors
+        });
     }
-  }
+  };
 
-  private _scheduleReconnect(): void {
-    if (this._closed) return;
-
-    const delay = BACKOFF_MS[Math.min(this._backoffIndex, BACKOFF_MS.length - 1)];
-    this._backoffIndex++;
-    this._wsStatus = "connecting";
-
-    this._reconnectTimer = setTimeout(() => {
-      this._reconnectTimer = null;
-      // On reconnect, resync the cache to pick up changes missed while offline
-      if (this._fetchChain) {
-        this._fetchChain()
-          .then((newChain) => {
-            const oldCache = this._cache;
-            this._chain = newChain;
-            this._cache = resolveChain(newChain, this._environment);
-            this._fetchCount += newChain.length;
-            this._lastFetchAt = new Date().toISOString();
-            this._diffAndFire(oldCache, this._cache, "manual");
-          })
-          .catch(() => {
-            // ignore fetch errors during reconnect
-          })
-          .finally(() => {
-            this._connectWebSocket();
-          });
-      } else {
-        this._connectWebSocket();
-      }
-    }, delay);
-  }
-
-  private _handleMessage(msg: WsMessage): void {
-    if (msg.type === "config_changed") {
-      this._applyChanges(msg.config_id, msg.changes);
-    } else if (msg.type === "config_deleted") {
-      this._closed = true;
-      void this.close();
-    }
-  }
+  private _handleConfigDeleted = (_data: Record<string, any>): void => {
+    this._closed = true;
+    void this.close();
+  };
 
   private _applyChanges(
     configId: string,
