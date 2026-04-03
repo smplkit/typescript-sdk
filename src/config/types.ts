@@ -6,8 +6,8 @@
  * as the {@link connect} entry point for runtime value resolution.
  */
 
-import type { ConfigRuntime } from "./runtime.js";
-import type { ConnectOptions } from "./runtime-types.js";
+// ConfigRuntime and ConnectOptions no longer imported here —
+// connect() has been moved to SmplClient.connect().
 
 /**
  * Internal type used by {@link ConfigClient}.  Not part of the public API.
@@ -214,55 +214,11 @@ export class Config {
   }
 
   /**
-   * Connect to this config for runtime value resolution.
-   *
-   * Eagerly fetches this config and its full parent chain, resolves values
-   * for the given environment via deep merge, and returns a
-   * {@link ConfigRuntime} with a fully populated local cache.
-   *
-   * A background WebSocket connection is started for real-time updates.
-   * If the WebSocket fails to connect, the runtime operates in cache-only
-   * mode and reconnects automatically.
-   *
-   * Supports both `await` and `await using` (TypeScript 5.2+)::
-   *
-   * ```typescript
-   * // Simple await
-   * const runtime = await config.connect("production");
-   * try { ... } finally { await runtime.close(); }
-   *
-   * // await using (auto-close)
-   * await using runtime = await config.connect("production");
-   * ```
-   *
-   * @param environment - The environment to resolve for (e.g. `"production"`).
-   * @param options.timeout - Milliseconds to wait for the initial fetch.
-   */
-  async connect(environment: string, options?: ConnectOptions): Promise<ConfigRuntime> {
-    // Lazy import to avoid loading ws at module-init time
-    const { ConfigRuntime } = await import("./runtime.js");
-
-    const timeout = options?.timeout ?? 30_000;
-    const chain = await this._buildChain(timeout);
-
-    return new ConfigRuntime({
-      configKey: this.key,
-      configId: this.id,
-      environment,
-      chain,
-      apiKey: this._client._apiKey,
-      baseUrl: this._client._baseUrl,
-      fetchChain: () => this._buildChain(timeout),
-      sharedWs: this._client._getSharedWs ? this._client._getSharedWs() : null,
-    });
-  }
-
-  /**
    * Walk the parent chain and return config data objects, child-to-root.
    * @internal
    */
-  private async _buildChain(
-    _timeout: number,
+  async _buildChain(
+    _timeout?: unknown,
   ): Promise<
     Array<{ id: string; items: Record<string, unknown>; environments: Record<string, unknown> }>
   > {

@@ -580,7 +580,7 @@ describe("FlagsClient runtime", () => {
       }),
     );
 
-    await client.connect("staging");
+    await client._connectInternal("staging");
     // connectionStatus delegates to the mock WS which returns "disconnected"
     // The important thing is that connect() doesn't throw
 
@@ -593,7 +593,7 @@ describe("FlagsClient runtime", () => {
 
     // connect
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // disconnect (flushContexts may call fetch)
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
@@ -624,7 +624,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     const changes: string[] = [];
     client.onChange((e) => changes.push(e.key));
@@ -682,7 +682,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // refresh to fire listeners
     mockFetch.mockResolvedValueOnce(
@@ -816,7 +816,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // refresh triggers listeners — should not throw
     mockFetch.mockResolvedValueOnce(
@@ -873,7 +873,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     const changes: string[] = [];
     client.onChange((e) => changes.push(e.key));
@@ -926,7 +926,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     const changes: string[] = [];
     client.onChange((e) => changes.push(e.key));
@@ -944,7 +944,7 @@ describe("FlagsClient runtime", () => {
     // Make the GET /api/v1/flags fail with a network error
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client.connect("staging")).rejects.toThrow(SmplConnectionError);
+    await expect(client._connectInternal("staging")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should auto-flush context buffer when it reaches batch size", async () => {
@@ -970,7 +970,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // Register many contexts to exceed CONTEXT_BATCH_FLUSH_SIZE (100)
     for (let i = 0; i < 100; i++) {
@@ -1006,7 +1006,7 @@ describe("FlagsClient runtime", () => {
 
     // connect
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // lastMockWs has connectionStatus: "connected"
     expect(client.connectionStatus()).toBe("connected");
@@ -1040,7 +1040,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     // evaluate should use local store, no additional fetch
     const result = await client.evaluate("color", {
@@ -1077,7 +1077,7 @@ describe("FlagsClient runtime", () => {
         ],
       }),
     );
-    await client.connect("staging");
+    await client._connectInternal("staging");
 
     const handle = client.stringFlag("null-flag", "fallback");
     expect(handle.get()).toBe("fallback");
@@ -1116,5 +1116,46 @@ describe("FlagsClient runtime", () => {
 
     // The error should propagate through wrapFetchError as SmplConnectionError
     await expect(client.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should auto-inject service context in evaluate()", async () => {
+    const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: "my-svc" };
+
+    // Mock evaluate fetch with a flag that targets service.key
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "flag-svc",
+            type: "flag",
+            attributes: {
+              key: "svc-flag",
+              name: "Service Flag",
+              type: "BOOLEAN",
+              default: false,
+              values: [],
+              environments: {
+                staging: {
+                  enabled: true,
+                  rules: [
+                    {
+                      logic: { "==": [{ var: "service.key" }, "my-svc"] },
+                      value: true,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const result = await client.evaluate("svc-flag", {
+      environment: "staging",
+      context: [],
+    });
+    expect(result).toBe(true);
   });
 });

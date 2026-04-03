@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigClient } from "../../../src/config/client.js";
 import {
   SmplNotFoundError,
+  SmplNotConnectedError,
   SmplConflictError,
   SmplValidationError,
   SmplConnectionError,
@@ -664,5 +665,110 @@ describe("ConfigClient", () => {
       const client = makeClient();
       await expect(client.get({ id: "missing" })).rejects.toThrow(SmplNotFoundError);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// _connectInternal + getValue
+// ---------------------------------------------------------------------------
+
+describe("ConfigClient _connectInternal and getValue", () => {
+  it("should populate cache via _connectInternal", async () => {
+    const client = makeClient();
+
+    // Mock list() returning one config
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "cfg-1",
+            type: "config",
+            attributes: {
+              key: "db",
+              name: "DB Config",
+              description: null,
+              parent: null,
+              items: { host: { value: "localhost" }, port: { value: 5432 } },
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+
+    await client._connectInternal("production");
+
+    expect(client.getValue("db", "host")).toBe("localhost");
+    expect(client.getValue("db", "port")).toBe(5432);
+  });
+
+  it("should return all values when itemKey is omitted", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "cfg-1",
+            type: "config",
+            attributes: {
+              key: "db",
+              name: "DB Config",
+              description: null,
+              parent: null,
+              items: { host: { value: "localhost" } },
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+
+    await client._connectInternal("production");
+
+    const all = client.getValue("db") as Record<string, unknown>;
+    expect(all).toEqual({ host: "localhost" });
+  });
+
+  it("should return default for missing config", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    await client._connectInternal("production");
+
+    expect(client.getValue("missing", "key", "fallback")).toBe("fallback");
+  });
+
+  it("should return default for missing item key", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "cfg-1",
+            type: "config",
+            attributes: {
+              key: "db",
+              name: "DB Config",
+              description: null,
+              parent: null,
+              items: { host: { value: "localhost" } },
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+
+    await client._connectInternal("production");
+
+    expect(client.getValue("db", "missing_key", "nope")).toBe("nope");
+  });
+
+  it("should throw SmplNotConnectedError before connect", () => {
+    const client = makeClient();
+    expect(() => client.getValue("db", "host")).toThrow(SmplNotConnectedError);
   });
 });

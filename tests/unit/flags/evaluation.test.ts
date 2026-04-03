@@ -30,10 +30,10 @@ function setFlagStore(client: FlagsClient, store: Record<string, Record<string, 
 }
 
 describe("Local JSON Logic evaluation", () => {
-  it("should return code default when not connected", () => {
+  it("should throw SmplNotConnectedError when not connected", () => {
     const client = makeFlagsClient();
     const handle = client.boolFlag("my-flag", false);
-    expect(handle.get()).toBe(false);
+    expect(() => handle.get()).toThrow("SmplClient is not connected");
   });
 
   it("should evaluate enabled environment with matching rule", () => {
@@ -262,5 +262,59 @@ describe("Local JSON Logic evaluation", () => {
     const handle = client.stringFlag("my-flag", "code-default");
     // Invalid rule is caught and skipped, falls through to env default
     expect(handle.get()).toBe("env-default");
+  });
+
+  it("should auto-inject service context from parent", () => {
+    const client = makeFlagsClient();
+    // Set a parent with service
+    client._parent = { _environment: "staging", _service: "my-svc" };
+
+    setFlagStore(client, {
+      "svc-flag": {
+        key: "svc-flag",
+        default: false,
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [
+              {
+                logic: { "==": [{ var: "service.key" }, "my-svc"] },
+                value: true,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    const handle = client.boolFlag("svc-flag", false);
+    expect(handle.get()).toBe(true);
+  });
+
+  it("should not override explicit service context", () => {
+    const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: "auto-svc" };
+
+    setFlagStore(client, {
+      "svc-flag": {
+        key: "svc-flag",
+        default: false,
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [
+              {
+                logic: { "==": [{ var: "service.key" }, "explicit-svc"] },
+                value: true,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    const handle = client.boolFlag("svc-flag", false);
+    // Explicit service context overrides auto-injected
+    expect(handle.get({ context: [new Context("service", "explicit-svc", {})] })).toBe(true);
   });
 });

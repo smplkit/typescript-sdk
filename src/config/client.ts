@@ -11,11 +11,13 @@ import type { components, operations } from "../generated/config.d.ts";
 import {
   SmplConflictError,
   SmplNotFoundError,
+  SmplNotConnectedError,
   SmplValidationError,
   SmplError,
   SmplConnectionError,
   SmplTimeoutError,
 } from "../errors.js";
+import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
 import type { ConfigUpdatePayload, CreateConfigOptions, GetConfigOptions } from "./types.js";
 
@@ -228,6 +230,12 @@ export class ConfigClient {
   /** @internal — returns the shared WebSocket for real-time updates. */
   _getSharedWs?: () => import("../ws.js").SharedWebSocket;
 
+  /** @internal — set by SmplClient after construction. */
+  _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
+
+  private _configCache: Record<string, Record<string, unknown>> = {};
+  private _connected = false;
+
   /** @internal */
   constructor(apiKey: string, timeout?: number) {
     this._apiKey = apiKey;
@@ -329,6 +337,46 @@ export class ConfigClient {
     } catch (err) {
       wrapFetchError(err);
     }
+  }
+
+  /**
+   * Fetch all configs, resolve values for the environment, and cache.
+   * @internal — called by SmplClient.connect().
+   */
+  async _connectInternal(environment: string): Promise<void> {
+    const configs = await this.list();
+    const cache: Record<string, Record<string, unknown>> = {};
+    for (const cfg of configs) {
+      const chain = await cfg._buildChain(this._http);
+      cache[cfg.key] = resolveChain(chain, environment);
+    }
+    this._configCache = cache;
+    this._connected = true;
+  }
+
+  /**
+   * Read a resolved config value (prescriptive access).
+   *
+   * Requires {@link SmplClient.connect} to have been called.
+   *
+   * @param configKey - The config key to look up.
+   * @param itemKey - Optional specific item key. If omitted, returns all values.
+   * @param defaultValue - Default value if the key is missing.
+   *
+   * @throws {SmplNotConnectedError} If connect() has not been called.
+   */
+  getValue(configKey: string, itemKey?: string, defaultValue?: unknown): unknown {
+    if (!this._connected) {
+      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
+    }
+    const resolved = this._configCache[configKey];
+    if (resolved === undefined) {
+      return defaultValue ?? null;
+    }
+    if (itemKey === undefined) {
+      return { ...resolved };
+    }
+    return itemKey in resolved ? resolved[itemKey] : (defaultValue ?? null);
   }
 
   /**

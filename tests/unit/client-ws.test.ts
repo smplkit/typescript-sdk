@@ -41,13 +41,13 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 describe("SmplClient WebSocket lifecycle", () => {
-  it("should create shared WS on flags.connect and close it", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test" });
+  it("should create shared WS on flags._connectInternal and close it", async () => {
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
 
-    // Mock the flags list response for connect()
+    // Mock the flags list response for _connectInternal()
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-    await client.flags.connect("staging");
+    await client.flags._connectInternal("staging");
 
     // A WebSocket should have been created
     expect(wsInstances).toHaveLength(1);
@@ -58,16 +58,16 @@ describe("SmplClient WebSocket lifecycle", () => {
   });
 
   it("should reuse the shared WS across connects", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test" });
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
 
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await client.flags.connect("staging");
+    await client.flags._connectInternal("staging");
     const wsCountAfterFirst = wsInstances.length;
 
     // Disconnect flags and reconnect — should reuse the same SharedWebSocket
     await client.flags.disconnect();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await client.flags.connect("production");
+    await client.flags._connectInternal("production");
 
     // No additional WS constructor calls since SharedWebSocket is already running
     expect(wsInstances).toHaveLength(wsCountAfterFirst);
@@ -76,7 +76,7 @@ describe("SmplClient WebSocket lifecycle", () => {
   });
 
   it("should be safe to close twice", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test" });
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
     // no WS created yet
     client.close();
     client.close();

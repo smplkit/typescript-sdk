@@ -14,6 +14,7 @@ import type { components } from "../generated/flags.d.ts";
 import {
   SmplConflictError,
   SmplError,
+  SmplNotConnectedError,
   SmplNotFoundError,
   SmplTimeoutError,
   SmplValidationError,
@@ -400,6 +401,9 @@ export class FlagsClient {
   private _wsManager: SharedWebSocket | null = null;
   private readonly _ensureWs: () => SharedWebSocket;
 
+  /** @internal — set by SmplClient after construction. */
+  _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
+
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
     this._apiKey = apiKey;
@@ -689,8 +693,9 @@ export class FlagsClient {
   /**
    * Connect to an environment: fetch flag definitions, register on
    * shared WebSocket, enable local evaluation.
+   * @internal — called by SmplClient.connect().
    */
-  async connect(environment: string, _options?: { timeout?: number }): Promise<void> {
+  async _connectInternal(environment: string): Promise<void> {
     this._environment = environment;
     await this._fetchAllFlags();
     this._connected = true;
@@ -793,6 +798,11 @@ export class FlagsClient {
   async evaluate(key: string, options: { environment: string; context: Context[] }): Promise<any> {
     const evalDict = contextsToEvalDict(options.context);
 
+    // Auto-inject service context if set and not already provided
+    if (this._parent?._service && !("service" in evalDict)) {
+      evalDict["service"] = { key: this._parent._service };
+    }
+
     // Use local store if connected, otherwise fetch
     let flagDef: Record<string, any> | null = null;
     if (this._connected && key in this._flagStore) {
@@ -821,7 +831,7 @@ export class FlagsClient {
   /** @internal */
   _evaluateHandle(key: string, defaultValue: any, context: Context[] | null): any {
     if (!this._connected) {
-      return defaultValue;
+      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
     }
 
     let evalDict: Record<string, any>;
@@ -837,6 +847,11 @@ export class FlagsClient {
       }
     } else {
       evalDict = {};
+    }
+
+    // Auto-inject service context if set and not already provided
+    if (this._parent?._service && !("service" in evalDict)) {
+      evalDict["service"] = { key: this._parent._service };
     }
 
     const ctxHash = hashContext(evalDict);

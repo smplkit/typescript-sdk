@@ -59,6 +59,15 @@ export class SmplConflictError extends SmplError {
   }
 }
 
+/** Raised when a method requiring connect() is called before connecting. */
+export class SmplNotConnectedError extends SmplError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SmplNotConnectedError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 /** Raised when the server rejects a request due to validation errors (HTTP 422). */
 export class SmplValidationError extends SmplError {
   constructor(message: string, statusCode?: number, responseBody?: string) {

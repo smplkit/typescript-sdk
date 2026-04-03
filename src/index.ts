@@ -49,6 +49,7 @@ export {
   SmplConnectionError,
   SmplTimeoutError,
   SmplNotFoundError,
+  SmplNotConnectedError,
   SmplConflictError,
   SmplValidationError,
 } from "./errors.js";

@@ -284,8 +284,8 @@ describe("Config", () => {
     });
   });
 
-  describe("connect", () => {
-    it("should build chain and return a ConfigRuntime", async () => {
+  describe("_buildChain", () => {
+    it("should build chain for config with parent", async () => {
       const client = makeMockClient();
       const config = makeConfig(client, {
         id: "child-id",
@@ -294,7 +294,6 @@ describe("Config", () => {
         environments: {},
       });
 
-      // Simulate parent with no further parent
       client.get.mockResolvedValueOnce(
         new Config(client, {
           id: "parent-id",
@@ -309,100 +308,20 @@ describe("Config", () => {
         }),
       );
 
-      const runtime = await config.connect("production");
-
-      // Should have fetched the parent
+      const chain = await config._buildChain();
+      expect(chain).toHaveLength(2);
+      expect(chain[0].id).toBe("child-id");
+      expect(chain[1].id).toBe("parent-id");
       expect(client.get).toHaveBeenCalledWith({ id: "parent-id" });
-
-      // Runtime should have resolved values from both child and parent
-      expect(runtime.get("child_val")).toBe(1);
-      expect(runtime.get("parent_val")).toBe(2);
-
-      await runtime.close();
     });
 
-    it("should walk full parent chain (three levels)", async () => {
-      const client = makeMockClient();
-      const grandchild = makeConfig(client, {
-        id: "gc-id",
-        parent: "c-id",
-        items: { level: "grandchild" },
-      });
-
-      const child = new Config(client, {
-        id: "c-id",
-        key: "child",
-        name: "Child",
-        description: null,
-        parent: "root-id",
-        items: { level: "child", mid: true },
-        environments: {},
-        createdAt: null,
-        updatedAt: null,
-      });
-
-      const root = new Config(client, {
-        id: "root-id",
-        key: "root",
-        name: "Root",
-        description: null,
-        parent: null,
-        items: { level: "root", base: true },
-        environments: {},
-        createdAt: null,
-        updatedAt: null,
-      });
-
-      client.get.mockResolvedValueOnce(child);
-      client.get.mockResolvedValueOnce(root);
-
-      const runtime = await grandchild.connect("production");
-
-      expect(client.get).toHaveBeenCalledTimes(2);
-      expect(runtime.get("level")).toBe("grandchild");
-      expect(runtime.get("mid")).toBe(true);
-      expect(runtime.get("base")).toBe(true);
-
-      await runtime.close();
-    });
-
-    it("should pass custom timeout option", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client);
-
-      const runtime = await config.connect("production", { timeout: 5000 });
-
-      expect(runtime).toBeDefined();
-      await runtime.close();
-    });
-
-    it("should work for a root config with no parent", async () => {
+    it("should return single-element chain for root config", async () => {
       const client = makeMockClient();
       const config = makeConfig(client, { parent: null });
 
-      const runtime = await config.connect("production");
-
+      const chain = await config._buildChain();
+      expect(chain).toHaveLength(1);
       expect(client.get).not.toHaveBeenCalled();
-      expect(runtime.get("timeout")).toBe(30);
-
-      await runtime.close();
-    });
-
-    it("should provide a working fetchChain for runtime refresh", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, { parent: null, items: { x: 1 } });
-
-      const runtime = await config.connect("production");
-
-      // Modify the config's items to simulate server-side change
-      config.items = { x: 99 };
-
-      // refresh() calls the fetchChain lambda, which calls _buildChain
-      await runtime.refresh();
-
-      expect(runtime.get("x")).toBe(99);
-
-      await runtime.close();
     });
   });
 });
