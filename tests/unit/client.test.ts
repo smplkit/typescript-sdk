@@ -54,6 +54,16 @@ describe("SmplClient", () => {
     expect(client.flags).toBeInstanceOf(FlagsClient);
   });
 
+  it("should return the same config instance every time (singleton accessor)", () => {
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    expect(client.config).toBe(client.config);
+  });
+
+  it("should return the same flags instance every time (singleton accessor)", () => {
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    expect(client.flags).toBe(client.flags);
+  });
+
   it("should close without error when no WS is active", () => {
     const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
     expect(() => client.close()).not.toThrow();

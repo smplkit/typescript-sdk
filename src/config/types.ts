@@ -1,13 +1,11 @@
 /**
- * Config resource — management-plane model with runtime connect support.
+ * Config resource — management-plane model.
  *
  * Instances are returned by {@link ConfigClient} methods and provide
- * management-plane operations (`update`, `setValues`, `setValue`) as well
- * as the {@link connect} entry point for runtime value resolution.
+ * management-plane operations (`update`, `setValues`, `setValue`).
+ * Prescriptive value access is via `client.config.getValue()` after
+ * `client.connect()`.
  */
-
-// ConfigRuntime and ConnectOptions no longer imported here —
-// connect() has been moved to SmplClient.connect().
 
 /**
  * Internal type used by {@link ConfigClient}.  Not part of the public API.
@@ -27,8 +25,7 @@ export interface ConfigUpdatePayload {
  * A configuration resource fetched from the smplkit Config service.
  *
  * Instances are returned by {@link ConfigClient} methods and provide
- * management-plane operations as well as the {@link connect} entry point
- * for runtime value resolution.
+ * management-plane operations (update, setValues, setValue).
  */
 export class Config {
   /** UUID of the config. */

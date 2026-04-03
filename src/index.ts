@@ -8,19 +8,11 @@
 export { SmplClient } from "./client.js";
 export type { SmplClientOptions } from "./client.js";
 
-// Config — management plane
+// Config — management and prescriptive plane
 export { ConfigClient } from "./config/client.js";
+export type { ConfigChangeEvent } from "./config/client.js";
 export type { CreateConfigOptions, GetConfigOptions } from "./config/types.js";
 export { Config } from "./config/types.js";
-
-// Config — runtime plane
-export { ConfigRuntime } from "./config/runtime.js";
-export type {
-  ConfigChangeEvent,
-  ConfigStats,
-  ConnectionStatus,
-  ConnectOptions,
-} from "./config/runtime-types.js";
 
 // Flags — public types
 export { Context, Rule } from "./flags/types.js";

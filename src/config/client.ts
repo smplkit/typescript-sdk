@@ -21,6 +21,27 @@ import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
 import type { ConfigUpdatePayload, CreateConfigOptions, GetConfigOptions } from "./types.js";
 
+/** Describes a single config value change detected on refresh. */
+export interface ConfigChangeEvent {
+  /** The config key that changed. */
+  configKey: string;
+  /** The item key within the config that changed. */
+  itemKey: string;
+  /** The previous value (null if the key was absent). */
+  oldValue: unknown;
+  /** The updated value (null if the key was removed). */
+  newValue: unknown;
+  /** How the change was delivered. */
+  source: "websocket" | "manual";
+}
+
+/** @internal */
+interface ChangeListener {
+  callback: (event: ConfigChangeEvent) => void;
+  configKey: string | null;
+  itemKey: string | null;
+}
+
 const BASE_URL = "https://config.smplkit.com";
 
 type ApiConfig = components["schemas"]["Config"];
@@ -235,6 +256,7 @@ export class ConfigClient {
 
   private _configCache: Record<string, Record<string, unknown>> = {};
   private _connected = false;
+  private _listeners: ChangeListener[] = [];
 
   /** @internal */
   constructor(apiKey: string, timeout?: number) {
@@ -377,6 +399,116 @@ export class ConfigClient {
       return { ...resolved };
     }
     return itemKey in resolved ? resolved[itemKey] : (defaultValue ?? null);
+  }
+
+  /**
+   * Return a config value as a string, or `defaultValue` if absent or not a string.
+   *
+   * @throws {SmplNotConnectedError} If connect() has not been called.
+   */
+  getString(configKey: string, itemKey: string, defaultValue: string | null = null): string | null {
+    const value = this.getValue(configKey, itemKey);
+    return typeof value === "string" ? value : defaultValue;
+  }
+
+  /**
+   * Return a config value as a number, or `defaultValue` if absent or not a number.
+   *
+   * @throws {SmplNotConnectedError} If connect() has not been called.
+   */
+  getInt(configKey: string, itemKey: string, defaultValue: number | null = null): number | null {
+    const value = this.getValue(configKey, itemKey);
+    return typeof value === "number" ? value : defaultValue;
+  }
+
+  /**
+   * Return a config value as a boolean, or `defaultValue` if absent or not a boolean.
+   *
+   * @throws {SmplNotConnectedError} If connect() has not been called.
+   */
+  getBool(configKey: string, itemKey: string, defaultValue: boolean | null = null): boolean | null {
+    const value = this.getValue(configKey, itemKey);
+    return typeof value === "boolean" ? value : defaultValue;
+  }
+
+  /**
+   * Re-fetch all configs, re-resolve values, and update the cache.
+   *
+   * Fires change listeners for any values that differ from the previous cache.
+   *
+   * @throws {SmplNotConnectedError} If connect() has not been called.
+   */
+  async refresh(): Promise<void> {
+    if (!this._connected) {
+      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
+    }
+    const environment = this._parent?._environment;
+    if (!environment) {
+      throw new SmplError("No environment set.");
+    }
+    const configs = await this.list();
+    const newCache: Record<string, Record<string, unknown>> = {};
+    for (const cfg of configs) {
+      const chain = await cfg._buildChain(this._http);
+      newCache[cfg.key] = resolveChain(chain, environment);
+    }
+    const oldCache = this._configCache;
+    this._configCache = newCache;
+    this._diffAndFire(oldCache, newCache, "manual");
+  }
+
+  /**
+   * Register a listener that fires when a config value changes (on refresh).
+   *
+   * @param callback - Called with a {@link ConfigChangeEvent} on each change.
+   * @param options.configKey - If provided, only fire for changes to this config.
+   * @param options.itemKey - If provided, only fire for changes to this item key.
+   */
+  onChange(
+    callback: (event: ConfigChangeEvent) => void,
+    options?: { configKey?: string; itemKey?: string },
+  ): void {
+    this._listeners.push({
+      callback,
+      configKey: options?.configKey ?? null,
+      itemKey: options?.itemKey ?? null,
+    });
+  }
+
+  /** @internal */
+  private _diffAndFire(
+    oldCache: Record<string, Record<string, unknown>>,
+    newCache: Record<string, Record<string, unknown>>,
+    source: "websocket" | "manual",
+  ): void {
+    const allConfigKeys = new Set([...Object.keys(oldCache), ...Object.keys(newCache)]);
+    for (const cfgKey of allConfigKeys) {
+      const oldItems = oldCache[cfgKey] ?? {};
+      const newItems = newCache[cfgKey] ?? {};
+      const allItemKeys = new Set([...Object.keys(oldItems), ...Object.keys(newItems)]);
+      for (const iKey of allItemKeys) {
+        const oldVal = iKey in oldItems ? oldItems[iKey] : null;
+        const newVal = iKey in newItems ? newItems[iKey] : null;
+        if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+          const event: ConfigChangeEvent = {
+            configKey: cfgKey,
+            itemKey: iKey,
+            oldValue: oldVal,
+            newValue: newVal,
+            source,
+          };
+          for (const listener of this._listeners) {
+            if (listener.configKey !== null && listener.configKey !== cfgKey) continue;
+            if (listener.itemKey !== null && listener.itemKey !== iKey) continue;
+            try {
+              listener.callback(event);
+            } catch {
+              // ignore listener errors
+            }
+          }
+        }
+      }
+    }
   }
 
   /**
