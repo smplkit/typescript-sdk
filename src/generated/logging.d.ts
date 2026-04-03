@@ -41,6 +41,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/loggers/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Register Loggers */
+        post: operations["bulk_register_loggers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/log_groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Log Groups */
+        get: operations["list_log_groups"];
+        put?: never;
+        /** Create Log Group */
+        post: operations["create_log_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/log_groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Log Group */
+        get: operations["get_log_group"];
+        /** Update Log Group */
+        put: operations["update_log_group"];
+        post?: never;
+        /** Delete Log Group */
+        delete: operations["delete_log_group"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -75,29 +129,29 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
-         * Logger
+         * LogGroup
          * @example {
-         *       "aliases": [
-         *         "sequelize"
-         *       ],
-         *       "default": "DEBUG",
-         *       "description": "Controls SQL query log verbosity.",
-         *       "environments": {},
-         *       "key": "sql",
-         *       "name": "SQL Logger"
+         *       "created_at": "2026-04-01T10:00:00Z",
+         *       "environments": {
+         *         "production": {
+         *           "level": "ERROR"
+         *         }
+         *       },
+         *       "key": "database-loggers",
+         *       "level": "WARN",
+         *       "name": "Database Loggers",
+         *       "updated_at": "2026-04-01T10:00:00Z"
          *     }
          */
-        Logger: {
+        LogGroup: {
             /** Key */
             key?: string | null;
             /** Name */
             name: string;
-            /** Description */
-            description?: string | null;
-            /** Aliases */
-            aliases?: string[] | null;
-            /** Default */
-            default: string;
+            /** Level */
+            level?: string | null;
+            /** Group */
+            group?: string | null;
             /** Environments */
             environments?: {
                 [key: string]: unknown;
@@ -107,12 +161,157 @@ export interface components {
             /** Updated At */
             readonly updated_at?: string | null;
         };
+        /** LogGroupListResponse */
+        LogGroupListResponse: {
+            /** Data */
+            data: components["schemas"]["LogGroupResource"][];
+        };
+        /**
+         * LogGroupResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-01T10:00:00Z",
+         *         "environments": {
+         *           "production": {
+         *             "level": "ERROR"
+         *           }
+         *         },
+         *         "key": "database-loggers",
+         *         "level": "WARN",
+         *         "name": "Database Loggers",
+         *         "updated_at": "2026-04-01T10:00:00Z"
+         *       },
+         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "type": "log_group"
+         *     }
+         */
+        LogGroupResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "log_group";
+            attributes: components["schemas"]["LogGroup"];
+        };
+        /** LogGroupResponse */
+        LogGroupResponse: {
+            data: components["schemas"]["LogGroupResource"];
+        };
+        /**
+         * Logger
+         * @example {
+         *       "created_at": "2026-04-01T10:00:00Z",
+         *       "environments": {
+         *         "production": {
+         *           "level": "WARN"
+         *         },
+         *         "staging": {
+         *           "level": "DEBUG"
+         *         }
+         *       },
+         *       "group": "550e8400-e29b-41d4-a716-446655440000",
+         *       "key": "com.example.sql",
+         *       "level": "DEBUG",
+         *       "managed": true,
+         *       "name": "SQL Logger",
+         *       "sources": [
+         *         {
+         *           "first_observed": "2026-04-01T10:00:00Z",
+         *           "service": "api-gateway"
+         *         }
+         *       ],
+         *       "updated_at": "2026-04-01T10:00:00Z"
+         *     }
+         */
+        Logger: {
+            /** Key */
+            key?: string | null;
+            /** Name */
+            name: string;
+            /** Level */
+            level?: string | null;
+            /** Group */
+            group?: string | null;
+            /** Managed */
+            readonly managed?: boolean | null;
+            /** Sources */
+            readonly sources?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Environments */
+            environments?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+        };
+        /** LoggerBulkItem */
+        LoggerBulkItem: {
+            /**
+             * Key
+             * @description Normalized logger name
+             */
+            key: string;
+            /**
+             * Level
+             * @description Observed log level in smplkit canonical format
+             */
+            level: string;
+            /**
+             * Service
+             * @description Service name that discovered this logger
+             */
+            service?: string | null;
+        };
+        /** LoggerBulkRequest */
+        LoggerBulkRequest: {
+            /** Loggers */
+            loggers: components["schemas"]["LoggerBulkItem"][];
+        };
+        /** LoggerBulkResponse */
+        LoggerBulkResponse: {
+            /** Registered */
+            registered: number;
+        };
         /** LoggerListResponse */
         LoggerListResponse: {
             /** Data */
             data: components["schemas"]["LoggerResource"][];
         };
-        /** LoggerResource */
+        /**
+         * LoggerResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-01T10:00:00Z",
+         *         "environments": {
+         *           "production": {
+         *             "level": "WARN"
+         *           },
+         *           "staging": {
+         *             "level": "DEBUG"
+         *           }
+         *         },
+         *         "group": "660e8400-e29b-41d4-a716-446655440000",
+         *         "key": "com.example.sql",
+         *         "level": "DEBUG",
+         *         "managed": true,
+         *         "name": "SQL Logger",
+         *         "sources": [
+         *           {
+         *             "first_observed": "2026-04-01T10:00:00Z",
+         *             "service": "api-gateway"
+         *           }
+         *         ],
+         *         "updated_at": "2026-04-01T10:00:00Z"
+         *       },
+         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "type": "logger"
+         *     }
+         */
         LoggerResource: {
             /** Id */
             id?: string | null;
@@ -127,6 +326,17 @@ export interface components {
         LoggerResponse: {
             data: components["schemas"]["LoggerResource"];
         };
+        /** Resource[LogGroup] */
+        Resource_LogGroup_: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            attributes: components["schemas"]["LogGroup"];
+        };
         /** Resource[Logger] */
         Resource_Logger_: {
             /** Id */
@@ -137,6 +347,10 @@ export interface components {
              */
             type: string;
             attributes: components["schemas"]["Logger"];
+        };
+        /** Response[LogGroup] */
+        Response_LogGroup_: {
+            data: components["schemas"]["Resource_LogGroup_"];
         };
         /** Response[Logger] */
         Response_Logger_: {
@@ -164,6 +378,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[key]"?: string | null;
+                "filter[managed]"?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -177,7 +392,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoggerListResponse"];
+                    "application/vnd.api+json": components["schemas"]["LoggerListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -186,7 +401,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -195,7 +410,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Resource not found */
@@ -204,7 +419,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -213,7 +428,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rate limit exceeded */
@@ -222,7 +437,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -246,7 +461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoggerResponse"];
+                    "application/vnd.api+json": components["schemas"]["LoggerResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -255,7 +470,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -264,7 +479,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Resource not found */
@@ -273,7 +488,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -282,7 +497,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rate limit exceeded */
@@ -291,7 +506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -313,7 +528,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoggerResponse"];
+                    "application/vnd.api+json": components["schemas"]["LoggerResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -322,7 +537,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -331,7 +546,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Resource not found */
@@ -340,7 +555,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -349,7 +564,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rate limit exceeded */
@@ -358,7 +573,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -384,7 +599,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoggerResponse"];
+                    "application/vnd.api+json": components["schemas"]["LoggerResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -393,7 +608,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -402,7 +617,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Resource not found */
@@ -411,7 +626,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -420,7 +635,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rate limit exceeded */
@@ -429,7 +644,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -458,7 +673,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -467,7 +682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Resource not found */
@@ -476,7 +691,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -485,7 +700,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rate limit exceeded */
@@ -494,7 +709,404 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bulk_register_loggers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoggerBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LoggerBulkResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_log_groups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LogGroupListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_log_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Response_LogGroup_"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LogGroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_log_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LogGroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_log_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Response_LogGroup_"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LogGroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_log_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
