@@ -38,9 +38,21 @@ jobs:
       - run: npm run build
       - run: npm run test:coverage
 
+  ci-gate:
+    if: always()
+    needs: [lint, build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all checks passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed or were cancelled."
+            exit 1
+          fi
+
   release:
     name: Release
-    needs: [lint, build-and-test]
+    needs: [ci-gate]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
