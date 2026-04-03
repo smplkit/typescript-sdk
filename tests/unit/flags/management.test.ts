@@ -772,7 +772,7 @@ describe("FlagsClient runtime", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
     await client.flushContexts();
 
-    // Verify PUT was called
+    // Verify POST was called
     expect(mockFetch).toHaveBeenCalled();
   });
 

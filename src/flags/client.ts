@@ -348,8 +348,8 @@ class ContextRegistrationBuffer {
         }
         this._seen.set(cacheKey, ctx.attributes);
         this._pending.push({
-          id: `${ctx.type}:${ctx.key}`,
-          name: ctx.name ?? ctx.key,
+          type: ctx.type,
+          key: ctx.key,
           attributes: { ...ctx.attributes },
         });
       }

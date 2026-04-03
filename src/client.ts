@@ -129,7 +129,7 @@ export class SmplClient {
   private async _registerServiceContext(): Promise<void> {
     try {
       await fetch(`${APP_BASE_URL}/api/v1/contexts/bulk`, {
-        method: "PUT",
+        method: "POST",
         headers: {
           Authorization: `Bearer ${this._apiKey}`,
           "Content-Type": "application/json",

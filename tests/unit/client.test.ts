@@ -190,7 +190,7 @@ describe("SmplClient connect()", () => {
     vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
     vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
 
-    // Mock the service registration PUT and the connect internals
+    // Mock the service registration POST and the connect internals
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
     await client.connect();
