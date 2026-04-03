@@ -348,8 +348,8 @@ class ContextRegistrationBuffer {
         }
         this._seen.set(cacheKey, ctx.attributes);
         this._pending.push({
-          type: ctx.type,
-          key: ctx.key,
+          id: `${ctx.type}:${ctx.key}`,
+          name: ctx.name ?? ctx.key,
           attributes: { ...ctx.attributes },
         });
       }
@@ -965,7 +965,7 @@ export class FlagsClient {
     const batch = this._contextBuffer.drain();
     if (batch.length === 0) return;
     try {
-      await this._transport.put(`${APP_BASE_URL}/api/v1/contexts/bulk`, {
+      await this._transport.post(`${APP_BASE_URL}/api/v1/contexts/bulk`, {
         contexts: batch,
       });
     } catch {

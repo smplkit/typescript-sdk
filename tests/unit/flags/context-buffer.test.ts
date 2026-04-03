@@ -47,7 +47,7 @@ describe("Context registration buffer", () => {
     expect(buffer.pendingCount).toBe(3);
   });
 
-  it("should format contexts with type and key", () => {
+  it("should format contexts with id and name", () => {
     const client = makeFlagsClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const buffer = (client as any)._contextBuffer;
@@ -57,13 +57,13 @@ describe("Context registration buffer", () => {
     const batch = buffer.drain();
     expect(batch).toHaveLength(1);
     expect(batch[0]).toEqual({
-      type: "user",
-      key: "u-1",
+      id: "user:u-1",
+      name: "Alice",
       attributes: { plan: "enterprise" },
     });
   });
 
-  it("should include type and key fields", () => {
+  it("should include id and name fields", () => {
     const client = makeFlagsClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const buffer = (client as any)._contextBuffer;
@@ -71,8 +71,8 @@ describe("Context registration buffer", () => {
     client.register(new Context("user", "u-1", { plan: "enterprise" }));
 
     const batch = buffer.drain();
-    expect(batch[0].type).toBe("user");
-    expect(batch[0].key).toBe("u-1");
+    expect(batch[0].id).toBe("user:u-1");
+    expect(batch[0].name).toBe("u-1");
   });
 
   it("should evict oldest entry when LRU limit is reached", () => {
