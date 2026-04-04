@@ -5,11 +5,12 @@
  * to sub-clients for each API domain (config, flags, logging, etc.).
  */
 
+import createClient from "openapi-fetch";
 import { ConfigClient } from "./config/client.js";
 import { FlagsClient } from "./flags/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveApiKey } from "./resolve.js";
-import { SmplError } from "./errors.js";
+import { SmplError, SmplTimeoutError } from "./errors.js";
 
 const APP_BASE_URL = "https://app.smplkit.com";
 
@@ -76,6 +77,7 @@ export class SmplClient {
 
   private _connected = false;
   private readonly _timeout: number;
+  private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
   constructor(options: SmplClientOptions = {}) {
     const apiKey = resolveApiKey(options.apiKey);
@@ -89,6 +91,30 @@ export class SmplClient {
     this._service = options.service || process.env.SMPLKIT_SERVICE || null;
 
     this._timeout = options.timeout ?? 30_000;
+
+    const ms = this._timeout;
+    this._appHttp = createClient<import("./generated/app.d.ts").paths>({
+      baseUrl: APP_BASE_URL,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+      fetch: async (request: Request): Promise<Response> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), ms);
+        try {
+          return await fetch(new Request(request, { signal: controller.signal }));
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
+          }
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    });
+
     this.config = new ConfigClient(apiKey, this._timeout);
     this.flags = new FlagsClient(apiKey, () => this._ensureWs(), this._timeout);
 
@@ -128,21 +154,15 @@ export class SmplClient {
   /** @internal */
   private async _registerServiceContext(): Promise<void> {
     try {
-      await fetch(`${APP_BASE_URL}/api/v1/contexts/bulk`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this._apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      await this._appHttp.POST("/api/v1/contexts/bulk", {
+        body: {
           contexts: [
             {
-              type: "service",
-              key: this._service,
+              id: `service:${this._service}`,
               attributes: { name: this._service },
             },
           ],
-        }),
+        },
       });
     } catch {
       // Fire-and-forget: log warning on failure

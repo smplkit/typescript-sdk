@@ -552,6 +552,52 @@ describe("FlagsClient context type management", () => {
     const contexts = await client.listContexts({ contextTypeKey: "user" });
     expect(contexts).toHaveLength(1);
   });
+
+  it("should pass filter[context_type_id] query param for listContexts", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    await client.listContexts({ contextTypeKey: "user" });
+    const request: Request = mockFetch.mock.calls[0][0];
+    expect(request.url).toContain("filter[context_type_id]=user");
+  });
+
+  // Error paths for coverage
+  it("should handle createContextType network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(client.createContextType("user", { name: "User" })).rejects.toThrow(
+      SmplConnectionError,
+    );
+  });
+
+  it("should handle updateContextType network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(client.updateContextType("ct-1", { attributes: {} })).rejects.toThrow(
+      SmplConnectionError,
+    );
+  });
+
+  it("should handle listContextTypes network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(client.listContextTypes()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should handle deleteContextType network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(client.deleteContextType("ct-1")).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should handle listContexts network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(client.listContexts({ contextTypeKey: "user" })).rejects.toThrow(
+      SmplConnectionError,
+    );
+  });
 });
 
 describe("FlagsClient runtime", () => {

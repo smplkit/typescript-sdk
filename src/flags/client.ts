@@ -2,15 +2,16 @@
  * FlagsClient — management + prescriptive runtime for Smpl Flags.
  *
  * Uses the generated OpenAPI types (`src/generated/flags.d.ts`) via
- * `openapi-fetch` for all HTTP calls. Context type management and
- * context registration use direct HTTP via the Transport class since
- * these endpoints are on the flags service but not in the generated spec.
+ * `openapi-fetch` for all flag HTTP calls. Context type management and
+ * context registration use the generated app service types
+ * (`src/generated/app.d.ts`) via a separate `openapi-fetch` client.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
 import type { components } from "../generated/flags.d.ts";
+import type { components as appComponents } from "../generated/app.d.ts";
 import {
   SmplConflictError,
   SmplError,
@@ -385,6 +386,8 @@ export class FlagsClient {
   /** @internal */
   private readonly _http: ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
   /** @internal */
+  private readonly _appHttp: ReturnType<typeof createClient<import("../generated/app.d.ts").paths>>;
+  /** @internal */
   private readonly _transport: Transport;
 
   // Runtime state
@@ -410,26 +413,37 @@ export class FlagsClient {
     this._ensureWs = ensureWs;
     const ms = timeout ?? 30_000;
 
+    const fetchWithTimeout = async (request: Request): Promise<Response> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ms);
+      try {
+        return await fetch(new Request(request, { signal: controller.signal }));
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     this._http = createClient<import("../generated/flags.d.ts").paths>({
       baseUrl: FLAGS_BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },
-      fetch: async (request: Request): Promise<Response> => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), ms);
-        try {
-          return await fetch(new Request(request, { signal: controller.signal }));
-        } catch (err) {
-          if (err instanceof DOMException && err.name === "AbortError") {
-            throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
-          }
-          throw err;
-        } finally {
-          clearTimeout(timer);
-        }
+      fetch: fetchWithTimeout,
+    });
+
+    this._appHttp = createClient<import("../generated/app.d.ts").paths>({
+      baseUrl: APP_BASE_URL,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
       },
+      fetch: fetchWithTimeout,
     });
 
     this._transport = new Transport({ apiKey, timeout: ms });
@@ -578,16 +592,26 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Context type management (direct HTTP — not in generated spec)
+  // Context type management (via generated app client)
   // ------------------------------------------------------------------
 
   /** Create a context type. */
   async createContextType(key: string, options: { name: string }): Promise<ContextType> {
-    const resp = await this._transport.post(`${APP_BASE_URL}/api/v1/context_types`, {
-      data: { type: "context_type", attributes: { key, name: options.name } },
-    });
-    const data = resp.data ?? {};
-    return this._parseContextType(data);
+    let data: appComponents["schemas"]["ContextTypeResponse"] | undefined;
+    try {
+      const result = await this._appHttp.POST("/api/v1/context_types", {
+        body: {
+          data: { type: "context_type", attributes: { key, name: options.name } },
+        },
+      });
+      if (result.error !== undefined)
+        await checkError(result.response, "Failed to create context type");
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) throw new SmplValidationError("Failed to create context type");
+    return this._parseContextType(data.data);
   }
 
   /** Update a context type (merge attributes). */
@@ -595,31 +619,65 @@ export class FlagsClient {
     ctId: string,
     options: { attributes: Record<string, any> },
   ): Promise<ContextType> {
-    const resp = await this._transport.put(`${APP_BASE_URL}/api/v1/context_types/${ctId}`, {
-      data: { type: "context_type", attributes: { attributes: options.attributes } },
-    });
-    const data = resp.data ?? {};
-    return this._parseContextType(data);
+    let data: appComponents["schemas"]["ContextTypeResponse"] | undefined;
+    try {
+      const result = await this._appHttp.PUT("/api/v1/context_types/{id}", {
+        params: { path: { id: ctId } },
+        body: {
+          data: { type: "context_type", attributes: { attributes: options.attributes } },
+        },
+      });
+      if (result.error !== undefined)
+        await checkError(result.response, `Failed to update context type ${ctId}`);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) throw new SmplValidationError(`Failed to update context type ${ctId}`);
+    return this._parseContextType(data.data);
   }
 
   /** List all context types. */
   async listContextTypes(): Promise<ContextType[]> {
-    const resp = await this._transport.get(`${APP_BASE_URL}/api/v1/context_types`);
-    const items = resp.data ?? [];
-    return (items as any[]).map((item: any) => this._parseContextType(item));
+    let data: appComponents["schemas"]["ContextTypeListResponse"] | undefined;
+    try {
+      const result = await this._appHttp.GET("/api/v1/context_types");
+      if (result.error !== undefined)
+        await checkError(result.response, "Failed to list context types");
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) throw new SmplValidationError("Failed to list context types");
+    return data.data.map((item) => this._parseContextType(item));
   }
 
   /** Delete a context type. */
   async deleteContextType(ctId: string): Promise<void> {
-    await this._transport.delete(`${APP_BASE_URL}/api/v1/context_types/${ctId}`);
+    try {
+      const result = await this._appHttp.DELETE("/api/v1/context_types/{id}", {
+        params: { path: { id: ctId } },
+      });
+      if (result.error !== undefined && result.response.status !== 204)
+        await checkError(result.response, `Failed to delete context type ${ctId}`);
+    } catch (err) {
+      wrapFetchError(err);
+    }
   }
 
   /** List context instances filtered by context type key. */
   async listContexts(options: { contextTypeKey: string }): Promise<any[]> {
-    const resp = await this._transport.get(`${APP_BASE_URL}/api/v1/contexts`, {
-      "filter[context_type]": options.contextTypeKey,
-    });
-    return resp.data ?? [];
+    let data: appComponents["schemas"]["ContextListResponse"] | undefined;
+    try {
+      const result = await this._appHttp.GET("/api/v1/contexts", {
+        params: { query: { "filter[context_type_id]": options.contextTypeKey } },
+      });
+      if (result.error !== undefined) await checkError(result.response, "Failed to list contexts");
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    return data?.data ?? [];
   }
 
   // ------------------------------------------------------------------
@@ -965,8 +1023,13 @@ export class FlagsClient {
     const batch = this._contextBuffer.drain();
     if (batch.length === 0) return;
     try {
-      await this._transport.post(`${APP_BASE_URL}/api/v1/contexts/bulk`, {
-        contexts: batch,
+      await this._appHttp.POST("/api/v1/contexts/bulk", {
+        body: {
+          contexts: batch.map((ctx) => ({
+            id: `${ctx.type}:${ctx.key}`,
+            attributes: ctx.attributes,
+          })),
+        },
       });
     } catch {
       // Fire-and-forget: ignore registration failures

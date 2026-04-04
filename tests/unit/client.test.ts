@@ -190,18 +190,17 @@ describe("SmplClient connect()", () => {
     vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
     vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
 
-    // Mock the service registration POST and the connect internals
-    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    // Mock the service registration POST (openapi-fetch sends a Request object)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
 
     await client.connect();
 
-    // First fetch call is the service registration
+    // First fetch call is the service registration via openapi-fetch
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    const call = mockFetch.mock.calls[0];
-    expect(call[0]).toContain("/api/v1/contexts/bulk");
-    const body = JSON.parse(call[1].body);
-    expect(body.contexts[0].type).toBe("service");
-    expect(body.contexts[0].key).toBe("my-svc");
+    const request: Request = mockFetch.mock.calls[0][0];
+    expect(request.url).toContain("/api/v1/contexts/bulk");
+    const body = JSON.parse(await request.text());
+    expect(body.contexts[0].id).toBe("service:my-svc");
   });
 
   it("should not register service when service is null", async () => {
@@ -227,5 +226,22 @@ describe("SmplClient connect()", () => {
     mockFetch.mockRejectedValueOnce(new Error("network error"));
 
     await client.connect(); // Should not throw
+  });
+
+  it("should swallow service registration timeout", async () => {
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "my-svc",
+      timeout: 1,
+    });
+    vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
+    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
+
+    // Simulate an AbortError (timeout)
+    const abortErr = new DOMException("The operation was aborted.", "AbortError");
+    mockFetch.mockRejectedValueOnce(abortErr);
+
+    await client.connect(); // Should not throw — fire-and-forget
   });
 });
