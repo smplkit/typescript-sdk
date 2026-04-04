@@ -653,5 +653,10 @@
         "scheme": "bearer"
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "Configs"
+    }
+  ]
 }
