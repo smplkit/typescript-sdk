@@ -1025,7 +1025,8 @@ export class FlagsClient {
       await this._appHttp.POST("/api/v1/contexts/bulk", {
         body: {
           contexts: batch.map((ctx) => ({
-            id: `${ctx.type}:${ctx.key}`,
+            type: ctx.type,
+            key: ctx.key,
             attributes: ctx.attributes,
           })),
         },

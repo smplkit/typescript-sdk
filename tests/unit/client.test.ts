@@ -200,7 +200,8 @@ describe("SmplClient connect()", () => {
     const request: Request = mockFetch.mock.calls[0][0];
     expect(request.url).toContain("/api/v1/contexts/bulk");
     const body = JSON.parse(await request.text());
-    expect(body.contexts[0].id).toBe("service:my-svc");
+    expect(body.contexts[0].type).toBe("service");
+    expect(body.contexts[0].key).toBe("my-svc");
   });
 
   it("should not register service when service is null", async () => {

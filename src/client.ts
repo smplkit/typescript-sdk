@@ -158,8 +158,9 @@ export class SmplClient {
         body: {
           contexts: [
             {
-              id: `service:${this._service}`,
-              attributes: { name: this._service },
+              type: "service",
+              key: this._service!,
+              attributes: { name: this._service! },
             },
           ],
         },
