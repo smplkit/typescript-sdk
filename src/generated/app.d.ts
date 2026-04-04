@@ -506,9 +506,15 @@ export interface components {
              * @default false
              */
             readonly has_stripe_customer: boolean;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Deleted At */
+            /**
+             * Deleted At
+             * Format: date-time
+             */
             readonly deleted_at?: string | null;
         };
         /**
@@ -529,7 +535,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "account";
             attributes: components["schemas"]["Account"];
@@ -574,13 +580,25 @@ export interface components {
              * @default
              */
             readonly created_by: string;
-            /** Expires At */
+            /**
+             * Expires At
+             * Format: date-time
+             */
             expires_at?: string | null;
-            /** Last Used At */
+            /**
+             * Last Used At
+             * Format: date-time
+             */
             readonly last_used_at?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
             /** Data */
             readonly data?: {
@@ -615,7 +633,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "api_key";
             attributes: components["schemas"]["ApiKey"];
@@ -669,9 +687,15 @@ export interface components {
             attributes?: {
                 [key: string]: unknown;
             };
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
         };
         /** ContextBatchResponse */
@@ -682,15 +706,15 @@ export interface components {
         /** ContextBulkItem */
         ContextBulkItem: {
             /**
-             * Id
-             * @description Composite logical ID: type:key (e.g., 'user:123')
+             * Type
+             * @description Context type key: 'user', 'account', 'device'
              */
-            id: string;
+            type: string;
             /**
-             * Name
-             * @description Human-readable display name; defaults to key
+             * Key
+             * @description Entity identifier: 'user-123', 'acme-corp'
              */
-            name?: string | null;
+            key: string;
             /** Attributes */
             attributes?: {
                 [key: string]: unknown;
@@ -712,7 +736,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "context";
             attributes: components["schemas"]["Context"];
@@ -753,9 +777,15 @@ export interface components {
             attributes?: {
                 [key: string]: unknown;
             };
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
         };
         /** ContextTypeListResponse */
@@ -769,7 +799,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "context_type";
             attributes: components["schemas"]["ContextType"];
@@ -795,9 +825,15 @@ export interface components {
             key?: string | null;
             /** Color */
             color?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
         };
         /** EnvironmentListResponse */
@@ -824,7 +860,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "environment";
             attributes: components["schemas"]["Environment"];
@@ -890,11 +926,20 @@ export interface components {
              * @default
              */
             readonly invited_by: string;
-            /** Expires At */
+            /**
+             * Expires At
+             * Format: date-time
+             */
             readonly expires_at?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
         };
         /** InvitationBulkCreateRequest */
@@ -941,7 +986,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "invitation";
             attributes: components["schemas"]["Invitation"];
@@ -1005,7 +1050,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "plan";
             attributes: components["schemas"]["Plan"];
@@ -1041,7 +1086,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "product";
             attributes: components["schemas"]["Product"];
@@ -1074,7 +1119,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "service";
             attributes: components["schemas"]["Service"];
@@ -1101,7 +1146,7 @@ export interface components {
             id?: string | null;
             /**
              * Type
-             * @constant
+             * @enum {string}
              */
             type: "user";
             attributes: components["schemas"]["User"];
@@ -1128,9 +1173,15 @@ export interface components {
             name: string;
             /** Key */
             key?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             readonly updated_at?: string | null;
         };
         /** ServiceListResponse */
@@ -1183,7 +1234,10 @@ export interface components {
              * @default
              */
             readonly account: string;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             readonly created_at?: string | null;
         };
         /** UserListResponse */
