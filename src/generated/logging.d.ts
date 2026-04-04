@@ -235,7 +235,7 @@ export interface components {
             /** Group */
             group?: string | null;
             /** Managed */
-            readonly managed?: boolean | null;
+            managed?: boolean | null;
             /** Sources */
             readonly sources?: {
                 [key: string]: unknown;
