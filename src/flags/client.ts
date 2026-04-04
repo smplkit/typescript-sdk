@@ -443,8 +443,6 @@ export class FlagsClient {
       },
       fetch: fetchWithTimeout,
     });
-
-
   }
 
   // ------------------------------------------------------------------

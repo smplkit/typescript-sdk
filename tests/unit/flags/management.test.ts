@@ -516,7 +516,11 @@ describe("FlagsClient context type management", () => {
       }),
     );
 
-    const ct = await client.updateContextType("ct-1", { key: "user", name: "User", attributes: { plan: {} } });
+    const ct = await client.updateContextType("ct-1", {
+      key: "user",
+      name: "User",
+      attributes: { plan: {} },
+    });
     expect(ct.attributes).toEqual({ plan: {} });
   });
 
@@ -574,9 +578,9 @@ describe("FlagsClient context type management", () => {
   it("should handle updateContextType network error", async () => {
     const client = makeFlagsClient();
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(client.updateContextType("ct-1", { key: "user", name: "User", attributes: {} })).rejects.toThrow(
-      SmplConnectionError,
-    );
+    await expect(
+      client.updateContextType("ct-1", { key: "user", name: "User", attributes: {} }),
+    ).rejects.toThrow(SmplConnectionError);
   });
 
   it("should handle listContextTypes network error", async () => {
