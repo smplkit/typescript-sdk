@@ -20,7 +20,7 @@ import {
   SmplTimeoutError,
   SmplValidationError,
 } from "../errors.js";
-import { Transport } from "../transport.js";
+
 import { Flag, ContextType } from "./models.js";
 import type { Context, FlagType } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
@@ -387,8 +387,6 @@ export class FlagsClient {
   private readonly _http: ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
   /** @internal */
   private readonly _appHttp: ReturnType<typeof createClient<import("../generated/app.d.ts").paths>>;
-  /** @internal */
-  private readonly _transport: Transport;
 
   // Runtime state
   private _environment: string | null = null;
@@ -446,7 +444,7 @@ export class FlagsClient {
       fetch: fetchWithTimeout,
     });
 
-    this._transport = new Transport({ apiKey, timeout: ms });
+
   }
 
   // ------------------------------------------------------------------
@@ -617,14 +615,17 @@ export class FlagsClient {
   /** Update a context type (merge attributes). */
   async updateContextType(
     ctId: string,
-    options: { attributes: Record<string, any> },
+    options: { key: string; name: string; attributes: Record<string, any> },
   ): Promise<ContextType> {
     let data: appComponents["schemas"]["ContextTypeResponse"] | undefined;
     try {
       const result = await this._appHttp.PUT("/api/v1/context_types/{id}", {
         params: { path: { id: ctId } },
         body: {
-          data: { type: "context_type", attributes: { attributes: options.attributes } },
+          data: {
+            type: "context_type",
+            attributes: { key: options.key, name: options.name, attributes: options.attributes },
+          },
         },
       });
       if (result.error !== undefined)

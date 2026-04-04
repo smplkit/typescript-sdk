@@ -372,6 +372,8 @@ async function main(): Promise<void> {
 
   // Add known attributes.
   await client.flags.updateContextType(userCt.id, {
+    key: userCt.key,
+    name: userCt.name,
     attributes: {
       first_name: {},
       plan: {},
@@ -384,6 +386,8 @@ async function main(): Promise<void> {
     name: "Account",
   });
   await client.flags.updateContextType(accountCt.id, {
+    key: accountCt.key,
+    name: accountCt.name,
     attributes: {
       industry: {},
       region: {},
