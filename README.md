@@ -1,6 +1,6 @@
 # smplkit TypeScript SDK
 
-[![npm Version](https://img.shields.io/npm/v/@smplkit/sdk)](https://www.npmjs.com/package/@smplkit/sdk) [![Build](https://github.com/smplkit/typescript-sdk/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/smplkit/typescript-sdk/actions) [![License](https://img.shields.io/npm/l/@smplkit/sdk)](LICENSE) [![Docs](https://img.shields.io/badge/docs-docs.smplkit.com-blue)](https://docs.smplkit.com)
+[![npm Version](https://img.shields.io/npm/v/@smplkit/sdk)](https://www.npmjs.com/package/@smplkit/sdk) [![Build](https://github.com/smplkit/typescript-sdk/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/smplkit/typescript-sdk/actions) [![Coverage](https://codecov.io/gh/smplkit/typescript-sdk/branch/main/graph/badge.svg)](https://codecov.io/gh/smplkit/typescript-sdk) [![License](https://img.shields.io/npm/l/@smplkit/sdk)](LICENSE) [![Docs](https://img.shields.io/badge/docs-docs.smplkit.com-blue)](https://docs.smplkit.com)
 
 The official TypeScript SDK for [smplkit](https://www.smplkit.com) — simple application infrastructure that just works.
 
