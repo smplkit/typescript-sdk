@@ -16,6 +16,7 @@ import {
   SmplError,
   SmplConnectionError,
   SmplTimeoutError,
+  throwForStatus,
 } from "../errors.js";
 import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
@@ -116,18 +117,9 @@ function resourceToConfig(resource: ConfigResource, client: ConfigClient): Confi
  * Map fetch or HTTP errors to typed SDK exceptions.
  * @internal
  */
-async function checkError(response: Response, context: string): Promise<never> {
+async function checkError(response: Response, _context: string): Promise<never> {
   const body = await response.text().catch(() => "");
-  switch (response.status) {
-    case 404:
-      throw new SmplNotFoundError(body || context, 404, body);
-    case 409:
-      throw new SmplConflictError(body || context, 409, body);
-    case 422:
-      throw new SmplValidationError(body || context, 422, body);
-    default:
-      throw new SmplError(`HTTP ${response.status}: ${body}`, response.status, body);
-  }
+  throwForStatus(response.status, body);
 }
 
 /**

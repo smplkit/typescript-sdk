@@ -10,11 +10,9 @@
 import { buildAuthHeader } from "./auth.js";
 import {
   SmplConnectionError,
-  SmplConflictError,
   SmplError,
-  SmplNotFoundError,
   SmplTimeoutError,
-  SmplValidationError,
+  throwForStatus,
 } from "./errors.js";
 
 const SDK_VERSION = "0.0.0";
@@ -148,7 +146,7 @@ export class Transport {
     const responseText = await response.text();
 
     if (!response.ok) {
-      this.throwForStatus(response.status, responseText);
+      throwForStatus(response.status, responseText);
     }
 
     try {
@@ -158,24 +156,4 @@ export class Transport {
     }
   }
 
-  /**
-   * Map HTTP error status codes to typed SDK exceptions.
-   *
-   * @throws {SmplNotFoundError} On 404.
-   * @throws {SmplConflictError} On 409.
-   * @throws {SmplValidationError} On 422.
-   * @throws {SmplError} On any other non-2xx status.
-   */
-  private throwForStatus(status: number, body: string): never {
-    switch (status) {
-      case 404:
-        throw new SmplNotFoundError(body, 404, body);
-      case 409:
-        throw new SmplConflictError(body, 409, body);
-      case 422:
-        throw new SmplValidationError(body, 422, body);
-      default:
-        throw new SmplError(`HTTP ${status}: ${body}`, status, body);
-    }
-  }
 }

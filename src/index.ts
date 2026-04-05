@@ -45,3 +45,4 @@ export {
   SmplConflictError,
   SmplValidationError,
 } from "./errors.js";
+export type { ApiErrorObject } from "./errors.js";
