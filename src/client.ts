@@ -19,6 +19,11 @@ const NO_ENVIRONMENT_MESSAGE =
   "  1. Pass environment to the constructor\n" +
   "  2. Set the SMPLKIT_ENVIRONMENT environment variable";
 
+const NO_SERVICE_MESSAGE =
+  "No service provided. Set one of:\n" +
+  "  1. Pass service in options\n" +
+  "  2. Set the SMPLKIT_SERVICE environment variable";
+
 /** Configuration options for the {@link SmplClient}. */
 export interface SmplClientOptions {
   /**
@@ -35,9 +40,9 @@ export interface SmplClientOptions {
   environment?: string;
 
   /**
-   * Optional service name. When set, the SDK automatically registers
-   * the service as a context instance and includes it in flag
-   * evaluation context.
+   * Service name. The SDK automatically registers the service as a
+   * context instance and includes it in flag evaluation context.
+   * When omitted, resolved from the `SMPLKIT_SERVICE` environment variable.
    */
   service?: string;
 
@@ -73,22 +78,30 @@ export class SmplClient {
   readonly _environment: string;
 
   /** @internal */
-  readonly _service: string | null;
+  readonly _service: string;
 
   private _connected = false;
   private readonly _timeout: number;
   private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
   constructor(options: SmplClientOptions = {}) {
-    const apiKey = resolveApiKey(options.apiKey);
-    this._apiKey = apiKey;
-
+    // 1. Resolve environment first
     const environment = options.environment || process.env.SMPLKIT_ENVIRONMENT;
     if (!environment) {
       throw new SmplError(NO_ENVIRONMENT_MESSAGE);
     }
     this._environment = environment;
-    this._service = options.service || process.env.SMPLKIT_SERVICE || null;
+
+    // 2. Resolve service second
+    const service = options.service || process.env.SMPLKIT_SERVICE;
+    if (!service) {
+      throw new SmplError(NO_SERVICE_MESSAGE);
+    }
+    this._service = service;
+
+    // 3. Resolve API key last (receives the already-resolved environment)
+    const apiKey = resolveApiKey(options.apiKey, environment);
+    this._apiKey = apiKey;
 
     this._timeout = options.timeout ?? 30_000;
 
@@ -138,9 +151,7 @@ export class SmplClient {
     if (this._connected) return;
 
     // Register service context (fire-and-forget)
-    if (this._service) {
-      await this._registerServiceContext();
-    }
+    await this._registerServiceContext();
 
     // Connect flags (fetch definitions, register WS listeners)
     await this.flags._connectInternal(this._environment);
@@ -159,8 +170,8 @@ export class SmplClient {
           contexts: [
             {
               type: "service",
-              key: this._service!,
-              attributes: { name: this._service! },
+              key: this._service,
+              attributes: { name: this._service },
             },
           ],
         },

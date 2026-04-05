@@ -7,107 +7,101 @@ import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { FlagsClient } from "../../src/flags/client.js";
 
+const DEFAULT_OPTS = { apiKey: "sk_api_test", environment: "test", service: "test-svc" };
+
 describe("SmplClient", () => {
-  it("should throw SmplError when no apiKey and no env/config fallback", () => {
-    // Skip if a config file exists on this machine (CI has no ~/.smplkit)
-    if (existsSync(join(homedir(), ".smplkit"))) return;
-    const original = process.env.SMPLKIT_API_KEY;
-    delete process.env.SMPLKIT_API_KEY;
-    try {
-      expect(() => new SmplClient({ apiKey: "" })).toThrow(SmplError);
-    } finally {
-      if (original !== undefined) process.env.SMPLKIT_API_KEY = original;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.SMPLKIT_SERVICE = process.env.SMPLKIT_SERVICE;
+    savedEnv.SMPLKIT_ENVIRONMENT = process.env.SMPLKIT_ENVIRONMENT;
+    savedEnv.SMPLKIT_API_KEY = process.env.SMPLKIT_API_KEY;
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val !== undefined) {
+        process.env[key] = val;
+      } else {
+        delete process.env[key];
+      }
     }
   });
 
-  it("should create a client with an apiKey", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+  it("should throw SmplError when no apiKey and no env/config fallback", () => {
+    // Skip if a config file exists on this machine (CI has no ~/.smplkit)
+    if (existsSync(join(homedir(), ".smplkit"))) return;
+    delete process.env.SMPLKIT_API_KEY;
+    expect(() => new SmplClient({ apiKey: "", environment: "test", service: "test-svc" })).toThrow(
+      SmplError,
+    );
+  });
+
+  it("should create a client with all required options", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(client).toBeInstanceOf(SmplClient);
   });
 
   it("should expose a config sub-client", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(client.config).toBeInstanceOf(ConfigClient);
   });
 
   it("should accept a custom timeout", () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      timeout: 5000,
-    });
+    const client = new SmplClient({ ...DEFAULT_OPTS, timeout: 5000 });
     expect(client).toBeInstanceOf(SmplClient);
   });
 
   it("should accept all options together", () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      timeout: 10000,
-    });
+    const client = new SmplClient({ ...DEFAULT_OPTS, timeout: 10000 });
     expect(client).toBeInstanceOf(SmplClient);
     expect(client.config).toBeInstanceOf(ConfigClient);
   });
 
   it("should expose a flags sub-client", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(client.flags).toBeInstanceOf(FlagsClient);
   });
 
   it("should return the same config instance every time (singleton accessor)", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(client.config).toBe(client.config);
   });
 
   it("should return the same flags instance every time (singleton accessor)", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(client.flags).toBe(client.flags);
   });
 
   it("should close without error when no WS is active", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient(DEFAULT_OPTS);
     expect(() => client.close()).not.toThrow();
   });
 
   it("should throw SmplError when no environment and no env var", () => {
-    const original = process.env.SMPLKIT_ENVIRONMENT;
     delete process.env.SMPLKIT_ENVIRONMENT;
-    try {
-      expect(() => new SmplClient({ apiKey: "sk_api_test" })).toThrow(SmplError);
-      expect(() => new SmplClient({ apiKey: "sk_api_test" })).toThrow("No environment provided");
-    } finally {
-      if (original !== undefined) process.env.SMPLKIT_ENVIRONMENT = original;
-    }
+    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
+      SmplError,
+    );
+    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
+      "No environment provided",
+    );
   });
 
   it("should resolve environment from SMPLKIT_ENVIRONMENT env var", () => {
-    const original = process.env.SMPLKIT_ENVIRONMENT;
     process.env.SMPLKIT_ENVIRONMENT = "staging";
-    try {
-      const client = new SmplClient({ apiKey: "sk_api_test" });
-      expect(client._environment).toBe("staging");
-    } finally {
-      if (original !== undefined) {
-        process.env.SMPLKIT_ENVIRONMENT = original;
-      } else {
-        delete process.env.SMPLKIT_ENVIRONMENT;
-      }
-    }
+    const client = new SmplClient({ apiKey: "sk_api_test", service: "test-svc" });
+    expect(client._environment).toBe("staging");
   });
 
   it("should prefer explicit environment over env var", () => {
-    const original = process.env.SMPLKIT_ENVIRONMENT;
     process.env.SMPLKIT_ENVIRONMENT = "staging";
-    try {
-      const client = new SmplClient({ apiKey: "sk_api_test", environment: "production" });
-      expect(client._environment).toBe("production");
-    } finally {
-      if (original !== undefined) {
-        process.env.SMPLKIT_ENVIRONMENT = original;
-      } else {
-        delete process.env.SMPLKIT_ENVIRONMENT;
-      }
-    }
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "production",
+      service: "test-svc",
+    });
+    expect(client._environment).toBe("production");
   });
 
   it("should store service when provided", () => {
@@ -119,23 +113,85 @@ describe("SmplClient", () => {
     expect(client._service).toBe("my-svc");
   });
 
-  it("should have null service when not provided", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
-    expect(client._service).toBeNull();
+  it("should throw SmplError when no service and no env var", () => {
+    delete process.env.SMPLKIT_SERVICE;
+    expect(() => new SmplClient({ apiKey: "sk_api_test", environment: "test" })).toThrow(SmplError);
+    expect(() => new SmplClient({ apiKey: "sk_api_test", environment: "test" })).toThrow(
+      "No service provided",
+    );
+  });
+
+  it("should include both methods in service error message", () => {
+    delete process.env.SMPLKIT_SERVICE;
+    try {
+      new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    } catch (e) {
+      expect(e).toBeInstanceOf(SmplError);
+      const msg = (e as SmplError).message;
+      expect(msg).toContain("Pass service in options");
+      expect(msg).toContain("SMPLKIT_SERVICE");
+      expect(msg).not.toContain("~/.smplkit");
+    }
   });
 
   it("should resolve service from SMPLKIT_SERVICE env var", () => {
-    const original = process.env.SMPLKIT_SERVICE;
     process.env.SMPLKIT_SERVICE = "env-service";
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    expect(client._service).toBe("env-service");
+  });
+
+  it("should not mention ~/.smplkit in environment error message", () => {
+    delete process.env.SMPLKIT_ENVIRONMENT;
     try {
-      const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
-      expect(client._service).toBe("env-service");
-    } finally {
-      if (original !== undefined) {
-        process.env.SMPLKIT_SERVICE = original;
-      } else {
-        delete process.env.SMPLKIT_SERVICE;
+      new SmplClient({ apiKey: "sk_api_test", service: "test-svc" });
+    } catch (e) {
+      expect(e).toBeInstanceOf(SmplError);
+      const msg = (e as SmplError).message;
+      expect(msg).not.toContain("~/.smplkit");
+    }
+  });
+
+  it("should resolve environment before service before API key", () => {
+    // Verify resolution order by checking that:
+    // 1. Environment error fires before service/API key are checked
+    // 2. Service error fires before API key is checked
+    // 3. API key error fires last and includes the resolved environment
+
+    delete process.env.SMPLKIT_ENVIRONMENT;
+    delete process.env.SMPLKIT_SERVICE;
+    delete process.env.SMPLKIT_API_KEY;
+
+    // Missing environment → environment error (not service or api_key error)
+    expect(() => new SmplClient({})).toThrow("No environment provided");
+
+    // Has environment, missing service → service error (not api_key error)
+    expect(() => new SmplClient({ environment: "test" })).toThrow("No service provided");
+
+    // Skip if a config file exists on this machine
+    if (!existsSync(join(homedir(), ".smplkit"))) {
+      // Has environment + service, missing API key → api_key error with environment name
+      try {
+        new SmplClient({ environment: "staging", service: "test-svc" });
+      } catch (e) {
+        expect(e).toBeInstanceOf(SmplError);
+        const msg = (e as SmplError).message;
+        expect(msg).toContain("No API key provided");
+        expect(msg).toContain("[staging]");
       }
+    }
+  });
+
+  it("should show resolved environment name in API key error message", () => {
+    // Skip if a config file exists on this machine
+    if (existsSync(join(homedir(), ".smplkit"))) return;
+    delete process.env.SMPLKIT_API_KEY;
+    try {
+      new SmplClient({ environment: "production", service: "test-svc" });
+    } catch (e) {
+      expect(e).toBeInstanceOf(SmplError);
+      const msg = (e as SmplError).message;
+      expect(msg).toContain("[production]");
+      expect(msg).toContain("~/.smplkit");
     }
   });
 });
@@ -160,9 +216,16 @@ describe("SmplClient connect()", () => {
   }
 
   it("should call flags._connectInternal and config._connectInternal", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "test-svc",
+    });
     const flagsSpy = vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
     const configSpy = vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
+
+    // Service registration POST
+    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
 
     await client.connect();
 
@@ -171,9 +234,16 @@ describe("SmplClient connect()", () => {
   });
 
   it("should be idempotent", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "test-svc",
+    });
     const flagsSpy = vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
     vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
+
+    // Service registration POST
+    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
 
     await client.connect();
     await client.connect();
@@ -181,7 +251,7 @@ describe("SmplClient connect()", () => {
     expect(flagsSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("should register service context when service is set", async () => {
+  it("should always register service context on connect", async () => {
     const client = new SmplClient({
       apiKey: "sk_api_test",
       environment: "test",
@@ -202,17 +272,6 @@ describe("SmplClient connect()", () => {
     const body = JSON.parse(await request.text());
     expect(body.contexts[0].type).toBe("service");
     expect(body.contexts[0].key).toBe("my-svc");
-  });
-
-  it("should not register service when service is null", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
-    vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    await client.connect();
-
-    // No fetch calls for service registration
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("should swallow service registration failure", async () => {
