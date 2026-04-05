@@ -338,6 +338,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/showcase_accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Showcase Account
+         * @description Creates an ephemeral showcase account with a 60-second TTL for SDK demonstrations.
+         */
+        post: operations["create_showcase_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invitations": {
         parameters: {
             query?: never;
@@ -506,6 +526,13 @@ export interface components {
              * @default false
              */
             readonly has_stripe_customer: boolean;
+            /** Account Type */
+            readonly account_type?: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            readonly expires_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1188,6 +1215,78 @@ export interface components {
         ServiceListResponse: {
             /** Data */
             data: components["schemas"]["ServiceResource"][];
+        };
+        /**
+         * ShowcaseAccount
+         * @example {
+         *       "account_type": "SHOWCASE",
+         *       "api_key": "sk_api_...",
+         *       "created_at": "2026-04-05T14:00:00Z",
+         *       "expires_at": "2026-04-05T14:01:00Z",
+         *       "key": "showcase-a1b2c3d4",
+         *       "name": "Showcase"
+         *     }
+         */
+        ShowcaseAccount: {
+            /**
+             * Name
+             * @default
+             */
+            readonly name: string;
+            /**
+             * Key
+             * @default
+             */
+            readonly key: string;
+            /**
+             * Account Type
+             * @default SHOWCASE
+             */
+            readonly account_type: string;
+            /**
+             * Api Key
+             * @default
+             */
+            readonly api_key: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            readonly expires_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at?: string | null;
+        };
+        /**
+         * ShowcaseAccountResource
+         * @example {
+         *       "attributes": {
+         *         "account_type": "SHOWCASE",
+         *         "api_key": "sk_api_...",
+         *         "created_at": "2026-04-05T14:00:00Z",
+         *         "expires_at": "2026-04-05T14:01:00Z",
+         *         "key": "showcase-a1b2c3d4",
+         *         "name": "Showcase"
+         *       },
+         *       "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+         *       "type": "showcase_account"
+         *     }
+         */
+        ShowcaseAccountResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "showcase_account";
+            attributes: components["schemas"]["ShowcaseAccount"];
+        };
+        /** ShowcaseAccountResponse */
+        ShowcaseAccountResponse: {
+            data: components["schemas"]["ShowcaseAccountResource"];
         };
         /**
          * User
@@ -3209,6 +3308,62 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_showcase_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ShowcaseAccountResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
