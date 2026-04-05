@@ -18,11 +18,12 @@
  *
  * Prerequisites:
  *   - `npm install @smplkit/sdk`
- *   - A valid smplkit API key (set via `SMPLKIT_API_KEY` env var)
+ *   - A valid smplkit API key, provided via one of:
+ *       - SMPLKIT_API_KEY environment variable
+ *       - ~/.smplkit configuration file (see SDK docs)
+ *   - The smplkit Config service running and reachable
  *
  * Usage:
- *   export SMPLKIT_API_KEY="sk_api_..."
- *   export SMPLKIT_ENVIRONMENT="production"
  *   npx tsx examples/config_runtime_showcase.ts
  */
 
@@ -31,19 +32,6 @@ import { SmplClient } from "@smplkit/sdk";
 // Demo scaffolding — creates configs so this showcase can run standalone.
 // In a real app, configs are created via the Console UI.
 import { setupDemoConfigs, teardownDemoConfigs } from "./config_runtime_setup.js";
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-const API_KEY = process.env.SMPLKIT_API_KEY ?? "";
-const ENVIRONMENT = process.env.SMPLKIT_ENVIRONMENT ?? "production";
-
-if (!API_KEY) {
-  console.log("ERROR: Set the SMPLKIT_API_KEY environment variable before running.");
-  console.log("  export SMPLKIT_API_KEY='sk_api_...'");
-  process.exit(1);
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,8 +55,31 @@ async function main(): Promise<void> {
   // ======================================================================
   section("1. SDK Initialization + Setup");
 
-  const client = new SmplClient({ apiKey: API_KEY, environment: ENVIRONMENT });
-  step(`SmplClient initialized (environment=${ENVIRONMENT})`);
+  // The SmplClient constructor resolves three required parameters:
+  //
+  //   apiKey       — not passed here; resolved automatically from the
+  //                  SMPLKIT_API_KEY environment variable or the
+  //                  ~/.smplkit configuration file.
+  //
+  //   environment  — the target environment. Can also be resolved from
+  //                  SMPLKIT_ENVIRONMENT if not passed.
+  //
+  //   service      — identifies this SDK instance. Can also be resolved
+  //                  from SMPLKIT_SERVICE if not passed.
+  //
+  // To pass the API key explicitly:
+  //
+  //   const client = new SmplClient({
+  //       apiKey: "sk_api_...",
+  //       environment: "production",
+  //       service: "showcase-service",
+  //   });
+  //
+  const client = new SmplClient({
+    environment: "production",
+    service: "showcase-service",
+  });
+  step("SmplClient initialized (environment=production)");
 
   // Create demo configs (normally done via Console UI).
   console.log("  Setting up demo configs...");

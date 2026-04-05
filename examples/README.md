@@ -7,7 +7,9 @@ Runnable examples demonstrating the [smplkit TypeScript SDK](https://github.com/
 ## Prerequisites
 
 1. Node.js 18+
-2. A valid smplkit API key (create one in the [smplkit console](https://app.smplkit.com)).
+2. A valid smplkit API key, provided via one of:
+   - `SMPLKIT_API_KEY` environment variable
+   - `~/.smplkit` configuration file (see SDK docs)
 3. At least one config created in your smplkit account (every account comes with a `common` config by default).
 
 ## Config Showcase
@@ -16,7 +18,7 @@ Runnable examples demonstrating the [smplkit TypeScript SDK](https://github.com/
 
 An end-to-end walkthrough of the Smpl Config SDK covering:
 
-- **Client initialization** — `new SmplClient({ apiKey: "..." })`
+- **Client initialization** — `new SmplClient({ environment: "production", service: "my-service" })`
 - **Management-plane CRUD** — create, update, list, get by key, and delete configs
 - **Environment overrides** — `setValues()` and `setValue()` for per-environment configuration
 - **Multi-level inheritance** — child → parent → common hierarchy setup
@@ -27,7 +29,6 @@ An end-to-end walkthrough of the Smpl Config SDK covering:
 ### Running
 
 ```bash
-export SMPLKIT_API_KEY="sk_api_..."
 npx tsx examples/config_showcase.ts
 ```
 
