@@ -134,7 +134,12 @@ describe("SmplError errors array", () => {
 
   it("should produce single-error toString output", () => {
     const apiErrors = [
-      { status: "400", title: "Validation Error", detail: "The 'name' field is required.", source: { pointer: "/data/attributes/name" } },
+      {
+        status: "400",
+        title: "Validation Error",
+        detail: "The 'name' field is required.",
+        source: { pointer: "/data/attributes/name" },
+      },
     ];
     const error = new SmplValidationError("The 'name' field is required.", 400, "", apiErrors);
     const str = error.toString();
@@ -147,10 +152,25 @@ describe("SmplError errors array", () => {
 
   it("should produce multi-error toString output", () => {
     const apiErrors = [
-      { status: "400", title: "Validation Error", detail: "The 'name' field is required.", source: { pointer: "/data/attributes/name" } },
-      { status: "400", title: "Validation Error", detail: "The 'id' field is required.", source: { pointer: "/data/id" } },
+      {
+        status: "400",
+        title: "Validation Error",
+        detail: "The 'name' field is required.",
+        source: { pointer: "/data/attributes/name" },
+      },
+      {
+        status: "400",
+        title: "Validation Error",
+        detail: "The 'id' field is required.",
+        source: { pointer: "/data/id" },
+      },
     ];
-    const error = new SmplValidationError("The 'name' field is required. (and 1 more error)", 400, "", apiErrors);
+    const error = new SmplValidationError(
+      "The 'name' field is required. (and 1 more error)",
+      400,
+      "",
+      apiErrors,
+    );
     const str = error.toString();
     expect(str).toContain("SmplValidationError:");
     expect(str).toContain("Errors:");
@@ -357,11 +377,7 @@ describe("throwForStatus", () => {
 
   it("should pluralize 'errors' when more than 2 extra errors", () => {
     const body = JSON.stringify({
-      errors: [
-        { detail: "Error 1" },
-        { detail: "Error 2" },
-        { detail: "Error 3" },
-      ],
+      errors: [{ detail: "Error 1" }, { detail: "Error 2" }, { detail: "Error 3" }],
     });
 
     try {

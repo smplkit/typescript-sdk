@@ -42,7 +42,11 @@ function jsonResponse(body: object, status = 200): Response {
 
 describe("SmplClient WebSocket lifecycle", () => {
   it("should create shared WS on flags._connectInternal and close it", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test", service: "test-svc" });
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "test-svc",
+    });
 
     // Mock the flags list response for _connectInternal()
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
@@ -58,7 +62,11 @@ describe("SmplClient WebSocket lifecycle", () => {
   });
 
   it("should reuse the shared WS across connects", async () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test", service: "test-svc" });
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "test-svc",
+    });
 
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
     await client.flags._connectInternal("staging");
@@ -76,7 +84,11 @@ describe("SmplClient WebSocket lifecycle", () => {
   });
 
   it("should be safe to close twice", () => {
-    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test", service: "test-svc" });
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "test-svc",
+    });
     // no WS created yet
     client.close();
     client.close();

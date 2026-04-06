@@ -8,12 +8,7 @@
  */
 
 import { buildAuthHeader } from "./auth.js";
-import {
-  SmplConnectionError,
-  SmplError,
-  SmplTimeoutError,
-  throwForStatus,
-} from "./errors.js";
+import { SmplConnectionError, SmplError, SmplTimeoutError, throwForStatus } from "./errors.js";
 
 const SDK_VERSION = "0.0.0";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -155,5 +150,4 @@ export class Transport {
       throw new SmplError(`Invalid JSON response: ${responseText}`, response.status, responseText);
     }
   }
-
 }

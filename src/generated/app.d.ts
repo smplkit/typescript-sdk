@@ -507,6 +507,11 @@ export interface components {
              */
             readonly has_stripe_customer: boolean;
             /**
+             * Expires At
+             * Format: date-time
+             */
+            readonly expires_at?: string | null;
+            /**
              * Created At
              * Format: date-time
              */

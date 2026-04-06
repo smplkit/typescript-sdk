@@ -80,9 +80,7 @@ describe("SmplClient", () => {
 
   it("should throw SmplError when no environment and no env var", () => {
     delete process.env.SMPLKIT_ENVIRONMENT;
-    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
-      SmplError,
-    );
+    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(SmplError);
     expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
       "No environment provided",
     );
