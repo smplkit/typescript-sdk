@@ -816,9 +816,9 @@ export interface components {
         /**
          * Environment
          * @example {
+         *       "classification": "STANDARD",
          *       "color": "#2ecc71",
          *       "created_at": "2026-03-20T11:02:16.616Z",
-         *       "key": "production",
          *       "name": "Production",
          *       "updated_at": "2026-03-20T11:02:16.616Z"
          *     }
@@ -826,10 +826,10 @@ export interface components {
         Environment: {
             /** Name */
             name: string;
-            /** Key */
-            key?: string | null;
             /** Color */
             color?: string | null;
+            /** Classification */
+            readonly classification?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -850,13 +850,13 @@ export interface components {
          * EnvironmentResource
          * @example {
          *       "attributes": {
+         *         "classification": "STANDARD",
          *         "color": "#2ecc71",
          *         "created_at": "2026-03-20T11:02:16.616Z",
-         *         "key": "production",
          *         "name": "Production",
          *         "updated_at": "2026-03-20T11:02:16.616Z"
          *       },
-         *       "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+         *       "id": "production",
          *       "type": "environment"
          *     }
          */
