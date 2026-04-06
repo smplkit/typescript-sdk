@@ -397,10 +397,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Accept Invitation */
-        get: operations["accept_invitation"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** Accept Invitation */
+        post: operations["accept_invitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -940,6 +940,11 @@ export interface components {
              * Format: date-time
              */
             readonly updated_at?: string | null;
+        };
+        /** InvitationAcceptRequest */
+        InvitationAcceptRequest: {
+            /** Token */
+            token: string;
         };
         /** InvitationBulkCreateRequest */
         InvitationBulkCreateRequest: {
@@ -3479,14 +3484,16 @@ export interface operations {
     };
     accept_invitation: {
         parameters: {
-            query: {
-                token: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["InvitationAcceptRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3494,7 +3501,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["InvitationResponse"];
                 };
             };
             /** @description Validation error or malformed request */
