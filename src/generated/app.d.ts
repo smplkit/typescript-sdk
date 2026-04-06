@@ -1111,11 +1111,10 @@ export interface components {
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
-         *         "key": "user_service",
          *         "name": "User Service",
          *         "updated_at": "2026-03-20T11:02:16.616Z"
          *       },
-         *       "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+         *       "id": "user_service",
          *       "type": "service"
          *     }
          */
@@ -1168,7 +1167,6 @@ export interface components {
          * Service
          * @example {
          *       "created_at": "2026-03-20T11:02:16.616Z",
-         *       "key": "user_service",
          *       "name": "User Service",
          *       "updated_at": "2026-03-20T11:02:16.616Z"
          *     }
@@ -1176,8 +1174,6 @@ export interface components {
         Service: {
             /** Name */
             name: string;
-            /** Key */
-            key?: string | null;
             /**
              * Created At
              * Format: date-time
