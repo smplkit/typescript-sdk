@@ -132,9 +132,9 @@ function parseJsonApiErrors(body: string): ApiErrorObject[] {
  * Falls back to `HTTP {statusCode}` when no detail/title/status is available.
  * @internal
  */
-function deriveMessage(errors: ApiErrorObject[], statusCode: number): string {
+function deriveMessage(errors: ApiErrorObject[], statusCode: number, body?: string): string {
   if (errors.length === 0) {
-    return `HTTP ${statusCode}`;
+    return body ? `HTTP ${statusCode}: ${body}` : `HTTP ${statusCode}`;
   }
   const first = errors[0];
   const base = first.detail ?? first.title ?? (first.status ? `HTTP ${first.status}` : `HTTP ${statusCode}`);
@@ -156,7 +156,7 @@ function deriveMessage(errors: ApiErrorObject[], statusCode: number): string {
  */
 export function throwForStatus(statusCode: number, body: string): never {
   const errors = parseJsonApiErrors(body);
-  const message = errors.length > 0 ? deriveMessage(errors, statusCode) : `HTTP ${statusCode}: ${body}`;
+  const message = deriveMessage(errors, statusCode, body);
 
   switch (statusCode) {
     case 400:
