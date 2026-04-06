@@ -25,7 +25,12 @@ export class SmplError extends Error {
   /** Structured JSON:API error objects from the server response, if available. */
   public readonly errors: ReadonlyArray<ApiErrorObject>;
 
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message);
     this.name = "SmplError";
     this.statusCode = statusCode;
@@ -48,7 +53,12 @@ export class SmplError extends Error {
 
 /** Raised when a network request fails (e.g., DNS resolution, connection refused). */
 export class SmplConnectionError extends SmplError {
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message, statusCode, responseBody, errors);
     this.name = "SmplConnectionError";
     Object.setPrototypeOf(this, new.target.prototype);
@@ -57,7 +67,12 @@ export class SmplConnectionError extends SmplError {
 
 /** Raised when an operation exceeds its timeout. */
 export class SmplTimeoutError extends SmplError {
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message, statusCode, responseBody, errors);
     this.name = "SmplTimeoutError";
     Object.setPrototypeOf(this, new.target.prototype);
@@ -66,7 +81,12 @@ export class SmplTimeoutError extends SmplError {
 
 /** Raised when a requested resource does not exist (HTTP 404). */
 export class SmplNotFoundError extends SmplError {
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message, statusCode ?? 404, responseBody, errors);
     this.name = "SmplNotFoundError";
     Object.setPrototypeOf(this, new.target.prototype);
@@ -75,7 +95,12 @@ export class SmplNotFoundError extends SmplError {
 
 /** Raised when an operation conflicts with current state (HTTP 409). */
 export class SmplConflictError extends SmplError {
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message, statusCode ?? 409, responseBody, errors);
     this.name = "SmplConflictError";
     Object.setPrototypeOf(this, new.target.prototype);
@@ -93,7 +118,12 @@ export class SmplNotConnectedError extends SmplError {
 
 /** Raised when the server rejects a request due to validation errors (HTTP 422). */
 export class SmplValidationError extends SmplError {
-  constructor(message: string, statusCode?: number, responseBody?: string, errors?: ApiErrorObject[]) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorObject[],
+  ) {
     super(message, statusCode ?? 422, responseBody, errors);
     this.name = "SmplValidationError";
     Object.setPrototypeOf(this, new.target.prototype);
@@ -137,7 +167,8 @@ function deriveMessage(errors: ApiErrorObject[], statusCode: number, body?: stri
     return body ? `HTTP ${statusCode}: ${body}` : `HTTP ${statusCode}`;
   }
   const first = errors[0];
-  const base = first.detail ?? first.title ?? (first.status ? `HTTP ${first.status}` : `HTTP ${statusCode}`);
+  const base =
+    first.detail ?? first.title ?? (first.status ? `HTTP ${first.status}` : `HTTP ${statusCode}`);
   if (errors.length > 1) {
     return `${base} (and ${errors.length - 1} more error${errors.length - 1 > 1 ? "s" : ""})`;
   }
