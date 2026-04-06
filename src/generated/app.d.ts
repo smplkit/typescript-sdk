@@ -663,17 +663,11 @@ export interface components {
          *       },
          *       "context_type": "user",
          *       "created_at": "2026-03-31T10:00:00Z",
-         *       "key": "123",
          *       "name": "Alice Smith",
          *       "updated_at": "2026-03-31T10:00:00Z"
          *     }
          */
         Context: {
-            /**
-             * Key
-             * @description Entity identifier: user-123, acme-corp
-             */
-            key: string;
             /**
              * Name
              * @description Human-readable display name
