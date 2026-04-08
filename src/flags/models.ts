@@ -1,20 +1,25 @@
 /**
- * Flag and ContextType resource models returned by the management API.
+ * Unified Flag hierarchy — management model + runtime handle.
+ *
+ * A single {@link Flag} class replaces the old separate Flag + FlagHandle
+ * classes. Typed subclasses ({@link BooleanFlag}, {@link StringFlag},
+ * {@link NumberFlag}, {@link JsonFlag}) override `get()` for type safety.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { FlagsClient } from "./client.js";
+import type { Context } from "./types.js";
 
 /**
- * A flag resource returned by {@link FlagsClient} management methods.
+ * A flag resource that doubles as a runtime handle.
  *
- * Provides `update()` for partial updates and `addRule()` for
- * conveniently appending a rule to an environment.
+ * Management: call `save()` to persist (POST if new, PUT if existing).
+ * Runtime: call `get()` for local JSON Logic evaluation.
  */
 export class Flag {
-  /** UUID of the flag. */
-  id: string;
+  /** UUID of the flag, or `null` if unsaved. */
+  id: string | null;
   /** Unique key within the account. */
   key: string;
   /** Human-readable display name. */
@@ -35,13 +40,13 @@ export class Flag {
   updatedAt: string | null;
 
   /** @internal */
-  private readonly _client: FlagsClient;
+  readonly _client: FlagsClient;
 
   /** @internal */
   constructor(
     client: FlagsClient,
     fields: {
-      id: string;
+      id: string | null;
       key: string;
       name: string;
       type: string;
@@ -67,36 +72,30 @@ export class Flag {
   }
 
   /**
-   * Update this flag's attributes on the server.
+   * Persist this flag to the server.
    *
-   * Only provided fields are changed; others retain their current values.
+   * POST if `id` is null (new flag), PUT if `id` is set (update).
+   * Updates this instance in-place with the server response.
    */
-  async update(options: {
-    environments?: Record<string, any>;
-    values?: Array<{ name: string; value: unknown }>;
-    default?: unknown;
-    description?: string;
-    name?: string;
-  }): Promise<void> {
-    const updated = await this._client._updateFlag({
-      flag: this,
-      environments: options.environments,
-      values: options.values,
-      default: options.default,
-      description: options.description,
-      name: options.name,
-    });
-    this._apply(updated);
+  async save(): Promise<void> {
+    if (this.id === null) {
+      const created = await this._client._createFlag(this);
+      this._apply(created);
+    } else {
+      const updated = await this._client._updateFlag(this);
+      this._apply(updated);
+    }
   }
 
   /**
-   * Add a rule to a specific environment.
+   * Add a rule to a specific environment (sync local mutation).
    *
    * The built rule must include an `environment` key (set via
-   * `Rule(...).environment("env_key")`).  Re-fetches current state
-   * first to avoid stale data.
+   * `Rule(...).environment("env_key")`). No HTTP call is made.
+   *
+   * @returns `this` for chaining.
    */
-  async addRule(builtRule: Record<string, any>): Promise<void> {
+  addRule(builtRule: Record<string, any>): Flag {
     const envKey = builtRule.environment as string | undefined;
     if (!envKey) {
       throw new Error(
@@ -105,29 +104,60 @@ export class Flag {
       );
     }
 
-    // Re-fetch current state to avoid staleness
-    const current = await this._client.get(this.id);
-    this._apply(current);
-
     const envs = { ...this.environments };
     const envData = { ...(envs[envKey] ?? { enabled: true, rules: [] }) };
     const rules = [...(envData.rules ?? [])];
 
-    // Strip the environment key from the rule — it's metadata, not part of the rule
+    // Strip the environment key from the rule — it's metadata
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { environment: _env, ...ruleCopy } = builtRule;
     rules.push(ruleCopy);
     envData.rules = rules;
     envs[envKey] = envData;
 
-    const updated = await this._client._updateFlag({
-      flag: this,
-      environments: envs,
-    });
-    this._apply(updated);
+    this.environments = envs;
+    return this;
   }
 
-  /** @internal */
+  /** Enable or disable a flag in a specific environment (sync local mutation). */
+  setEnvironmentEnabled(envKey: string, enabled: boolean): void {
+    const envs = { ...this.environments };
+    const envData = { ...(envs[envKey] ?? { enabled: false, rules: [] }) };
+    envData.enabled = enabled;
+    envs[envKey] = envData;
+    this.environments = envs;
+  }
+
+  /** Set the default value for a specific environment (sync local mutation). */
+  setEnvironmentDefault(envKey: string, defaultValue: unknown): void {
+    const envs = { ...this.environments };
+    const envData = { ...(envs[envKey] ?? { enabled: false, rules: [] }) };
+    envData.default = defaultValue;
+    envs[envKey] = envData;
+    this.environments = envs;
+  }
+
+  /** Clear all rules for a specific environment (sync local mutation). */
+  clearRules(envKey: string): void {
+    const envs = { ...this.environments };
+    const envData = envs[envKey];
+    if (envData) {
+      envs[envKey] = { ...envData, rules: [] };
+      this.environments = envs;
+    }
+  }
+
+  /**
+   * Evaluate the flag locally (sync, no HTTP).
+   *
+   * Requires `initialize()` to have been called.
+   */
+  /* v8 ignore next 3 — overridden by all exported subclasses */
+  get(options?: { context?: Context[] }): unknown {
+    return this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+  }
+
+  /** @internal — copy all fields from another Flag instance. */
   _apply(other: Flag): void {
     this.id = other.id;
     this.key = other.key;
@@ -146,25 +176,46 @@ export class Flag {
   }
 }
 
-/** A context type resource returned by management API methods. */
-export class ContextType {
-  /** UUID. */
-  id: string;
-  /** Unique key within the account. */
-  key: string;
-  /** Human-readable display name. */
-  name: string;
-  /** Known attributes. */
-  attributes: Record<string, any>;
-
-  constructor(fields: { id: string; key: string; name: string; attributes: Record<string, any> }) {
-    this.id = fields.id;
-    this.key = fields.key;
-    this.name = fields.name;
-    this.attributes = fields.attributes;
+/** Typed flag that returns `boolean` from `get()`. */
+export class BooleanFlag extends Flag {
+  get(options?: { context?: Context[] }): boolean {
+    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    if (typeof value === "boolean") {
+      return value;
+    }
+    return this.default as boolean;
   }
+}
 
-  toString(): string {
-    return `ContextType(key=${this.key}, name=${this.name})`;
+/** Typed flag that returns `string` from `get()`. */
+export class StringFlag extends Flag {
+  get(options?: { context?: Context[] }): string {
+    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    if (typeof value === "string") {
+      return value;
+    }
+    return this.default as string;
+  }
+}
+
+/** Typed flag that returns `number` from `get()`. */
+export class NumberFlag extends Flag {
+  get(options?: { context?: Context[] }): number {
+    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    if (typeof value === "number") {
+      return value;
+    }
+    return this.default as number;
+  }
+}
+
+/** Typed flag that returns `Record<string, any>` from `get()`. */
+export class JsonFlag extends Flag {
+  get(options?: { context?: Context[] }): Record<string, any> {
+    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return value as Record<string, any>;
+    }
+    return this.default as Record<string, any>;
   }
 }

@@ -1,17 +1,17 @@
 /**
- * ConfigClient — management-plane operations for configs.
+ * ConfigClient — management plane + runtime for Smpl Config.
  *
  * Uses the generated OpenAPI types (`src/generated/config.d.ts`) via
- * `openapi-fetch` for all HTTP calls, keeping the client layer fully
- * type-safe without hand-coded request/response shapes.
+ * `openapi-fetch` for all HTTP calls.
  */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
 import type { components, operations } from "../generated/config.d.ts";
 import {
   SmplConflictError,
   SmplNotFoundError,
-  SmplNotConnectedError,
   SmplValidationError,
   SmplError,
   SmplConnectionError,
@@ -20,7 +20,8 @@ import {
 } from "../errors.js";
 import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
-import type { ConfigUpdatePayload, CreateConfigOptions, GetConfigOptions } from "./types.js";
+import { LiveConfigProxy } from "./proxy.js";
+import { keyToDisplayName } from "../helpers.js";
 
 /** Describes a single config value change detected on refresh. */
 export interface ConfigChangeEvent {
@@ -45,8 +46,6 @@ interface ChangeListener {
 
 const BASE_URL = "https://config.smplkit.com";
 
-type ApiConfig = components["schemas"]["Config"];
-type ApiConfigOutput = components["schemas"]["Config"];
 type ConfigResource = components["schemas"]["ConfigResource"];
 
 /**
@@ -94,9 +93,9 @@ function extractEnvironments(
 
 /** @internal */
 function resourceToConfig(resource: ConfigResource, client: ConfigClient): Config {
-  const attrs: ApiConfigOutput = resource.attributes;
+  const attrs = resource.attributes;
   return new Config(client, {
-    id: resource.id ?? "",
+    id: resource.id ?? null,
     key: attrs.key ?? "",
     name: attrs.name,
     description: attrs.description ?? null,
@@ -108,24 +107,18 @@ function resourceToConfig(resource: ConfigResource, client: ConfigClient): Confi
         | null
         | undefined,
     ),
-    createdAt: attrs.created_at ? new Date(attrs.created_at) : null,
-    updatedAt: attrs.updated_at ? new Date(attrs.updated_at) : null,
+    createdAt: attrs.created_at ?? null,
+    updatedAt: attrs.updated_at ?? null,
   });
 }
 
-/**
- * Map fetch or HTTP errors to typed SDK exceptions.
- * @internal
- */
+/** @internal */
 async function checkError(response: Response, _context: string): Promise<never> {
   const body = await response.text().catch(() => "");
   throwForStatus(response.status, body);
 }
 
-/**
- * Re-raise fetch-level errors (network, timeout) as typed SDK exceptions.
- * @internal
- */
+/** @internal */
 function wrapFetchError(err: unknown): never {
   if (
     err instanceof SmplNotFoundError ||
@@ -202,16 +195,16 @@ function buildRequestBody(options: {
   items?: Record<string, unknown> | null;
   environments?: Record<string, unknown> | null;
 }): operations["create_config"]["requestBody"]["content"]["application/json"] {
-  const attrs: ApiConfig = {
+  const attrs: components["schemas"]["Config"] = {
     name: options.name,
   };
   if (options.key !== undefined) attrs.key = options.key;
   if (options.description !== undefined) attrs.description = options.description;
   if (options.parent !== undefined) attrs.parent = options.parent;
   if (options.items !== undefined)
-    attrs.items = wrapItemValues(options.items) as ApiConfig["items"];
+    attrs.items = wrapItemValues(options.items) as typeof attrs.items;
   if (options.environments !== undefined)
-    attrs.environments = wrapEnvironments(options.environments) as ApiConfig["environments"];
+    attrs.environments = wrapEnvironments(options.environments) as typeof attrs.environments;
 
   return {
     data: {
@@ -223,15 +216,12 @@ function buildRequestBody(options: {
 }
 
 /**
- * Client for the smplkit Config API (management plane).
- *
- * All methods are async and return `Promise<T>`. Network and server
- * errors are mapped to typed SDK exceptions.
+ * Client for the smplkit Config API — management plane + runtime.
  *
  * Obtained via `SmplClient.config`.
  */
 export class ConfigClient {
-  /** @internal — used by Config instances for reconnecting and WebSocket auth. */
+  /** @internal */
   readonly _apiKey: string;
 
   /** @internal */
@@ -247,7 +237,9 @@ export class ConfigClient {
   _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
-  private _connected = false;
+  /* v8 ignore next — bookkeeping for future use */
+  _configStore: Config[] = [];
+  private _initialized = false;
   private _listeners: ChangeListener[] = [];
 
   /** @internal */
@@ -260,7 +252,6 @@ export class ConfigClient {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },
-      // openapi-fetch custom fetch receives a pre-built Request object
       fetch: async (request: Request): Promise<Response> => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), ms);
@@ -278,24 +269,35 @@ export class ConfigClient {
     });
   }
 
-  /**
-   * Fetch a single config by key or UUID.
-   *
-   * Exactly one of `key` or `id` must be provided.
-   *
-   * @throws {SmplNotFoundError} If no matching config exists.
-   */
-  async get(options: GetConfigOptions): Promise<Config> {
-    const { key, id } = options;
-    if ((key === undefined) === (id === undefined)) {
-      throw new Error("Exactly one of 'key' or 'id' must be provided.");
-    }
-    return id !== undefined ? this._getById(id) : this._getByKey(key!);
+  // ------------------------------------------------------------------
+  // Management: factory method
+  // ------------------------------------------------------------------
+
+  /** Create an unsaved config. Call `.save()` to persist. */
+  new(key: string, options?: { name?: string; description?: string; parent?: string }): Config {
+    return new Config(this, {
+      id: null,
+      key,
+      name: options?.name ?? keyToDisplayName(key),
+      description: options?.description ?? null,
+      parent: options?.parent ?? null,
+      items: {},
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
   }
 
-  /**
-   * List all configs for the account.
-   */
+  // ------------------------------------------------------------------
+  // Management: CRUD
+  // ------------------------------------------------------------------
+
+  /** Fetch a config by key. */
+  async get(key: string): Promise<Config> {
+    return this._getByKey(key);
+  }
+
+  /** List all configs. */
   async list(): Promise<Config[]> {
     let data: components["schemas"]["ConfigListResponse"] | undefined;
     try {
@@ -309,18 +311,33 @@ export class ConfigClient {
     return data.data.map((r) => resourceToConfig(r, this));
   }
 
-  /**
-   * Create a new config.
-   *
-   * @throws {SmplValidationError} If the server rejects the request.
-   */
-  async create(options: CreateConfigOptions): Promise<Config> {
+  /** Delete a config by key. */
+  async delete(key: string): Promise<void> {
+    const config = await this.get(key);
+    try {
+      const result = await this._http.DELETE("/api/v1/configs/{id}", {
+        params: { path: { id: config.id! } },
+      });
+      if (result.error !== undefined && result.response.status !== 204)
+        await checkError(result.response, `Failed to delete config '${key}'`);
+    } catch (err) {
+      wrapFetchError(err);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Management: internal save methods (called by Config.save())
+  // ------------------------------------------------------------------
+
+  /** @internal — POST a new config. */
+  async _createConfig(config: Config): Promise<Config> {
     const body = buildRequestBody({
-      name: options.name,
-      key: options.key,
-      description: options.description,
-      parent: options.parent,
-      items: options.items,
+      name: config.name,
+      key: config.key,
+      description: config.description,
+      parent: config.parent,
+      items: config.items,
+      environments: config.environments,
     });
 
     let data: components["schemas"]["ConfigResponse"] | undefined;
@@ -335,113 +352,156 @@ export class ConfigClient {
     return resourceToConfig(data.data, this);
   }
 
-  /**
-   * Delete a config by UUID.
-   *
-   * @throws {SmplNotFoundError} If the config does not exist.
-   * @throws {SmplConflictError} If the config has child configs.
-   */
-  async delete(configId: string): Promise<void> {
+  /** @internal — PUT a config update. */
+  async _updateConfig(config: Config): Promise<Config> {
+    const body = buildRequestBody({
+      id: config.id,
+      name: config.name,
+      key: config.key,
+      description: config.description,
+      parent: config.parent,
+      items: config.items,
+      environments: config.environments,
+    });
+
+    let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
-      const result = await this._http.DELETE("/api/v1/configs/{id}", {
-        params: { path: { id: configId } },
+      const result = await this._http.PUT("/api/v1/configs/{id}", {
+        params: { path: { id: config.id! } },
+        body,
       });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete config ${configId}`);
+      if (result.error !== undefined)
+        await checkError(result.response, `Failed to update config ${config.id}`);
+      data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
+    if (!data || !data.data) throw new SmplValidationError(`Failed to update config ${config.id}`);
+    return resourceToConfig(data.data, this);
   }
 
-  /**
-   * Fetch all configs, resolve values for the environment, and cache.
-   * @internal — called by SmplClient.connect().
-   */
-  async _connectInternal(environment: string): Promise<void> {
-    const configs = await this.list();
-    const cache: Record<string, Record<string, unknown>> = {};
-    for (const cfg of configs) {
-      const chain = await cfg._buildChain(this._http);
-      cache[cfg.key] = resolveChain(chain, environment);
+  /** @internal — fetch a config by UUID. */
+  async _getById(configId: string): Promise<Config> {
+    let data: components["schemas"]["ConfigResponse"] | undefined;
+    try {
+      const result = await this._http.GET("/api/v1/configs/{id}", {
+        params: { path: { id: configId } },
+      });
+      if (result.error !== undefined)
+        await checkError(result.response, `Config ${configId} not found`);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
     }
-    this._configCache = cache;
-    this._connected = true;
+    if (!data || !data.data) throw new SmplNotFoundError(`Config ${configId} not found`);
+    return resourceToConfig(data.data, this);
   }
 
+  // ------------------------------------------------------------------
+  // Runtime: resolve and subscribe
+  // ------------------------------------------------------------------
+
   /**
-   * Read a resolved config value (prescriptive access).
+   * Resolve a config's values for the current environment.
    *
-   * Requires {@link SmplClient.connect} to have been called.
+   * Returns a flat dict of resolved key-value pairs, walking the
+   * parent chain and applying environment overrides.
    *
-   * @param configKey - The config key to look up.
-   * @param itemKey - Optional specific item key. If omitted, returns all values.
-   * @param defaultValue - Default value if the key is missing.
-   *
-   * @throws {SmplNotConnectedError} If connect() has not been called.
+   * Optionally pass a model class to map the resolved values.
    */
-  getValue(configKey: string, itemKey?: string, defaultValue?: unknown): unknown {
-    if (!this._connected) {
-      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
+  async resolve<T = Record<string, unknown>>(
+    key: string,
+    model?: new (data: any) => T,
+  ): Promise<T> {
+    await this._ensureInitialized();
+    const values = this._configCache[key];
+    if (values === undefined) {
+      throw new SmplNotFoundError(`Config with key '${key}' not found in cache`);
     }
-    const resolved = this._configCache[configKey];
-    if (resolved === undefined) {
-      return defaultValue ?? null;
+    if (model) {
+      return new model(values);
     }
-    if (itemKey === undefined) {
-      return { ...resolved };
+    return values as T;
+  }
+
+  /**
+   * Subscribe to a config's values — returns a live proxy that
+   * auto-updates when the underlying config changes.
+   *
+   * Optionally pass a model class to map the resolved values.
+   */
+  async subscribe<T = Record<string, unknown>>(
+    key: string,
+    model?: new (data: any) => T,
+  ): Promise<LiveConfigProxy<T>> {
+    await this._ensureInitialized();
+    if (!(key in this._configCache)) {
+      throw new SmplNotFoundError(`Config with key '${key}' not found in cache`);
     }
-    return itemKey in resolved ? resolved[itemKey] : (defaultValue ?? null);
+    return new LiveConfigProxy<T>(this, key, model);
   }
 
-  /**
-   * Return a config value as a string, or `defaultValue` if absent or not a string.
-   *
-   * @throws {SmplNotConnectedError} If connect() has not been called.
-   */
-  getString(configKey: string, itemKey: string, defaultValue: string | null = null): string | null {
-    const value = this.getValue(configKey, itemKey);
-    return typeof value === "string" ? value : defaultValue;
-  }
+  // ------------------------------------------------------------------
+  // Runtime: change listeners (3-level overloads)
+  // ------------------------------------------------------------------
 
   /**
-   * Return a config value as a number, or `defaultValue` if absent or not a number.
+   * Register a change listener.
    *
-   * @throws {SmplNotConnectedError} If connect() has not been called.
+   * - `onChange(callback)` — fires for any config change (global).
+   * - `onChange(configKey, callback)` — fires for changes to a specific config.
+   * - `onChange(configKey, itemKey, callback)` — fires for a specific item.
    */
-  getInt(configKey: string, itemKey: string, defaultValue: number | null = null): number | null {
-    const value = this.getValue(configKey, itemKey);
-    return typeof value === "number" ? value : defaultValue;
+  onChange(
+    callbackOrConfigKey: string | ((event: ConfigChangeEvent) => void),
+    callbackOrItemKey?: string | ((event: ConfigChangeEvent) => void),
+    callback?: (event: ConfigChangeEvent) => void,
+  ): void {
+    if (typeof callbackOrConfigKey === "function") {
+      // Global listener: onChange(callback)
+      this._listeners.push({
+        callback: callbackOrConfigKey,
+        configKey: null,
+        itemKey: null,
+      });
+    } else if (typeof callbackOrItemKey === "function") {
+      // Config-scoped: onChange(configKey, callback)
+      this._listeners.push({
+        callback: callbackOrItemKey,
+        configKey: callbackOrConfigKey,
+        itemKey: null,
+      });
+    } else if (typeof callbackOrItemKey === "string" && callback) {
+      // Item-scoped: onChange(configKey, itemKey, callback)
+      this._listeners.push({
+        callback,
+        configKey: callbackOrConfigKey,
+        itemKey: callbackOrItemKey,
+      });
+    }
   }
 
-  /**
-   * Return a config value as a boolean, or `defaultValue` if absent or not a boolean.
-   *
-   * @throws {SmplNotConnectedError} If connect() has not been called.
-   */
-  getBool(configKey: string, itemKey: string, defaultValue: boolean | null = null): boolean | null {
-    const value = this.getValue(configKey, itemKey);
-    return typeof value === "boolean" ? value : defaultValue;
-  }
+  // ------------------------------------------------------------------
+  // Runtime: refresh
+  // ------------------------------------------------------------------
 
   /**
    * Re-fetch all configs, re-resolve values, and update the cache.
-   *
-   * Fires change listeners for any values that differ from the previous cache.
-   *
-   * @throws {SmplNotConnectedError} If connect() has not been called.
+   * Fires change listeners for any values that differ.
    */
   async refresh(): Promise<void> {
-    if (!this._connected) {
-      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
+    if (!this._initialized) {
+      throw new SmplError("Config not initialized. Call resolve() or subscribe() first.");
     }
     const environment = this._parent?._environment;
     if (!environment) {
       throw new SmplError("No environment set.");
     }
     const configs = await this.list();
+    this._configStore = configs;
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
-      const chain = await cfg._buildChain(this._http);
+      const chain = await cfg._buildChain();
       newCache[cfg.key] = resolveChain(chain, environment);
     }
     const oldCache = this._configCache;
@@ -449,23 +509,66 @@ export class ConfigClient {
     this._diffAndFire(oldCache, newCache, "manual");
   }
 
-  /**
-   * Register a listener that fires when a config value changes (on refresh).
-   *
-   * @param callback - Called with a {@link ConfigChangeEvent} on each change.
-   * @param options.configKey - If provided, only fire for changes to this config.
-   * @param options.itemKey - If provided, only fire for changes to this item key.
-   */
-  onChange(
-    callback: (event: ConfigChangeEvent) => void,
-    options?: { configKey?: string; itemKey?: string },
-  ): void {
-    this._listeners.push({
-      callback,
-      configKey: options?.configKey ?? null,
-      itemKey: options?.itemKey ?? null,
-    });
+  // ------------------------------------------------------------------
+  // Runtime: lazy initialization
+  // ------------------------------------------------------------------
+
+  /** @internal */
+  private async _ensureInitialized(): Promise<void> {
+    if (this._initialized) return;
+    const environment = this._parent?._environment;
+    if (!environment) {
+      throw new SmplError("No environment set. Ensure SmplClient is configured.");
+    }
+    const configs = await this.list();
+    this._configStore = configs;
+    const cache: Record<string, Record<string, unknown>> = {};
+    for (const cfg of configs) {
+      const chain = await cfg._buildChain();
+      cache[cfg.key] = resolveChain(chain, environment);
+    }
+    this._configCache = cache;
+    this._initialized = true;
+
+    // Wire WebSocket for real-time updates
+    if (this._getSharedWs) {
+      const ws = this._getSharedWs();
+      ws.on("config_changed", this._handleConfigChanged);
+    }
   }
+
+  /** @internal — called by SmplClient for backward compat. */
+  async _connectInternal(environment: string): Promise<void> {
+    if (this._initialized) return;
+    const configs = await this.list();
+    this._configStore = configs;
+    const cache: Record<string, Record<string, unknown>> = {};
+    for (const cfg of configs) {
+      const chain = await cfg._buildChain();
+      cache[cfg.key] = resolveChain(chain, environment);
+    }
+    this._configCache = cache;
+    this._initialized = true;
+  }
+
+  /** @internal — get resolved config from cache. Used by LiveConfigProxy. */
+  _getCachedConfig(key: string): Record<string, unknown> | undefined {
+    return this._configCache[key];
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: WebSocket handler
+  // ------------------------------------------------------------------
+
+  private _handleConfigChanged = (_data: Record<string, any>): void => {
+    void this.refresh().catch(() => {
+      // ignore refresh errors from WebSocket events
+    });
+  };
+
+  // ------------------------------------------------------------------
+  // Internal: change detection
+  // ------------------------------------------------------------------
 
   /** @internal */
   private _diffAndFire(
@@ -503,57 +606,9 @@ export class ConfigClient {
     }
   }
 
-  /**
-   * Internal: PUT a full config update and return the updated model.
-   *
-   * Called by {@link Config} instance methods.
-   * @internal
-   */
-  async _updateConfig(payload: ConfigUpdatePayload): Promise<Config> {
-    const body = buildRequestBody({
-      id: payload.configId,
-      name: payload.name,
-      key: payload.key,
-      description: payload.description,
-      parent: payload.parent,
-      items: payload.items,
-      environments: payload.environments,
-    });
-
-    let data: components["schemas"]["ConfigResponse"] | undefined;
-    try {
-      const result = await this._http.PUT("/api/v1/configs/{id}", {
-        params: { path: { id: payload.configId } },
-        body,
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Failed to update config ${payload.configId}`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data)
-      throw new SmplValidationError(`Failed to update config ${payload.configId}`);
-    return resourceToConfig(data.data, this);
-  }
-
-  // ---- Private helpers ----
-
-  private async _getById(configId: string): Promise<Config> {
-    let data: components["schemas"]["ConfigResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/configs/{id}", {
-        params: { path: { id: configId } },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Config ${configId} not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplNotFoundError(`Config ${configId} not found`);
-    return resourceToConfig(data.data, this);
-  }
+  // ------------------------------------------------------------------
+  // Internal: fetch by key
+  // ------------------------------------------------------------------
 
   private async _getByKey(key: string): Promise<Config> {
     let data: components["schemas"]["ConfigListResponse"] | undefined;

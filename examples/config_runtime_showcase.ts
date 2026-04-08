@@ -5,16 +5,17 @@
  * Demonstrates the smplkit TypeScript SDK's runtime experience for Smpl Config:
  *
  * - Client initialization (`SmplClient`)
- * - Prescriptive value resolution via `client.connect()` + `client.config.getValue()`
- * - Typed accessors: `getString()`, `getInt()`, `getBool()`
- * - Multi-level inheritance (child configs inherit from parents and common)
- * - Change listeners: `client.config.onChange()`
+ * - Value resolution: `client.config.resolve()` for flat dict
+ * - Typed resolution: `client.config.resolve()` with a model class
+ * - Live proxy: `client.config.subscribe()` for auto-updating access
+ * - Change listeners at three levels: global, config-scoped, item-scoped
  * - Manual refresh: `client.config.refresh()`
  *
  * This is the SDK experience that 99% of customers will use. Configs are
  * created and configured via the Console UI (or the management API shown
  * in `config_management_showcase.ts`). This script focuses entirely on
- * the runtime: connecting, reading resolved values, and reacting to changes.
+ * the runtime: resolving values, subscribing to live updates, and
+ * reacting to changes.
  *
  * Prerequisites:
  *   - `npm install @smplkit/sdk`
@@ -49,32 +50,39 @@ function step(description: string): void {
   console.log(`  → ${description}`);
 }
 
+// ---------------------------------------------------------------------------
+// Typed model for resolve() demonstration
+// ---------------------------------------------------------------------------
+
+/**
+ * A simple model class that maps resolved config values to typed
+ * properties. Pass this to resolve() or subscribe() to get a typed
+ * object instead of a plain dict.
+ */
+class UserServiceConfig {
+  database_host: string;
+  database_port: number;
+  pool_size: number;
+  cache_ttl_seconds: number;
+  enable_signup: boolean;
+  pagination_default_page_size: number;
+
+  constructor(data: Record<string, unknown>) {
+    this.database_host = data.database_host as string;
+    this.database_port = data.database_port as number;
+    this.pool_size = data.pool_size as number;
+    this.cache_ttl_seconds = data.cache_ttl_seconds as number;
+    this.enable_signup = data.enable_signup as boolean;
+    this.pagination_default_page_size = data.pagination_default_page_size as number;
+  }
+}
+
 async function main(): Promise<void> {
   // ======================================================================
   // 1. SDK INITIALIZATION + SETUP
   // ======================================================================
   section("1. SDK Initialization + Setup");
 
-  // The SmplClient constructor resolves three required parameters:
-  //
-  //   apiKey       — not passed here; resolved automatically from the
-  //                  SMPLKIT_API_KEY environment variable or the
-  //                  ~/.smplkit configuration file.
-  //
-  //   environment  — the target environment. Can also be resolved from
-  //                  SMPLKIT_ENVIRONMENT if not passed.
-  //
-  //   service      — identifies this SDK instance. Can also be resolved
-  //                  from SMPLKIT_SERVICE if not passed.
-  //
-  // To pass the API key explicitly:
-  //
-  //   const client = new SmplClient({
-  //       apiKey: "sk_api_...",
-  //       environment: "production",
-  //       service: "showcase-service",
-  //   });
-  //
   const client = new SmplClient({
     environment: "production",
     service: "showcase-service",
@@ -87,110 +95,159 @@ async function main(): Promise<void> {
   console.log("  Demo configs ready.\n");
 
   // ======================================================================
-  // 2. CONNECT AND READ RESOLVED VALUES
+  // 2. RESOLVE — Flat Dict
+  // ======================================================================
+  //
+  // resolve() fetches all configs, walks the parent chain, applies
+  // environment overrides, and returns a flat dict of resolved values.
+  //
+  // The first call initializes the config cache. Subsequent calls use
+  // the cache and return instantly.
   // ======================================================================
 
-  section("2. Connect and Read Resolved Values");
+  section("2. Resolve — Flat Dict");
 
-  await client.connect();
-  step("client.connect() completed — all configs fetched and cached");
-
-  // Prescriptive access: getValue(configKey, itemKey)
-  const dbConfig = client.config.getValue("user_service", "database");
-  step(`database = ${JSON.stringify(dbConfig)}`);
-
-  const retries = client.config.getValue("user_service", "max_retries");
-  step(`max_retries = ${retries}`);
-
-  const cacheTtl = client.config.getValue("user_service", "cache_ttl_seconds");
-  step(`cache_ttl_seconds = ${cacheTtl}`);
-
-  const pageSize = client.config.getValue("user_service", "pagination_default_page_size");
-  step(`pagination_default_page_size = ${pageSize}`);
-
-  const missing = client.config.getValue("user_service", "nonexistent_key");
-  step(`nonexistent key = ${missing}`);
-
-  // Get all values for a config
-  const allValues = client.config.getValue("user_service") as Record<string, unknown>;
-  step(`Total resolved keys for user_service: ${Object.keys(allValues).length}`);
+  const values = await client.config.resolve("user-service");
+  step(`Resolved user-service: ${JSON.stringify(values)}`);
+  step(`  database_host = ${values.database_host}`);
+  step(`  pool_size = ${values.pool_size}`);
+  step(`  cache_ttl_seconds = ${values.cache_ttl_seconds}`);
+  step(`  max_retries = ${values.max_retries} (inherited from common)`);
+  step(`  app_name = ${values.app_name} (inherited from common)`);
 
   // ======================================================================
-  // 3. TYPED ACCESSORS
+  // 3. RESOLVE — Typed Model
+  // ======================================================================
+  //
+  // Pass a class constructor as the second argument. The class receives
+  // the resolved dict and maps it to typed properties.
   // ======================================================================
 
-  section("3. Typed Accessors");
+  section("3. Resolve — Typed Model");
 
-  const appName = client.config.getString("user_service", "app_name", "Unknown");
-  step(`app_name (string) = ${appName}`);
-
-  const timeoutMs = client.config.getInt("user_service", "request_timeout_ms", 3000);
-  step(`request_timeout_ms (number) = ${timeoutMs}`);
-
-  const signup = client.config.getBool("user_service", "enable_signup", true);
-  step(`enable_signup (bool) = ${signup}`);
+  const typed = await client.config.resolve("user-service", UserServiceConfig);
+  step(`Typed resolve: database_host=${typed.database_host}`);
+  step(`  pool_size=${typed.pool_size} (type: ${typeof typed.pool_size})`);
+  step(`  cache_ttl_seconds=${typed.cache_ttl_seconds} (type: ${typeof typed.cache_ttl_seconds})`);
+  step(`  enable_signup=${typed.enable_signup} (type: ${typeof typed.enable_signup})`);
 
   // ======================================================================
-  // 4. MULTI-LEVEL INHERITANCE
+  // 4. SUBSCRIBE — Live Proxy
+  // ======================================================================
+  //
+  // subscribe() returns a LiveConfigProxy — an ES6 Proxy that delegates
+  // property reads to the live cache. When the cache updates (via
+  // WebSocket or manual refresh), subsequent reads automatically reflect
+  // the new values. No polling, no callbacks needed for reads.
   // ======================================================================
 
-  section("4. Multi-Level Inheritance (auth_module)");
+  section("4. Subscribe — Live Proxy");
 
-  const sessionTtl = client.config.getValue("auth_module", "session_ttl_minutes");
-  step(`session_ttl_minutes = ${sessionTtl}`);
+  const proxy = await client.config.subscribe("user-service");
 
-  const mfa = client.config.getValue("auth_module", "mfa_enabled");
-  step(`mfa_enabled = ${mfa}`);
+  // Property reads go through the proxy to the live cache
+  step(`proxy.database_host = ${(proxy as Record<string, unknown>).database_host}`);
+  step(`proxy.pool_size = ${(proxy as Record<string, unknown>).pool_size}`);
+  step(`proxy.cache_ttl_seconds = ${(proxy as Record<string, unknown>).cache_ttl_seconds}`);
 
-  const inheritedApp = client.config.getValue("auth_module", "app_name");
-  step(`app_name (inherited from common) = ${inheritedApp}`);
+  // You can also subscribe with a model class for typed access
+  const typedProxy = await client.config.subscribe("user-service", UserServiceConfig);
+  step(`typedProxy.pool_size = ${typedProxy.pool_size} (type: ${typeof typedProxy.pool_size})`);
 
   // ======================================================================
-  // 5. CHANGE LISTENERS AND REFRESH
+  // 5. CHANGE LISTENERS — Three Levels
+  // ======================================================================
+  //
+  // onChange supports three scoping levels:
+  //
+  //   1. Global:       onChange(callback)
+  //   2. Config-scoped: onChange(configKey, callback)
+  //   3. Item-scoped:   onChange(configKey, itemKey, callback)
+  //
+  // Listeners fire when the config cache is updated (via refresh() or
+  // WebSocket push).
   // ======================================================================
 
   // ------------------------------------------------------------------
-  // 5a. Change Listeners
+  // 5a. Global Listener — fires for ANY config change
   // ------------------------------------------------------------------
-  section("5a. Change Listeners");
+  section("5a. Global Change Listener");
 
-  const changes: unknown[] = [];
+  const globalChanges: unknown[] = [];
   client.config.onChange((event) => {
-    changes.push(event);
+    globalChanges.push(event);
     console.log(
-      `    [CHANGE] ${event.configKey}.${event.itemKey}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
+      `    [GLOBAL] ${event.configKey}.${event.itemKey}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
     );
   });
   step("Global change listener registered");
 
-  const retriesChanges: unknown[] = [];
-  client.config.onChange((e) => retriesChanges.push(e), {
-    configKey: "common",
-    itemKey: "max_retries",
+  // ------------------------------------------------------------------
+  // 5b. Config-Scoped Listener — fires only for common config changes
+  // ------------------------------------------------------------------
+  section("5b. Config-Scoped Change Listener");
+
+  const commonChanges: unknown[] = [];
+  client.config.onChange("common", (event) => {
+    commonChanges.push(event);
+    console.log(
+      `    [COMMON] ${event.itemKey}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
+    );
   });
-  step("Key-specific listener registered for common.max_retries");
+  step("Config-scoped listener registered for 'common'");
 
   // ------------------------------------------------------------------
-  // 5b. Refresh After Management Change
+  // 5c. Item-Scoped Listener — fires only for max_retries on common
   // ------------------------------------------------------------------
-  section("5b. Refresh After Management Change");
+  section("5c. Item-Scoped Change Listener");
 
-  await demo.common.setValue("max_retries", 7, "production");
-  step("Updated max_retries to 7 on common (production)");
+  const retriesChanges: unknown[] = [];
+  client.config.onChange("common", "max_retries", (event) => {
+    retriesChanges.push(event);
+    console.log(
+      `    [RETRIES] max_retries: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
+    );
+  });
+  step("Item-scoped listener registered for common.max_retries");
 
+  // ======================================================================
+  // 6. REFRESH — Manual Cache Update
+  // ======================================================================
+  //
+  // refresh() re-fetches all configs, re-resolves values, and fires
+  // change listeners for any values that differ from the previous cache.
+  //
+  // In production, WebSocket events trigger refresh automatically. This
+  // manual call is for demos, scripts, and edge cases.
+  // ======================================================================
+
+  section("6. Refresh After Management Change");
+
+  // Simulate a management-side change
+  demo.common.items = { ...demo.common.items, max_retries: 7 };
+  demo.common.environments = {
+    ...demo.common.environments,
+    production: { values: { max_retries: 7, request_timeout_ms: 10000 } },
+  };
+  await demo.common.save();
+  step("Updated max_retries to 7 on common (production override)");
+
+  // Refresh the runtime cache — this detects the change and fires listeners
   await client.config.refresh();
   step("client.config.refresh() completed");
 
-  const newRetries = client.config.getValue("user_service", "max_retries");
-  step(`max_retries after refresh = ${newRetries}`);
+  // Verify the proxy reflects the new value
+  const newRetries = (proxy as Record<string, unknown>).max_retries;
+  step(`proxy.max_retries after refresh = ${newRetries}`);
 
-  step(`Global changes received: ${changes.length}`);
+  step(`Global changes received: ${globalChanges.length}`);
+  step(`Common-scoped changes received: ${commonChanges.length}`);
   step(`Retries-specific changes received: ${retriesChanges.length}`);
 
   // ======================================================================
-  // 6. CLEANUP
+  // 7. CLEANUP
   // ======================================================================
-  section("6. Cleanup");
+  section("7. Cleanup");
 
   await teardownDemoConfigs(client, demo);
   step("Demo configs deleted and common reset");
@@ -206,3 +263,4 @@ async function main(): Promise<void> {
 }
 
 main().catch(console.error);
+process.exit(0);

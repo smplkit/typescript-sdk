@@ -9,7 +9,7 @@ function makeFlagsClient(): FlagsClient {
 
 function setFlagStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
   (client as Record<string, unknown>)["_flagStore"] = store;
-  (client as Record<string, unknown>)["_connected"] = true;
+  (client as Record<string, unknown>)["_initialized"] = true;
   (client as Record<string, unknown>)["_environment"] = "staging";
 }
 
@@ -36,7 +36,7 @@ describe("Resolution cache", () => {
 
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
 
-    const handle = client.boolFlag("my-flag", false);
+    const handle = client.booleanFlag("my-flag", false);
 
     // First call = cache miss
     handle.get();
@@ -57,7 +57,7 @@ describe("Resolution cache", () => {
 
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
 
-    const handle = client.boolFlag("my-flag", false);
+    const handle = client.booleanFlag("my-flag", false);
 
     // 1 miss + 99 hits
     for (let i = 0; i < 100; i++) {
@@ -128,7 +128,7 @@ describe("Resolution cache", () => {
     let currentPlan = "enterprise";
     client.setContextProvider(() => [new Context("user", "u-1", { plan: currentPlan })]);
 
-    const handle = client.boolFlag("my-flag", false);
+    const handle = client.booleanFlag("my-flag", false);
 
     handle.get(); // miss
     handle.get(); // hit

@@ -1,37 +1,22 @@
 /**
- * Config resource — management-plane model.
- *
- * Instances are returned by {@link ConfigClient} methods and provide
- * management-plane operations (`update`, `setValues`, `setValue`).
- * Prescriptive value access is via `client.config.getValue()` after
- * `client.connect()`.
+ * Config resource — active-record model with save() pattern.
  */
 
-/**
- * Internal type used by {@link ConfigClient}.  Not part of the public API.
- * @internal
- */
-export interface ConfigUpdatePayload {
-  configId: string;
-  name: string;
-  key: string | null;
-  description: string | null;
-  parent: string | null;
-  items: Record<string, unknown>;
-  environments: Record<string, unknown>;
-}
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import type { ConfigClient } from "./client.js";
 
 /**
- * A configuration resource fetched from the smplkit Config service.
+ * A configuration resource managed by the smplkit platform.
  *
- * Instances are returned by {@link ConfigClient} methods and provide
- * management-plane operations (update, setValues, setValue).
+ * Management: mutate properties directly and call `save()` to persist.
+ * POST if `id` is null (new), PUT if `id` is set (update).
  */
 export class Config {
-  /** UUID of the config. */
-  id: string;
+  /** UUID of the config, or `null` if unsaved. */
+  id: string | null;
 
-  /** Human-readable key (e.g. `"user_service"`). */
+  /** Human-readable key (e.g. `"user-service"`). */
   key: string;
 
   /** Display name. */
@@ -54,42 +39,27 @@ export class Config {
   environments: Record<string, unknown>;
 
   /** When the config was created, or null if unavailable. */
-  createdAt: Date | null;
+  createdAt: string | null;
 
   /** When the config was last updated, or null if unavailable. */
-  updatedAt: Date | null;
+  updatedAt: string | null;
 
-  /**
-   * Internal reference to the parent client.
-   * @internal
-   */
-  private readonly _client: {
-    _updateConfig(payload: ConfigUpdatePayload): Promise<Config>;
-    get(options: { id: string }): Promise<Config>;
-    readonly _apiKey: string;
-    readonly _baseUrl: string;
-    _getSharedWs?: () => import("../ws.js").SharedWebSocket;
-  };
+  /** @internal */
+  readonly _client: ConfigClient;
 
   /** @internal */
   constructor(
-    client: {
-      _updateConfig(payload: ConfigUpdatePayload): Promise<Config>;
-      get(options: { id: string }): Promise<Config>;
-      readonly _apiKey: string;
-      readonly _baseUrl: string;
-      _getSharedWs?: () => import("../ws.js").SharedWebSocket;
-    },
+    client: ConfigClient,
     fields: {
-      id: string;
+      id: string | null;
       key: string;
       name: string;
       description: string | null;
       parent: string | null;
       items: Record<string, unknown>;
       environments: Record<string, unknown>;
-      createdAt: Date | null;
-      updatedAt: Date | null;
+      createdAt: string | null;
+      updatedAt: string | null;
     },
   ) {
     this._client = client;
@@ -105,108 +75,18 @@ export class Config {
   }
 
   /**
-   * Update this config's attributes on the server.
+   * Persist this config to the server.
    *
-   * Builds the request from current attribute values, overriding with any
-   * provided options. Updates local attributes in place on success.
-   *
-   * @param options.name - New display name.
-   * @param options.description - New description (pass empty string to clear).
-   * @param options.items - New base values (replaces entirely).
-   * @param options.environments - New environments dict (replaces entirely).
+   * POST if `id` is null (new config), PUT if `id` is set (update).
+   * Updates this instance in-place with the server response.
    */
-  async update(options: {
-    name?: string;
-    description?: string;
-    items?: Record<string, unknown>;
-    environments?: Record<string, unknown>;
-  }): Promise<void> {
-    const updated = await this._client._updateConfig({
-      configId: this.id,
-      name: options.name ?? this.name,
-      key: this.key,
-      description: options.description !== undefined ? options.description : this.description,
-      parent: this.parent,
-      items: options.items ?? this.items,
-      environments: options.environments ?? this.environments,
-    });
-    this.name = updated.name;
-    this.description = updated.description;
-    this.items = updated.items;
-    this.environments = updated.environments;
-    this.updatedAt = updated.updatedAt;
-  }
-
-  /**
-   * Replace base or environment-specific values.
-   *
-   * When `environment` is provided, replaces that environment's `values`
-   * sub-dict (other environments are preserved). When omitted, replaces
-   * the base `items`.
-   *
-   * @param values - The complete set of values to set.
-   * @param environment - Target environment, or omit for base values.
-   */
-  async setValues(values: Record<string, unknown>, environment?: string): Promise<void> {
-    let newItems: Record<string, unknown>;
-    let newEnvs: Record<string, unknown>;
-
-    if (environment === undefined) {
-      newItems = values;
-      newEnvs = this.environments;
+  async save(): Promise<void> {
+    if (this.id === null) {
+      const created = await this._client._createConfig(this);
+      this._apply(created);
     } else {
-      newItems = this.items;
-      // Preserve any extra metadata on the environment entry (like other sub-keys),
-      // but replace the `values` sub-dict entirely.
-      const existingEntry =
-        typeof this.environments[environment] === "object" &&
-        this.environments[environment] !== null
-          ? { ...(this.environments[environment] as Record<string, unknown>) }
-          : {};
-      existingEntry.values = values;
-      newEnvs = { ...this.environments, [environment]: existingEntry };
-    }
-
-    const updated = await this._client._updateConfig({
-      configId: this.id,
-      name: this.name,
-      key: this.key,
-      description: this.description,
-      parent: this.parent,
-      items: newItems,
-      environments: newEnvs,
-    });
-    this.items = updated.items;
-    this.environments = updated.environments;
-    this.updatedAt = updated.updatedAt;
-  }
-
-  /**
-   * Set a single key within base or environment-specific values.
-   *
-   * Merges the key into existing values rather than replacing all values.
-   *
-   * @param key - The config key to set.
-   * @param value - The value to assign.
-   * @param environment - Target environment, or omit for base values.
-   */
-  async setValue(key: string, value: unknown, environment?: string): Promise<void> {
-    if (environment === undefined) {
-      const merged = { ...this.items, [key]: value };
-      await this.setValues(merged);
-    } else {
-      const envEntry =
-        typeof this.environments[environment] === "object" &&
-        this.environments[environment] !== null
-          ? (this.environments[environment] as Record<string, unknown>)
-          : {};
-      const existing = {
-        ...(typeof envEntry.values === "object" && envEntry.values !== null
-          ? (envEntry.values as Record<string, unknown>)
-          : {}),
-      };
-      existing[key] = value;
-      await this.setValues(existing, environment);
+      const updated = await this._client._updateConfig(this);
+      this._apply(updated);
     }
   }
 
@@ -214,22 +94,20 @@ export class Config {
    * Walk the parent chain and return config data objects, child-to-root.
    * @internal
    */
-  async _buildChain(
-    _timeout?: unknown,
-  ): Promise<
+  async _buildChain(): Promise<
     Array<{ id: string; items: Record<string, unknown>; environments: Record<string, unknown> }>
   > {
     const chain: Array<{
       id: string;
       items: Record<string, unknown>;
       environments: Record<string, unknown>;
-    }> = [{ id: this.id, items: this.items, environments: this.environments }];
+    }> = [{ id: this.id ?? "", items: this.items, environments: this.environments }];
 
     let parentId = this.parent;
     while (parentId !== null) {
-      const parentConfig = await this._client.get({ id: parentId });
+      const parentConfig = await this._client._getById(parentId);
       chain.push({
-        id: parentConfig.id,
+        id: parentConfig.id ?? "",
         items: parentConfig.items,
         environments: parentConfig.environments,
       });
@@ -239,29 +117,20 @@ export class Config {
     return chain;
   }
 
+  /** @internal — copy all fields from another Config instance. */
+  _apply(other: Config): void {
+    this.id = other.id;
+    this.key = other.key;
+    this.name = other.name;
+    this.description = other.description;
+    this.parent = other.parent;
+    this.items = other.items;
+    this.environments = other.environments;
+    this.createdAt = other.createdAt;
+    this.updatedAt = other.updatedAt;
+  }
+
   toString(): string {
     return `Config(id=${this.id}, key=${this.key}, name=${this.name})`;
   }
-}
-
-/** Options for creating a new config. */
-export interface CreateConfigOptions {
-  /** Display name for the config. */
-  name: string;
-  /** Human-readable key. Auto-generated by the server if omitted. */
-  key?: string;
-  /** Optional description. */
-  description?: string;
-  /** Parent config UUID. Defaults to the account's `common` config if omitted. */
-  parent?: string;
-  /** Initial base values. */
-  items?: Record<string, unknown>;
-}
-
-/** Options for fetching a single config. Exactly one of `key` or `id` must be provided. */
-export interface GetConfigOptions {
-  /** Fetch by human-readable key. */
-  key?: string;
-  /** Fetch by UUID. */
-  id?: string;
 }

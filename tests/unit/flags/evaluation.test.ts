@@ -1,39 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-// We need to test the internal evaluateFlag function. We'll test it
-// through the FlagsClient._evaluateHandle by constructing a minimal client.
-// However, the evaluation function is private. Instead, we'll test it
-// indirectly through the flag handles.
-
-// For direct evaluation testing, we import the module and access the
-// internal function through the handle's get() behavior.
+// We test the internal evaluateFlag function indirectly through
+// _evaluateHandle, which is @internal but accessible.
 
 import { Context } from "../../../src/flags/types.js";
-
-// We'll create a minimal FlagsClient to test evaluation logic.
-// Since we can't call the private evaluateFlag directly, we test
-// through _evaluateHandle which is @internal but accessible.
-
 import { FlagsClient } from "../../../src/flags/client.js";
+import { SmplError } from "../../../src/errors.js";
 
 function makeFlagsClient(): FlagsClient {
-  // Create with a dummy ensureWs that returns a mock
   const mockWs = { on: () => {}, off: () => {}, connectionStatus: "disconnected" };
   return new FlagsClient("sk_test", () => mockWs as never, 30000);
 }
 
 function setFlagStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
-  // Access private _flagStore and _connected via bracket notation
   (client as Record<string, unknown>)["_flagStore"] = store;
-  (client as Record<string, unknown>)["_connected"] = true;
+  (client as Record<string, unknown>)["_initialized"] = true;
   (client as Record<string, unknown>)["_environment"] = "staging";
 }
 
 describe("Local JSON Logic evaluation", () => {
-  it("should throw SmplNotConnectedError when not connected", () => {
+  it("should throw SmplError when not initialized", () => {
     const client = makeFlagsClient();
-    const handle = client.boolFlag("my-flag", false);
-    expect(() => handle.get()).toThrow("SmplClient is not connected");
+    const handle = client.booleanFlag("my-flag", false);
+    expect(() => handle.get()).toThrow(SmplError);
+    expect(() => handle.get()).toThrow("Flags not initialized");
   });
 
   it("should evaluate enabled environment with matching rule", () => {
@@ -58,7 +48,7 @@ describe("Local JSON Logic evaluation", () => {
 
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
 
-    const handle = client.boolFlag("checkout-v2", false);
+    const handle = client.booleanFlag("checkout-v2", false);
     expect(handle.get()).toBe(true);
   });
 
@@ -168,7 +158,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {});
 
-    const handle = client.boolFlag("nonexistent", false);
+    const handle = client.booleanFlag("nonexistent", false);
     expect(handle.get()).toBe(false);
   });
 
@@ -195,7 +185,7 @@ describe("Local JSON Logic evaluation", () => {
 
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
 
-    const handle = client.boolFlag("my-flag", false);
+    const handle = client.booleanFlag("my-flag", false);
     // First rule has empty logic and should be skipped, second matches
     expect(handle.get()).toBe(false);
   });
@@ -223,7 +213,7 @@ describe("Local JSON Logic evaluation", () => {
     // Provider returns free user
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
 
-    const handle = client.boolFlag("checkout-v2", false);
+    const handle = client.booleanFlag("checkout-v2", false);
 
     // Override with enterprise user
     const result = handle.get({
@@ -287,7 +277,7 @@ describe("Local JSON Logic evaluation", () => {
       },
     });
 
-    const handle = client.boolFlag("svc-flag", false);
+    const handle = client.booleanFlag("svc-flag", false);
     expect(handle.get()).toBe(true);
   });
 
@@ -313,7 +303,7 @@ describe("Local JSON Logic evaluation", () => {
       },
     });
 
-    const handle = client.boolFlag("svc-flag", false);
+    const handle = client.booleanFlag("svc-flag", false);
     // Explicit service context overrides auto-injected
     expect(handle.get({ context: [new Context("service", "explicit-svc", {})] })).toBe(true);
   });

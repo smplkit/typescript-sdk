@@ -2,12 +2,13 @@
  * Top-level SDK client — SmplClient.
  *
  * The main entry point for the smplkit TypeScript SDK. Provides access
- * to sub-clients for each API domain (config, flags, logging, etc.).
+ * to sub-clients for each API domain (config, flags, logging).
  */
 
 import createClient from "openapi-fetch";
 import { ConfigClient } from "./config/client.js";
 import { FlagsClient } from "./flags/client.js";
+import { LoggingClient } from "./logging/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveApiKey } from "./resolve.js";
 import { SmplError, SmplTimeoutError } from "./errors.js";
@@ -60,16 +61,30 @@ export interface SmplClientOptions {
  * ```typescript
  * import { SmplClient } from "@smplkit/sdk";
  *
- * const client = new SmplClient({ apiKey: "sk_api_...", environment: "production" });
- * await client.connect();
+ * const client = new SmplClient({
+ *   apiKey: "sk_api_...",
+ *   environment: "production",
+ *   service: "my-service",
+ * });
+ *
+ * // Flags runtime
+ * await client.flags.initialize();
+ * const flag = client.flags.booleanFlag("checkout-v2", false);
+ * console.log(flag.get());
+ *
+ * // Config runtime
+ * const values = await client.config.resolve("user-service");
  * ```
  */
 export class SmplClient {
-  /** Client for config management-plane operations. */
+  /** Client for config management and runtime. */
   readonly config: ConfigClient;
 
-  /** Client for flags management and runtime operations. */
+  /** Client for flags management and runtime. */
   readonly flags: FlagsClient;
+
+  /** Client for logging management and runtime. */
+  readonly logging: LoggingClient;
 
   private _wsManager: SharedWebSocket | null = null;
   private readonly _apiKey: string;
@@ -80,7 +95,6 @@ export class SmplClient {
   /** @internal */
   readonly _service: string;
 
-  private _connected = false;
   private readonly _timeout: number;
   private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
@@ -118,6 +132,7 @@ export class SmplClient {
         try {
           return await fetch(new Request(request, { signal: controller.signal }));
         } catch (err) {
+          /* v8 ignore next 4 — abort path is tested in sub-clients; this client is only used for fire-and-forget registration */
           if (err instanceof DOMException && err.name === "AbortError") {
             throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
           }
@@ -130,6 +145,7 @@ export class SmplClient {
 
     this.config = new ConfigClient(apiKey, this._timeout);
     this.flags = new FlagsClient(apiKey, () => this._ensureWs(), this._timeout);
+    this.logging = new LoggingClient(apiKey, () => this._ensureWs(), this._timeout);
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();
@@ -137,29 +153,10 @@ export class SmplClient {
     // Wire parent reference into sub-clients
     this.flags._parent = this;
     this.config._parent = this;
-  }
+    this.logging._parent = this;
 
-  /**
-   * Connect to the smplkit platform.
-   *
-   * Fetches initial flag and config data, opens the shared WebSocket,
-   * and registers the service as a context instance (if provided).
-   *
-   * This method is idempotent — calling it multiple times is safe.
-   */
-  async connect(): Promise<void> {
-    if (this._connected) return;
-
-    // Register service context (fire-and-forget)
-    await this._registerServiceContext();
-
-    // Connect flags (fetch definitions, register WS listeners)
-    await this.flags._connectInternal(this._environment);
-
-    // Connect config (fetch all, resolve, cache)
-    await this.config._connectInternal(this._environment);
-
-    this._connected = true;
+    // Fire-and-forget: register service context
+    void this._registerServiceContext();
   }
 
   /** @internal */
@@ -192,6 +189,7 @@ export class SmplClient {
 
   /** Close the shared WebSocket and release resources. */
   close(): void {
+    this.logging._close();
     if (this._wsManager !== null) {
       this._wsManager.stop();
       this._wsManager = null;

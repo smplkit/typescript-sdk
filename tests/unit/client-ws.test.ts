@@ -13,7 +13,7 @@ vi.mock("ws", () => {
     send = vi.fn();
     close = vi.fn();
     constructor() {
-      wsInstances.push(this as any);
+      wsInstances.push(this as unknown as (typeof wsInstances)[number]);
     }
   }
   return { default: MockWebSocket };

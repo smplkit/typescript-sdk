@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigClient } from "../../../src/config/client.js";
 import type { ConfigChangeEvent } from "../../../src/config/client.js";
-import { SmplNotConnectedError, SmplError } from "../../../src/errors.js";
+import { SmplNotFoundError, SmplError } from "../../../src/errors.js";
 
 const mockFetch = vi.fn();
 
@@ -16,7 +16,9 @@ afterEach(() => {
 const API_KEY = "sk_api_test";
 
 function makeClient(): ConfigClient {
-  return new ConfigClient(API_KEY);
+  const client = new ConfigClient(API_KEY);
+  client._parent = { _environment: "staging", _service: "test-svc" };
+  return client;
 }
 
 function jsonResponse(body: object, status = 200): Response {
@@ -26,201 +28,424 @@ function jsonResponse(body: object, status = 200): Response {
   });
 }
 
-/** Helper: connect a client with a single config in cache. */
-async function connectClient(
-  client: ConfigClient,
-  configs: Array<{
-    id: string;
-    key: string;
-    items: Record<string, unknown>;
-    environments?: Record<string, unknown>;
-    parent?: string | null;
-  }>,
-): Promise<void> {
-  const data = configs.map((c) => ({
-    id: c.id,
+/**
+ * Build a JSON:API config resource in wire format (items wrapped as {value: raw}).
+ */
+function configResource(opts: {
+  id: string;
+  key: string;
+  items: Record<string, unknown>;
+  environments?: Record<string, { values: Record<string, unknown> }>;
+  parent?: string | null;
+}) {
+  return {
+    id: opts.id,
     type: "config",
     attributes: {
-      key: c.key,
-      name: c.key,
+      key: opts.key,
+      name: opts.key,
       description: null,
-      parent: c.parent ?? null,
-      items: Object.fromEntries(Object.entries(c.items).map(([k, v]) => [k, { value: v }])),
-      environments: c.environments
+      parent: opts.parent ?? null,
+      items: Object.fromEntries(Object.entries(opts.items).map(([k, v]) => [k, { value: v }])),
+      environments: opts.environments
         ? Object.fromEntries(
-            Object.entries(c.environments).map(([env, entry]) => {
-              const vals = (entry as Record<string, unknown>).values as Record<string, unknown>;
-              return [
-                env,
-                {
-                  values: Object.fromEntries(
-                    Object.entries(vals).map(([k, v]) => [k, { value: v }]),
-                  ),
-                },
-              ];
-            }),
+            Object.entries(opts.environments).map(([env, entry]) => [
+              env,
+              {
+                values: Object.fromEntries(
+                  Object.entries(entry.values).map(([k, v]) => [k, { value: v }]),
+                ),
+              },
+            ]),
           )
         : {},
+      created_at: "2024-01-15T10:30:00Z",
+      updated_at: "2024-01-16T14:00:00Z",
     },
-  }));
-
-  mockFetch.mockResolvedValueOnce(jsonResponse({ data }));
-  await client._connectInternal("production");
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Typed accessors
+// resolve()
 // ---------------------------------------------------------------------------
 
-describe("Typed accessors", () => {
-  it("getString returns string value", async () => {
+describe("resolve", () => {
+  it("should return resolved flat dict", async () => {
     const client = makeClient();
-    await connectClient(client, [
-      { id: "c1", key: "app", items: { name: "Acme", count: 42, flag: true } },
-    ]);
 
-    expect(client.getString("app", "name")).toBe("Acme");
-  });
-
-  it("getString returns default when value is not a string", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: { count: 42 } }]);
-
-    expect(client.getString("app", "count")).toBeNull();
-    expect(client.getString("app", "count", "fallback")).toBe("fallback");
-  });
-
-  it("getString returns default for missing key", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: {} }]);
-
-    expect(client.getString("app", "missing")).toBeNull();
-    expect(client.getString("app", "missing", "default")).toBe("default");
-  });
-
-  it("getInt returns number value", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: { port: 8080 } }]);
-
-    expect(client.getInt("app", "port")).toBe(8080);
-  });
-
-  it("getInt returns default when value is not a number", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: { name: "Acme" } }]);
-
-    expect(client.getInt("app", "name")).toBeNull();
-    expect(client.getInt("app", "name", 99)).toBe(99);
-  });
-
-  it("getInt returns default for missing key", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: {} }]);
-
-    expect(client.getInt("app", "missing")).toBeNull();
-    expect(client.getInt("app", "missing", 42)).toBe(42);
-  });
-
-  it("getBool returns boolean value", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: { enabled: true } }]);
-
-    expect(client.getBool("app", "enabled")).toBe(true);
-  });
-
-  it("getBool returns default when value is not a boolean", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: { name: "Acme" } }]);
-
-    expect(client.getBool("app", "name")).toBeNull();
-    expect(client.getBool("app", "name", false)).toBe(false);
-  });
-
-  it("getBool returns default for missing key", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: {} }]);
-
-    expect(client.getBool("app", "missing")).toBeNull();
-    expect(client.getBool("app", "missing", true)).toBe(true);
-  });
-
-  it("typed accessors throw SmplNotConnectedError before connect", () => {
-    const client = makeClient();
-    expect(() => client.getString("app", "name")).toThrow(SmplNotConnectedError);
-    expect(() => client.getInt("app", "port")).toThrow(SmplNotConnectedError);
-    expect(() => client.getBool("app", "flag")).toThrow(SmplNotConnectedError);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// refresh()
-// ---------------------------------------------------------------------------
-
-describe("refresh", () => {
-  it("should re-fetch configs and update cache", async () => {
-    const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
-
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
-    expect(client.getValue("app", "retries")).toBe(3);
-
-    // Mock the list() call for refresh — returns updated value
+    // Lazy init: list() fetches all configs
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 7 } },
-              environments: {},
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+            environments: {
+              staging: { values: { timeout: 2000 } },
             },
-          },
+          }),
         ],
       }),
     );
 
-    await client.refresh();
-    expect(client.getValue("app", "retries")).toBe(7);
+    const result = await client.resolve("app");
+
+    expect(result).toEqual({ retries: 3, timeout: 2000 });
   });
 
-  it("should throw SmplNotConnectedError before connect", async () => {
+  it("should handle parent chain resolution during lazy init", async () => {
     const client = makeClient();
-    await expect(client.refresh()).rejects.toThrow(SmplNotConnectedError);
+
+    // List returns child with parent reference
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "child-id",
+            key: "child-service",
+            items: { retries: 5 },
+            parent: "parent-id",
+          }),
+          configResource({
+            id: "parent-id",
+            key: "base-service",
+            items: { retries: 3, timeout: 1000 },
+            environments: {
+              staging: { values: { timeout: 2000 } },
+            },
+          }),
+        ],
+      }),
+    );
+
+    // _buildChain for child calls _getById(parent-id)
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: configResource({
+          id: "parent-id",
+          key: "base-service",
+          items: { retries: 3, timeout: 1000 },
+          environments: {
+            staging: { values: { timeout: 2000 } },
+          },
+        }),
+      }),
+    );
+
+    const result = await client.resolve("child-service");
+
+    // Child overrides parent: retries=5, parent's timeout=2000 (env override for staging)
+    expect(result).toEqual({ retries: 5, timeout: 2000 });
+  });
+
+  it("should return typed model instance when model is provided", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    class AppConfig {
+      retries: number;
+      timeout: number;
+      constructor(data: Record<string, unknown>) {
+        this.retries = data.retries as number;
+        this.timeout = data.timeout as number;
+      }
+    }
+
+    const result = await client.resolve("app", AppConfig);
+
+    expect(result).toBeInstanceOf(AppConfig);
+    expect(result.retries).toBe(3);
+    expect(result.timeout).toBe(1000);
+  });
+
+  it("should throw SmplNotFoundError for unknown key", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await expect(client.resolve("nonexistent")).rejects.toThrow(SmplNotFoundError);
+  });
+
+  it("should not re-fetch on second resolve call (lazy init only once)", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+    await client.resolve("app");
+
+    // Only one fetch call for the initial list()
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("should throw SmplError when no environment is set", async () => {
-    const client = makeClient();
-    // Force connected without parent
-    await connectClient(client, [{ id: "c1", key: "app", items: {} }]);
-    client._parent = null;
+    const client = new ConfigClient(API_KEY);
+    // _parent is null — no environment
 
-    await expect(client.refresh()).rejects.toThrow(SmplError);
-  });
-
-  it("should throw SmplError when environment is empty string", async () => {
-    const client = makeClient();
-    await connectClient(client, [{ id: "c1", key: "app", items: {} }]);
-    client._parent = { _environment: "", _service: null };
-
-    await expect(client.refresh()).rejects.toThrow(SmplError);
+    await expect(client.resolve("app")).rejects.toThrow(SmplError);
   });
 });
 
 // ---------------------------------------------------------------------------
-// onChange + _diffAndFire
+// subscribe() and LiveConfigProxy
 // ---------------------------------------------------------------------------
 
-describe("onChange and change listeners", () => {
-  it("should fire global listener on value change during refresh", async () => {
+describe("subscribe", () => {
+  it("should return a LiveConfigProxy", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    // Proxy should reflect cached values via property access
+    expect((proxy as Record<string, unknown>).retries).toBe(3);
+    expect((proxy as Record<string, unknown>).timeout).toBe(1000);
+  });
+
+  it("should throw SmplNotFoundError for unknown key", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await expect(client.subscribe("nonexistent")).rejects.toThrow(SmplNotFoundError);
+  });
+
+  it("should auto-update when cache changes", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+    expect((proxy as Record<string, unknown>).retries).toBe(3);
+
+    // Simulate cache update by directly writing to the cache
+    const cache = (client as Record<string, unknown>)["_configCache"] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    cache["app"] = { retries: 7 };
+
+    // Proxy should reflect the new value immediately
+    expect((proxy as Record<string, unknown>).retries).toBe(7);
+  });
+
+  it("should support has() trap on proxy", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    expect("retries" in proxy).toBe(true);
+    expect("missing" in proxy).toBe(false);
+  });
+
+  it("should support ownKeys() trap on proxy", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    expect(Object.keys(proxy)).toEqual(["retries", "timeout"]);
+  });
+
+  it("should support getOwnPropertyDescriptor() trap on proxy", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    const desc = Object.getOwnPropertyDescriptor(proxy, "retries");
+    expect(desc).toBeDefined();
+    expect(desc!.value).toBe(3);
+    expect(desc!.enumerable).toBe(true);
+    expect(desc!.configurable).toBe(true);
+
+    const missing = Object.getOwnPropertyDescriptor(proxy, "missing");
+    expect(missing).toBeUndefined();
+  });
+
+  it("should return empty object values when cache entry is missing", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    // Remove the cache entry
+    const cache = (client as Record<string, unknown>)["_configCache"] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    delete cache["app"];
+
+    // Proxy should return undefined for properties (empty object fallback)
+    expect((proxy as Record<string, unknown>).retries).toBeUndefined();
+  });
+
+  it("should delegate to model when model class is provided", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    class AppConfig {
+      retries: number;
+      timeout: number;
+      constructor(data: Record<string, unknown>) {
+        this.retries = data.retries as number;
+        this.timeout = data.timeout as number;
+      }
+
+      get totalWait(): number {
+        return this.retries * this.timeout;
+      }
+    }
+
+    const proxy = await client.subscribe("app", AppConfig);
+
+    expect((proxy as unknown as AppConfig).retries).toBe(3);
+    expect((proxy as unknown as AppConfig).timeout).toBe(1000);
+    expect((proxy as unknown as AppConfig).totalWait).toBe(3000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onChange — 3-level overloads
+// ---------------------------------------------------------------------------
+
+describe("onChange", () => {
+  it("should fire global listener on any change during refresh", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    // Initialize via resolve
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -229,18 +454,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 7 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7 },
+          }),
         ],
       }),
     );
@@ -255,79 +473,116 @@ describe("onChange and change listeners", () => {
     expect(events[0].source).toBe("manual");
   });
 
-  it("should fire key-specific listener only for matching changes", async () => {
+  it("should fire config-scoped listener only for that config", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3, timeout: 1000 } }]);
-
-    const retriesEvents: ConfigChangeEvent[] = [];
-    client.onChange((e) => retriesEvents.push(e), { configKey: "app", itemKey: "retries" });
-
-    // Refresh with both values changed
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 7 }, timeout: { value: 2000 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+          configResource({
+            id: "cfg-2",
+            key: "db",
+            items: { host: "localhost" },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+
+    const appEvents: ConfigChangeEvent[] = [];
+    const dbEvents: ConfigChangeEvent[] = [];
+    client.onChange("app", (e) => appEvents.push(e));
+    client.onChange("db", (e) => dbEvents.push(e));
+
+    // Refresh: both change
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7 },
+          }),
+          configResource({
+            id: "cfg-2",
+            key: "db",
+            items: { host: "prod-db" },
+          }),
         ],
       }),
     );
 
     await client.refresh();
 
+    expect(appEvents).toHaveLength(1);
+    expect(appEvents[0].configKey).toBe("app");
+
+    expect(dbEvents).toHaveLength(1);
+    expect(dbEvents[0].configKey).toBe("db");
+  });
+
+  it("should fire item-scoped listener only for that specific item", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+
+    const retriesEvents: ConfigChangeEvent[] = [];
+    client.onChange("app", "retries", (e) => retriesEvents.push(e));
+
+    // Refresh: both retries and timeout change
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7, timeout: 2000 },
+          }),
+        ],
+      }),
+    );
+
+    await client.refresh();
+
+    // Only retries event should fire
     expect(retriesEvents).toHaveLength(1);
     expect(retriesEvents[0].itemKey).toBe("retries");
   });
 
-  it("should fire configKey-only listener for all items in that config", async () => {
+  it("should not fire listener when values are unchanged", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
-
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3, timeout: 1000 } }]);
-
-    const appEvents: ConfigChangeEvent[] = [];
-    client.onChange((e) => appEvents.push(e), { configKey: "app" });
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 7 }, timeout: { value: 2000 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
         ],
       }),
     );
 
-    await client.refresh();
-
-    expect(appEvents).toHaveLength(2);
-  });
-
-  it("should not fire listener when values are unchanged", async () => {
-    const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
-
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -336,18 +591,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 3 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
         ],
       }),
     );
@@ -359,9 +607,20 @@ describe("onChange and change listeners", () => {
 
   it("should detect new keys added", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -369,18 +628,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 3 }, new_key: { value: "hello" } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, new_key: "hello" },
+          }),
         ],
       }),
     );
@@ -395,9 +647,20 @@ describe("onChange and change listeners", () => {
 
   it("should detect removed keys", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3, old_key: "bye" } }]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3, old_key: "bye" },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -405,18 +668,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 3 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
         ],
       }),
     );
@@ -429,11 +685,22 @@ describe("onChange and change listeners", () => {
     expect(events[0].newValue).toBeNull();
   });
 
-  it("should detect new configs added", async () => {
+  it("should detect new configs added on refresh", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -441,30 +708,16 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 3 } },
-              environments: {},
-            },
-          },
-          {
-            id: "c2",
-            type: "config",
-            attributes: {
-              key: "db",
-              name: "db",
-              description: null,
-              parent: null,
-              items: { host: { value: "localhost" } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+          configResource({
+            id: "cfg-2",
+            key: "db",
+            items: { host: "localhost" },
+          }),
         ],
       }),
     );
@@ -477,14 +730,27 @@ describe("onChange and change listeners", () => {
     expect(events[0].newValue).toBe("localhost");
   });
 
-  it("should detect removed configs", async () => {
+  it("should detect removed configs on refresh", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [
-      { id: "c1", key: "app", items: { retries: 3 } },
-      { id: "c2", key: "db", items: { host: "localhost" } },
-    ]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+          configResource({
+            id: "cfg-2",
+            key: "db",
+            items: { host: "localhost" },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -493,18 +759,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 3 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
         ],
       }),
     );
@@ -520,9 +779,20 @@ describe("onChange and change listeners", () => {
 
   it("should not crash if a listener throws", async () => {
     const client = makeClient();
-    client._parent = { _environment: "production", _service: null };
 
-    await connectClient(client, [{ id: "c1", key: "app", items: { retries: 3 } }]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange(() => {
@@ -533,18 +803,11 @@ describe("onChange and change listeners", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
-          {
-            id: "c1",
-            type: "config",
-            attributes: {
-              key: "app",
-              name: "app",
-              description: null,
-              parent: null,
-              items: { retries: { value: 7 } },
-              environments: {},
-            },
-          },
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7 },
+          }),
         ],
       }),
     );
@@ -557,16 +820,322 @@ describe("onChange and change listeners", () => {
 });
 
 // ---------------------------------------------------------------------------
+// refresh()
+// ---------------------------------------------------------------------------
+
+describe("refresh", () => {
+  it("should re-fetch configs and update cache", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const original = await client.resolve("app");
+    expect((original as Record<string, unknown>).retries).toBe(3);
+
+    // Refresh with updated value
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7 },
+          }),
+        ],
+      }),
+    );
+
+    await client.refresh();
+
+    // Re-resolve should return updated value
+    const refreshed = await client.resolve("app");
+    expect((refreshed as Record<string, unknown>).retries).toBe(7);
+  });
+
+  it("should throw SmplError before initialization", async () => {
+    const client = makeClient();
+    // Force _initialized flag to true to bypass lazy init, then unset
+    // Actually, we need to test the pre-initialization path
+    // The refresh() method checks _initialized first
+    const rawClient = client as Record<string, unknown>;
+    rawClient["_initialized"] = true;
+
+    // Now reset to test the guard
+    rawClient["_initialized"] = false;
+
+    await expect(client.refresh()).rejects.toThrow(SmplError);
+    await expect(client.refresh()).rejects.toThrow(
+      "Config not initialized. Call resolve() or subscribe() first.",
+    );
+  });
+
+  it("should throw SmplError when no environment is set", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: {},
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+    client._parent = null;
+
+    await expect(client.refresh()).rejects.toThrow(SmplError);
+    await expect(client.refresh()).rejects.toThrow("No environment set.");
+  });
+
+  it("should throw SmplError when environment is empty string", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: {},
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+    client._parent = { _environment: "", _service: null };
+
+    await expect(client.refresh()).rejects.toThrow(SmplError);
+  });
+
+  it("should update _configStore on refresh", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+    expect(client._configStore).toHaveLength(1);
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 7 },
+          }),
+          configResource({
+            id: "cfg-2",
+            key: "db",
+            items: { host: "localhost" },
+          }),
+        ],
+      }),
+    );
+
+    await client.refresh();
+    expect(client._configStore).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Singleton accessor identity
 // ---------------------------------------------------------------------------
 
 describe("Singleton accessor identity", () => {
-  it("SmplClient.config should return the same instance each time", async () => {
-    // SmplClient uses `readonly config: ConfigClient` — accessing it twice returns the same object
-    // We test this via the ConfigClient constructor behavior: the _apiKey is shared
+  it("ConfigClient instance is stable", () => {
     const client = makeClient();
-    // ConfigClient is a single instance — this is guaranteed by readonly property
     expect(client).toBe(client);
     expect(client._apiKey).toBe(API_KEY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// _ensureInitialized wires WebSocket when _getSharedWs is set
+// ---------------------------------------------------------------------------
+
+describe("_ensureInitialized WebSocket wiring", () => {
+  it("should wire config_changed listener when _getSharedWs is set", async () => {
+    const client = makeClient();
+    const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
+    client._getSharedWs = () => mockWs as never;
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+
+    expect(mockWs.on).toHaveBeenCalledWith("config_changed", expect.any(Function));
+  });
+
+  it("should refresh on config_changed WebSocket event", async () => {
+    const client = makeClient();
+    const wsListeners: Record<string, (...args: unknown[]) => void> = {};
+    const mockWs = {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        wsListeners[event] = cb;
+      }),
+      off: vi.fn(),
+      connectionStatus: "connected",
+    };
+    client._getSharedWs = () => mockWs as never;
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    // Simulate WebSocket config_changed event — refresh will re-fetch
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 99 },
+          }),
+        ],
+      }),
+    );
+
+    // Trigger the WebSocket handler
+    wsListeners["config_changed"]({ key: "app" });
+
+    // Wait for the async refresh to complete
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].newValue).toBe(99);
+  });
+
+  it("should not crash if WebSocket handler refresh fails", async () => {
+    const client = makeClient();
+    const wsListeners: Record<string, (...args: unknown[]) => void> = {};
+    const mockWs = {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        wsListeners[event] = cb;
+      }),
+      off: vi.fn(),
+      connectionStatus: "connected",
+    };
+    client._getSharedWs = () => mockWs as never;
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    await client.resolve("app");
+
+    // Simulate WebSocket event where refresh fails
+    mockFetch.mockRejectedValueOnce(new Error("network"));
+
+    // Should not throw
+    wsListeners["config_changed"]({ key: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LiveConfigProxy symbol access
+// ---------------------------------------------------------------------------
+
+describe("LiveConfigProxy edge cases", () => {
+  it("should return Reflect.get for symbol properties", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    // Symbol access should not throw and should return standard values
+    const str = String(proxy);
+    expect(typeof str).toBe("string");
+
+    // Symbol.toPrimitive shouldn't throw
+    expect(() => `${proxy}`).not.toThrow();
+  });
+
+  it("should return false for symbol in has() trap", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "cfg-1",
+            key: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.subscribe("app");
+
+    // Symbol.iterator should use Reflect.has
+    expect(Symbol.iterator in proxy).toBe(false);
   });
 });

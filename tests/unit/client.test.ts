@@ -6,6 +6,17 @@ import { SmplClient } from "../../src/client.js";
 import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { FlagsClient } from "../../src/flags/client.js";
+import { LoggingClient } from "../../src/logging/client.js";
+
+// Stub fetch globally so the fire-and-forget _registerServiceContext never hits the network.
+const mockFetch = vi.fn();
+beforeEach(() => {
+  vi.stubGlobal("fetch", mockFetch);
+  mockFetch.mockResolvedValue(new Response(JSON.stringify({ registered: 1 }), { status: 200 }));
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const DEFAULT_OPTS = { apiKey: "sk_api_test", environment: "test", service: "test-svc" };
 
@@ -63,6 +74,11 @@ describe("SmplClient", () => {
     expect(client.flags).toBeInstanceOf(FlagsClient);
   });
 
+  it("should expose a logging sub-client", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    expect(client.logging).toBeInstanceOf(LoggingClient);
+  });
+
   it("should return the same config instance every time (singleton accessor)", () => {
     const client = new SmplClient(DEFAULT_OPTS);
     expect(client.config).toBe(client.config);
@@ -76,6 +92,13 @@ describe("SmplClient", () => {
   it("should close without error when no WS is active", () => {
     const client = new SmplClient(DEFAULT_OPTS);
     expect(() => client.close()).not.toThrow();
+  });
+
+  it("should call logging._close() on close()", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    const spy = vi.spyOn(client.logging, "_close");
+    client.close();
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("should throw SmplError when no environment and no env var", () => {
@@ -191,115 +214,5 @@ describe("SmplClient", () => {
       expect(msg).toContain("[production]");
       expect(msg).toContain("~/.smplkit");
     }
-  });
-});
-
-describe("SmplClient connect()", () => {
-  const mockFetch = vi.fn();
-
-  beforeEach(() => {
-    vi.stubGlobal("fetch", mockFetch);
-    mockFetch.mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  function jsonResponse(body: object, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  it("should call flags._connectInternal and config._connectInternal", async () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      service: "test-svc",
-    });
-    const flagsSpy = vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    const configSpy = vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    // Service registration POST
-    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
-
-    await client.connect();
-
-    expect(flagsSpy).toHaveBeenCalledWith("test");
-    expect(configSpy).toHaveBeenCalledWith("test");
-  });
-
-  it("should be idempotent", async () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      service: "test-svc",
-    });
-    const flagsSpy = vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    // Service registration POST
-    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
-
-    await client.connect();
-    await client.connect();
-
-    expect(flagsSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("should always register service context on connect", async () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      service: "my-svc",
-    });
-    vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    // Mock the service registration POST (openapi-fetch sends a Request object)
-    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
-
-    await client.connect();
-
-    // First fetch call is the service registration via openapi-fetch
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const request: Request = mockFetch.mock.calls[0][0];
-    expect(request.url).toContain("/api/v1/contexts/bulk");
-    const body = JSON.parse(await request.text());
-    expect(body.contexts[0].type).toBe("service");
-    expect(body.contexts[0].key).toBe("my-svc");
-  });
-
-  it("should swallow service registration failure", async () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      service: "my-svc",
-    });
-    vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    mockFetch.mockRejectedValueOnce(new Error("network error"));
-
-    await client.connect(); // Should not throw
-  });
-
-  it("should swallow service registration timeout", async () => {
-    const client = new SmplClient({
-      apiKey: "sk_api_test",
-      environment: "test",
-      service: "my-svc",
-      timeout: 1,
-    });
-    vi.spyOn(client.flags, "_connectInternal").mockResolvedValue(undefined);
-    vi.spyOn(client.config, "_connectInternal").mockResolvedValue(undefined);
-
-    // Simulate an AbortError (timeout)
-    const abortErr = new DOMException("The operation was aborted.", "AbortError");
-    mockFetch.mockRejectedValueOnce(abortErr);
-
-    await client.connect(); // Should not throw — fire-and-forget
   });
 });

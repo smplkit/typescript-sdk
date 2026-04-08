@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FlagsClient } from "../../../src/flags/client.js";
-import { Flag, ContextType } from "../../../src/flags/models.js";
+import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "../../../src/flags/models.js";
 import {
   SmplError,
   SmplNotFoundError,
@@ -89,287 +89,384 @@ const FLAG_RESOURCE = {
   },
 };
 
-describe("FlagsClient management", () => {
-  describe("create", () => {
-    it("should create a flag", async () => {
+// ---------------------------------------------------------------------------
+// Factory methods (newXxxFlag)
+// ---------------------------------------------------------------------------
+
+describe("FlagsClient factory methods", () => {
+  describe("newBooleanFlag", () => {
+    it("should return a BooleanFlag with id: null", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
+      const flag = client.newBooleanFlag("checkout-v2", { default: false });
 
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
-
-      expect(flag).toBeInstanceOf(Flag);
-      expect(flag.key).toBe("my-flag");
-      expect(flag.id).toBe("flag-1");
+      expect(flag).toBeInstanceOf(BooleanFlag);
+      expect(flag.id).toBeNull();
+      expect(flag.key).toBe("checkout-v2");
       expect(flag.type).toBe("BOOLEAN");
+      expect(flag.default).toBe(false);
     });
 
-    it("should auto-generate boolean values", async () => {
+    it("should auto-generate name from key", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
+      const flag = client.newBooleanFlag("checkout-v2", { default: true });
+      expect(flag.name).toBe("Checkout V2");
+    });
 
-      await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
+    it("should use custom name when provided", () => {
+      const client = makeFlagsClient();
+      const flag = client.newBooleanFlag("checkout-v2", { default: true, name: "Custom Name" });
+      expect(flag.name).toBe("Custom Name");
+    });
 
-      const body = JSON.parse(await mockFetch.mock.calls[0][0].text());
-      expect(body.data.attributes.values).toEqual([
+    it("should auto-generate boolean values", () => {
+      const client = makeFlagsClient();
+      const flag = client.newBooleanFlag("feat", { default: false });
+      expect(flag.values).toEqual([
         { name: "True", value: true },
         { name: "False", value: false },
       ]);
     });
 
-    it("should pass custom values for string flags", async () => {
+    it("should set description when provided", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            ...FLAG_RESOURCE,
-            attributes: {
-              ...FLAG_RESOURCE.attributes,
-              type: "STRING",
-              default: "red",
-              values: [{ name: "Red", value: "red" }],
-            },
-          },
-        }),
-      );
+      const flag = client.newBooleanFlag("feat", { default: false, description: "A feature" });
+      expect(flag.description).toBe("A feature");
+    });
 
-      await client.create("color", {
-        name: "Color",
-        type: "STRING",
+    it("should default description to null", () => {
+      const client = makeFlagsClient();
+      const flag = client.newBooleanFlag("feat", { default: false });
+      expect(flag.description).toBeNull();
+    });
+
+    it("should have empty environments", () => {
+      const client = makeFlagsClient();
+      const flag = client.newBooleanFlag("feat", { default: false });
+      expect(flag.environments).toEqual({});
+    });
+
+    it("should have null timestamps", () => {
+      const client = makeFlagsClient();
+      const flag = client.newBooleanFlag("feat", { default: false });
+      expect(flag.createdAt).toBeNull();
+      expect(flag.updatedAt).toBeNull();
+    });
+  });
+
+  describe("newStringFlag", () => {
+    it("should return a StringFlag with id: null", () => {
+      const client = makeFlagsClient();
+      const flag = client.newStringFlag("banner-color", { default: "red" });
+
+      expect(flag).toBeInstanceOf(StringFlag);
+      expect(flag.id).toBeNull();
+      expect(flag.key).toBe("banner-color");
+      expect(flag.type).toBe("STRING");
+      expect(flag.default).toBe("red");
+    });
+
+    it("should auto-generate name from key", () => {
+      const client = makeFlagsClient();
+      const flag = client.newStringFlag("banner-color", { default: "red" });
+      expect(flag.name).toBe("Banner Color");
+    });
+
+    it("should accept custom values", () => {
+      const client = makeFlagsClient();
+      const flag = client.newStringFlag("color", {
         default: "red",
-        values: [{ name: "Red", value: "red" }],
+        values: [
+          { name: "Red", value: "red" },
+          { name: "Blue", value: "blue" },
+        ],
       });
-
-      const body = JSON.parse(await mockFetch.mock.calls[0][0].text());
-      expect(body.data.attributes.values).toEqual([{ name: "Red", value: "red" }]);
+      expect(flag.values).toEqual([
+        { name: "Red", value: "red" },
+        { name: "Blue", value: "blue" },
+      ]);
     });
 
-    it("should throw SmplValidationError on 422", async () => {
+    it("should default to empty values", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
-
-      await expect(
-        client.create("bad", { name: "Bad", type: "BOOLEAN", default: false }),
-      ).rejects.toThrow(SmplValidationError);
-    });
-
-    it("should throw SmplConflictError on 409", async () => {
-      const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
-
-      await expect(
-        client.create("dup", { name: "Dup", type: "BOOLEAN", default: false }),
-      ).rejects.toThrow(SmplConflictError);
-    });
-
-    it("should throw SmplConnectionError on network error", async () => {
-      const client = makeFlagsClient();
-      mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-
-      await expect(
-        client.create("x", { name: "X", type: "BOOLEAN", default: false }),
-      ).rejects.toThrow(SmplConnectionError);
-    });
-
-    it("should throw SmplError on 500 server error", async () => {
-      const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
-
-      await expect(
-        client.create("x", { name: "X", type: "BOOLEAN", default: false }),
-      ).rejects.toThrow(SmplError);
+      const flag = client.newStringFlag("color", { default: "red" });
+      expect(flag.values).toEqual([]);
     });
   });
 
-  describe("get", () => {
-    it("should fetch a flag by ID", async () => {
+  describe("newNumberFlag", () => {
+    it("should return a NumberFlag with id: null", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
+      const flag = client.newNumberFlag("max-retries", { default: 3 });
 
-      const flag = await client.get("flag-1");
-      expect(flag.id).toBe("flag-1");
-      expect(flag.key).toBe("my-flag");
+      expect(flag).toBeInstanceOf(NumberFlag);
+      expect(flag.id).toBeNull();
+      expect(flag.key).toBe("max-retries");
+      expect(flag.type).toBe("NUMERIC");
+      expect(flag.default).toBe(3);
     });
 
-    it("should throw SmplNotFoundError on 404", async () => {
+    it("should auto-generate name from key with underscores", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
+      const flag = client.newNumberFlag("max_retries", { default: 5 });
+      expect(flag.name).toBe("Max Retries");
+    });
 
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+    it("should accept custom values", () => {
+      const client = makeFlagsClient();
+      const flag = client.newNumberFlag("retries", {
+        default: 3,
+        values: [
+          { name: "Low", value: 1 },
+          { name: "High", value: 10 },
+        ],
+      });
+      expect(flag.values).toHaveLength(2);
     });
   });
 
-  describe("list", () => {
-    it("should list flags", async () => {
+  describe("newJsonFlag", () => {
+    it("should return a JsonFlag with id: null", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE, FLAG_RESOURCE] }));
+      const defaultVal = { mode: "dark", accent: "#fff" };
+      const flag = client.newJsonFlag("theme-config", { default: defaultVal });
 
-      const flags = await client.list();
-      expect(flags).toHaveLength(2);
-      expect(flags[0]).toBeInstanceOf(Flag);
+      expect(flag).toBeInstanceOf(JsonFlag);
+      expect(flag.id).toBeNull();
+      expect(flag.key).toBe("theme-config");
+      expect(flag.type).toBe("JSON");
+      expect(flag.default).toEqual(defaultVal);
     });
 
-    it("should throw SmplConnectionError on network error", async () => {
+    it("should auto-generate name from key", () => {
       const client = makeFlagsClient();
-      mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-
-      await expect(client.list()).rejects.toThrow(SmplConnectionError);
-    });
-  });
-
-  describe("delete", () => {
-    it("should delete a flag", async () => {
-      const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
-
-      await expect(client.delete("flag-1")).resolves.not.toThrow();
+      const flag = client.newJsonFlag("theme-config", { default: {} });
+      expect(flag.name).toBe("Theme Config");
     });
 
-    it("should throw on non-204 error", async () => {
+    it("should accept custom values", () => {
       const client = makeFlagsClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
-
-      await expect(client.delete("missing")).rejects.toThrow(SmplNotFoundError);
-    });
-  });
-
-  describe("_updateFlag", () => {
-    it("should PUT flag update and return updated model", async () => {
-      const client = makeFlagsClient();
-
-      // First create a flag
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
+      const flag = client.newJsonFlag("theme", {
+        default: {},
+        values: [{ name: "Dark", value: { mode: "dark" } }],
       });
-
-      // Now update it
-      const updatedResource = {
-        ...FLAG_RESOURCE,
-        attributes: { ...FLAG_RESOURCE.attributes, default: true },
-      };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
-
-      const updated = await client._updateFlag({ flag, default: true });
-      expect(updated.default).toBe(true);
-    });
-
-    it("should include description when flag has one", async () => {
-      const client = makeFlagsClient();
-
-      const resource = {
-        ...FLAG_RESOURCE,
-        attributes: { ...FLAG_RESOURCE.attributes, description: "has desc" },
-      };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-        description: "has desc",
-      });
-
-      // Update without providing description — should use flag's existing one
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      await client._updateFlag({ flag, default: true });
-
-      const body = JSON.parse(await mockFetch.mock.calls[1][0].text());
-      expect(body.data.attributes.description).toBe("has desc");
-    });
-
-    it("should include environments when flag has them", async () => {
-      const client = makeFlagsClient();
-
-      const resource = {
-        ...FLAG_RESOURCE,
-        attributes: {
-          ...FLAG_RESOURCE.attributes,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
-
-      // Update without environments — should include flag's existing ones
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      await client._updateFlag({ flag, default: true });
-
-      const body = JSON.parse(await mockFetch.mock.calls[1][0].text());
-      expect(body.data.attributes.environments).toEqual({ staging: { enabled: true, rules: [] } });
-    });
-
-    it("should omit description when flag has null description and none provided", async () => {
-      const client = makeFlagsClient();
-
-      const resource = {
-        ...FLAG_RESOURCE,
-        attributes: { ...FLAG_RESOURCE.attributes, description: undefined },
-      };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
-      // Ensure flag.description is null
-      flag.description = null;
-
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
-      await client._updateFlag({ flag, default: true });
-
-      const body = JSON.parse(await mockFetch.mock.calls[1][0].text());
-      expect(body.data.attributes.description).toBe("");
-    });
-
-    it("should include new description when provided", async () => {
-      const client = makeFlagsClient();
-
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
-
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
-      await client._updateFlag({ flag, description: "new desc" });
-
-      const body = JSON.parse(await mockFetch.mock.calls[1][0].text());
-      expect(body.data.attributes.description).toBe("new desc");
-    });
-
-    it("should throw on update error", async () => {
-      const client = makeFlagsClient();
-
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
-      const flag = await client.create("my-flag", {
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-      });
-
-      mockFetch.mockRejectedValueOnce(new TypeError("network error"));
-      await expect(client._updateFlag({ flag, default: true })).rejects.toThrow(
-        SmplConnectionError,
-      );
+      expect(flag.values).toHaveLength(1);
     });
   });
 });
 
-describe("Flag model", () => {
+// ---------------------------------------------------------------------------
+// Flag.save()
+// ---------------------------------------------------------------------------
+
+describe("Flag.save()", () => {
+  it("should POST when id is null (new flag)", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("checkout-v2", { default: false });
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "new-uuid",
+          type: "flag",
+          attributes: {
+            key: "checkout-v2",
+            name: "Checkout V2",
+            type: "BOOLEAN",
+            default: false,
+            values: [
+              { name: "True", value: true },
+              { name: "False", value: false },
+            ],
+            description: "",
+            environments: {},
+            created_at: "2024-06-01T00:00:00Z",
+            updated_at: "2024-06-01T00:00:00Z",
+          },
+        },
+      }),
+    );
+
+    await flag.save();
+
+    // Verify POST was used
+    const request: Request = mockFetch.mock.calls[0][0];
+    expect(request.method).toBe("POST");
+    expect(request.url).toContain("/api/v1/flags");
+    expect(request.url).not.toContain("/api/v1/flags/");
+
+    // Verify body structure
+    const body = JSON.parse(await mockFetch.mock.calls[0][0].clone().text());
+    expect(body.data.type).toBe("flag");
+    expect(body.data.attributes.key).toBe("checkout-v2");
+    expect(body.data.attributes.name).toBe("Checkout V2");
+    expect(body.data.attributes.type).toBe("BOOLEAN");
+    expect(body.data.attributes.values).toEqual([
+      { name: "True", value: true },
+      { name: "False", value: false },
+    ]);
+  });
+
+  it("should PUT when id is set (existing flag)", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("checkout-v2", { default: false });
+
+    // Simulate a previously-saved flag by assigning an id
+    flag.id = "existing-uuid";
+
+    const updatedResource = {
+      id: "existing-uuid",
+      type: "flag",
+      attributes: {
+        ...FLAG_RESOURCE.attributes,
+        key: "checkout-v2",
+        default: false,
+      },
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
+
+    await flag.save();
+
+    const request: Request = mockFetch.mock.calls[0][0];
+    expect(request.method).toBe("PUT");
+    expect(request.url).toContain("/api/v1/flags/existing-uuid");
+  });
+
+  it("should update the instance in-place via _apply after POST", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("new-flag", { default: true });
+    expect(flag.id).toBeNull();
+    expect(flag.createdAt).toBeNull();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "server-uuid",
+          type: "flag",
+          attributes: {
+            key: "new-flag",
+            name: "New Flag",
+            type: "BOOLEAN",
+            default: true,
+            values: [
+              { name: "True", value: true },
+              { name: "False", value: false },
+            ],
+            description: "",
+            environments: {},
+            created_at: "2024-06-01T12:00:00Z",
+            updated_at: "2024-06-01T12:00:00Z",
+          },
+        },
+      }),
+    );
+
+    await flag.save();
+
+    expect(flag.id).toBe("server-uuid");
+    expect(flag.createdAt).toBe("2024-06-01T12:00:00Z");
+    expect(flag.updatedAt).toBe("2024-06-01T12:00:00Z");
+  });
+
+  it("should update the instance in-place via _apply after PUT", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("existing", { default: false });
+    flag.id = "uuid-1";
+    flag.default = true; // local mutation
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "uuid-1",
+          type: "flag",
+          attributes: {
+            key: "existing",
+            name: "Existing",
+            type: "BOOLEAN",
+            default: true,
+            values: [
+              { name: "True", value: true },
+              { name: "False", value: false },
+            ],
+            description: "",
+            environments: {},
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-06-15T00:00:00Z",
+          },
+        },
+      }),
+    );
+
+    await flag.save();
+
+    expect(flag.default).toBe(true);
+    expect(flag.updatedAt).toBe("2024-06-15T00:00:00Z");
+  });
+
+  it("should include environments in POST body when present", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("feat", { default: false });
+    flag.setEnvironmentEnabled("staging", true);
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "uuid-2",
+          type: "flag",
+          attributes: {
+            key: "feat",
+            name: "Feat",
+            type: "BOOLEAN",
+            default: false,
+            values: [
+              { name: "True", value: true },
+              { name: "False", value: false },
+            ],
+            description: "",
+            environments: { staging: { enabled: true, rules: [] } },
+            created_at: "2024-06-01T00:00:00Z",
+            updated_at: "2024-06-01T00:00:00Z",
+          },
+        },
+      }),
+    );
+
+    await flag.save();
+
+    const body = JSON.parse(await mockFetch.mock.calls[0][0].clone().text());
+    expect(body.data.attributes.environments).toEqual({
+      staging: { enabled: true, rules: [] },
+    });
+  });
+
+  it("should omit environments from body when empty", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("feat", { default: false });
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "uuid-3",
+          type: "flag",
+          attributes: {
+            ...FLAG_RESOURCE.attributes,
+            key: "feat",
+          },
+        },
+      }),
+    );
+
+    await flag.save();
+
+    const body = JSON.parse(await mockFetch.mock.calls[0][0].clone().text());
+    expect(body.data.attributes).not.toHaveProperty("environments");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flag local mutations (sync)
+// ---------------------------------------------------------------------------
+
+describe("Flag local mutations", () => {
   function makeFlag(overrides?: Partial<ConstructorParameters<typeof Flag>[1]>): Flag {
     const client = makeFlagsClient();
     return new Flag(client, {
@@ -390,225 +487,505 @@ describe("Flag model", () => {
     });
   }
 
-  it("should update via update()", async () => {
-    const flag = makeFlag();
-    const updatedResource = {
-      ...FLAG_RESOURCE,
-      attributes: { ...FLAG_RESOURCE.attributes, default: true },
-    };
-    // PUT response
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
-
-    await flag.update({ default: true });
-    expect(flag.default).toBe(true);
-  });
-
-  it("should addRule to an environment", async () => {
-    const flag = makeFlag({
-      environments: {
-        staging: { enabled: true, rules: [{ description: "existing", logic: {}, value: true }] },
-      },
+  describe("addRule", () => {
+    it("should be synchronous and return this for chaining", () => {
+      const flag = makeFlag();
+      const result = flag.addRule({
+        environment: "staging",
+        description: "rule 1",
+        logic: { "==": [{ var: "user.plan" }, "enterprise"] },
+        value: true,
+      });
+      expect(result).toBe(flag);
     });
 
-    // First call: re-fetch (GET) returns current state
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          ...FLAG_RESOURCE,
-          attributes: {
-            ...FLAG_RESOURCE.attributes,
-            environments: {
-              staging: {
-                enabled: true,
-                rules: [{ description: "existing", logic: {}, value: true }],
-              },
-            },
+    it("should mutate environments locally", () => {
+      const flag = makeFlag();
+      flag.addRule({
+        environment: "staging",
+        description: "rule 1",
+        logic: { "==": [{ var: "user.plan" }, "enterprise"] },
+        value: true,
+      });
+
+      expect(flag.environments.staging).toBeDefined();
+      expect(flag.environments.staging.rules).toHaveLength(1);
+      expect(flag.environments.staging.rules[0].description).toBe("rule 1");
+    });
+
+    it("should append to existing rules", () => {
+      const flag = makeFlag({
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [{ description: "existing", logic: {}, value: true }],
           },
         },
-      }),
-    );
+      });
 
-    // Second call: PUT update
-    const updatedResource = {
-      ...FLAG_RESOURCE,
-      attributes: {
-        ...FLAG_RESOURCE.attributes,
+      flag.addRule({
+        environment: "staging",
+        description: "rule 2",
+        logic: { "==": [{ var: "user.plan" }, "free"] },
+        value: false,
+      });
+
+      expect(flag.environments.staging.rules).toHaveLength(2);
+      expect(flag.environments.staging.rules[0].description).toBe("existing");
+      expect(flag.environments.staging.rules[1].description).toBe("rule 2");
+    });
+
+    it("should strip the environment key from the stored rule", () => {
+      const flag = makeFlag();
+      flag.addRule({
+        environment: "staging",
+        description: "rule 1",
+        logic: {},
+        value: true,
+      });
+
+      const storedRule = flag.environments.staging.rules[0];
+      expect(storedRule).not.toHaveProperty("environment");
+    });
+
+    it("should throw if built rule has no environment key", () => {
+      const flag = makeFlag();
+      expect(() => flag.addRule({ description: "no env", logic: {}, value: true })).toThrow(
+        "Built rule must include 'environment' key",
+      );
+    });
+
+    it("should create environment with enabled: true when environment does not exist", () => {
+      const flag = makeFlag();
+      flag.addRule({
+        environment: "production",
+        description: "rule 1",
+        logic: {},
+        value: true,
+      });
+      expect(flag.environments.production.enabled).toBe(true);
+    });
+
+    it("should support chaining multiple addRule calls", () => {
+      const flag = makeFlag();
+      flag
+        .addRule({
+          environment: "staging",
+          description: "rule 1",
+          logic: { "==": [{ var: "user.plan" }, "enterprise"] },
+          value: true,
+        })
+        .addRule({
+          environment: "staging",
+          description: "rule 2",
+          logic: { "==": [{ var: "user.plan" }, "pro"] },
+          value: true,
+        });
+
+      expect(flag.environments.staging.rules).toHaveLength(2);
+    });
+  });
+
+  describe("setEnvironmentEnabled", () => {
+    it("should enable an environment", () => {
+      const flag = makeFlag();
+      flag.setEnvironmentEnabled("staging", true);
+      expect(flag.environments.staging.enabled).toBe(true);
+    });
+
+    it("should disable an environment", () => {
+      const flag = makeFlag({
+        environments: { staging: { enabled: true, rules: [] } },
+      });
+      flag.setEnvironmentEnabled("staging", false);
+      expect(flag.environments.staging.enabled).toBe(false);
+    });
+
+    it("should create environment if it does not exist", () => {
+      const flag = makeFlag();
+      flag.setEnvironmentEnabled("production", true);
+      expect(flag.environments.production).toBeDefined();
+      expect(flag.environments.production.enabled).toBe(true);
+    });
+
+    it("should preserve existing rules when toggling", () => {
+      const flag = makeFlag({
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [{ description: "r1", logic: {}, value: true }],
+          },
+        },
+      });
+      flag.setEnvironmentEnabled("staging", false);
+      expect(flag.environments.staging.rules).toHaveLength(1);
+      expect(flag.environments.staging.enabled).toBe(false);
+    });
+  });
+
+  describe("setEnvironmentDefault", () => {
+    it("should set the default value for an environment", () => {
+      const flag = makeFlag();
+      flag.setEnvironmentDefault("staging", true);
+      expect(flag.environments.staging.default).toBe(true);
+    });
+
+    it("should create environment if it does not exist", () => {
+      const flag = makeFlag();
+      flag.setEnvironmentDefault("production", "blue");
+      expect(flag.environments.production).toBeDefined();
+      expect(flag.environments.production.default).toBe("blue");
+    });
+
+    it("should update existing environment default", () => {
+      const flag = makeFlag({
+        environments: { staging: { enabled: true, default: "red", rules: [] } },
+      });
+      flag.setEnvironmentDefault("staging", "green");
+      expect(flag.environments.staging.default).toBe("green");
+    });
+  });
+
+  describe("clearRules", () => {
+    it("should clear rules for a specific environment", () => {
+      const flag = makeFlag({
         environments: {
           staging: {
             enabled: true,
             rules: [
-              { description: "existing", logic: {}, value: true },
-              {
-                description: "new rule",
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: true,
-              },
+              { description: "r1", logic: {}, value: true },
+              { description: "r2", logic: {}, value: false },
             ],
           },
         },
-      },
-    };
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
+      });
 
-    await flag.addRule({
-      environment: "staging",
-      description: "new rule",
-      logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-      value: true,
+      flag.clearRules("staging");
+      expect(flag.environments.staging.rules).toEqual([]);
     });
 
-    expect(flag.environments.staging.rules).toHaveLength(2);
-  });
-
-  it("should throw if addRule has no environment", async () => {
-    const flag = makeFlag();
-    await expect(flag.addRule({ description: "no env", logic: {}, value: true })).rejects.toThrow(
-      "Built rule must include 'environment' key",
-    );
-  });
-
-  it("should have a toString()", () => {
-    const flag = makeFlag();
-    expect(flag.toString()).toBe("Flag(key=my-flag, type=BOOLEAN, default=false)");
-  });
-});
-
-describe("ContextType model", () => {
-  it("should construct and have a toString()", () => {
-    const ct = new ContextType({
-      id: "ct-1",
-      key: "user",
-      name: "User",
-      attributes: { plan: {} },
-    });
-    expect(ct.key).toBe("user");
-    expect(ct.toString()).toBe("ContextType(key=user, name=User)");
-  });
-});
-
-describe("FlagsClient context type management", () => {
-  it("should create a context type", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "ct-1",
-          type: "context_type",
-          attributes: { key: "user", name: "User", attributes: {} },
-        },
-      }),
-    );
-
-    const ct = await client.createContextType("user", { name: "User" });
-    expect(ct).toBeInstanceOf(ContextType);
-    expect(ct.key).toBe("user");
-  });
-
-  it("should update a context type", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "ct-1",
-          type: "context_type",
-          attributes: { key: "user", name: "User", attributes: { plan: {} } },
-        },
-      }),
-    );
-
-    const ct = await client.updateContextType("ct-1", {
-      key: "user",
-      name: "User",
-      attributes: { plan: {} },
-    });
-    expect(ct.attributes).toEqual({ plan: {} });
-  });
-
-  it("should list context types", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "ct-1",
-            type: "context_type",
-            attributes: { key: "user", name: "User", attributes: {} },
+    it("should preserve the enabled state", () => {
+      const flag = makeFlag({
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [{ description: "r1", logic: {}, value: true }],
           },
-        ],
-      }),
-    );
+        },
+      });
 
-    const cts = await client.listContextTypes();
-    expect(cts).toHaveLength(1);
+      flag.clearRules("staging");
+      expect(flag.environments.staging.enabled).toBe(true);
+    });
+
+    it("should be a no-op for a non-existent environment", () => {
+      const flag = makeFlag();
+      // Should not throw
+      flag.clearRules("nonexistent");
+      expect(flag.environments).toEqual({});
+    });
+
+    it("should not affect other environments", () => {
+      const flag = makeFlag({
+        environments: {
+          staging: {
+            enabled: true,
+            rules: [{ description: "s1", logic: {}, value: true }],
+          },
+          production: {
+            enabled: true,
+            rules: [{ description: "p1", logic: {}, value: false }],
+          },
+        },
+      });
+
+      flag.clearRules("staging");
+      expect(flag.environments.staging.rules).toEqual([]);
+      expect(flag.environments.production.rules).toHaveLength(1);
+    });
   });
 
-  it("should delete a context type", async () => {
+  describe("toString", () => {
+    it("should produce a readable string", () => {
+      const flag = makeFlag();
+      expect(flag.toString()).toBe("Flag(key=my-flag, type=BOOLEAN, default=false)");
+    });
+  });
+
+  describe("_apply", () => {
+    it("should copy all fields from another Flag instance", () => {
+      const client = makeFlagsClient();
+      const flag = new Flag(client, {
+        id: null,
+        key: "a",
+        name: "A",
+        type: "BOOLEAN",
+        default: false,
+        values: [],
+        description: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+
+      const other = new Flag(client, {
+        id: "uuid",
+        key: "a",
+        name: "Updated A",
+        type: "BOOLEAN",
+        default: true,
+        values: [{ name: "T", value: true }],
+        description: "Updated",
+        environments: { staging: { enabled: true, rules: [] } },
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-06-01T00:00:00Z",
+      });
+
+      flag._apply(other);
+
+      expect(flag.id).toBe("uuid");
+      expect(flag.name).toBe("Updated A");
+      expect(flag.default).toBe(true);
+      expect(flag.values).toHaveLength(1);
+      expect(flag.description).toBe("Updated");
+      expect(flag.environments).toHaveProperty("staging");
+      expect(flag.createdAt).toBe("2024-01-01T00:00:00Z");
+      expect(flag.updatedAt).toBe("2024-06-01T00:00:00Z");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FlagsClient.get()
+// ---------------------------------------------------------------------------
+
+describe("FlagsClient.get()", () => {
+  it("should fetch a flag by key using filter[key] query param", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
 
-    await expect(client.deleteContextType("ct-1")).resolves.not.toThrow();
+    const flag = await client.get("my-flag");
+    expect(flag.id).toBe("flag-1");
+    expect(flag.key).toBe("my-flag");
+
+    // Verify the query param
+    const request: Request = mockFetch.mock.calls[0][0];
+    expect(request.url).toContain("filter[key]=my-flag");
   });
 
-  it("should list context instances", async () => {
+  it("should return a Flag model from the response", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [{ id: "ctx-1" }] }));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
 
-    const contexts = await client.listContexts({ contextTypeKey: "user" });
-    expect(contexts).toHaveLength(1);
+    const flag = await client.get("my-flag");
+    expect(flag).toBeInstanceOf(Flag);
+    expect(flag.name).toBe("My Flag");
+    expect(flag.type).toBe("BOOLEAN");
+    expect(flag.default).toBe(false);
+    expect(flag.description).toBe("A test flag");
   });
 
-  it("should pass filter[context_type_id] query param for listContexts", async () => {
+  it("should throw SmplNotFoundError when no results", async () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-    await client.listContexts({ contextTypeKey: "user" });
-    const request: Request = mockFetch.mock.calls[0][0];
-    expect(request.url).toContain("filter[context_type_id]=user");
-  });
+    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
 
-  // Error paths for coverage
-  it("should handle createContextType network error", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(client.createContextType("user", { name: "User" })).rejects.toThrow(
-      SmplConnectionError,
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await expect(client.get("nonexistent")).rejects.toThrow(
+      "Flag with key 'nonexistent' not found",
     );
   });
 
-  it("should handle updateContextType network error", async () => {
+  it("should throw SmplNotFoundError on 404", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(
-      client.updateContextType("ct-1", { key: "user", name: "User", attributes: {} }),
-    ).rejects.toThrow(SmplConnectionError);
+    mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
+
+    await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
   });
 
-  it("should handle listContextTypes network error", async () => {
+  it("should throw SmplConnectionError on network error", async () => {
     const client = makeFlagsClient();
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(client.listContextTypes()).rejects.toThrow(SmplConnectionError);
-  });
 
-  it("should handle deleteContextType network error", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(client.deleteContextType("ct-1")).rejects.toThrow(SmplConnectionError);
-  });
-
-  it("should handle listContexts network error", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(client.listContexts({ contextTypeKey: "user" })).rejects.toThrow(
-      SmplConnectionError,
-    );
+    await expect(client.get("x")).rejects.toThrow(SmplConnectionError);
   });
 });
 
-describe("FlagsClient runtime", () => {
-  it("should connect and evaluate flags", async () => {
+// ---------------------------------------------------------------------------
+// FlagsClient.list()
+// ---------------------------------------------------------------------------
+
+describe("FlagsClient.list()", () => {
+  it("should list flags as Flag[] instances", async () => {
+    const client = makeFlagsClient();
+    const secondResource = {
+      ...FLAG_RESOURCE,
+      id: "flag-2",
+      attributes: { ...FLAG_RESOURCE.attributes, key: "other-flag", name: "Other Flag" },
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE, secondResource] }));
+
+    const flags = await client.list();
+    expect(flags).toHaveLength(2);
+    expect(flags[0]).toBeInstanceOf(Flag);
+    expect(flags[1]).toBeInstanceOf(Flag);
+    expect(flags[0].key).toBe("my-flag");
+    expect(flags[1].key).toBe("other-flag");
+  });
+
+  it("should return empty array when no flags exist", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    const flags = await client.list();
+    expect(flags).toEqual([]);
+  });
+
+  it("should throw SmplConnectionError on network error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    await expect(client.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should throw SmplError on server error", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
+
+    await expect(client.list()).rejects.toThrow(SmplError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FlagsClient.delete()
+// ---------------------------------------------------------------------------
+
+describe("FlagsClient.delete()", () => {
+  it("should resolve key then DELETE by UUID", async () => {
     const client = makeFlagsClient();
 
-    // Mock the GET /api/v1/flags for connect()
+    // First call: GET /api/v1/flags?filter[key]=my-flag
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
+    // Second call: DELETE /api/v1/flags/flag-1
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await client.delete("my-flag");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const deleteRequest: Request = mockFetch.mock.calls[1][0];
+    expect(deleteRequest.method).toBe("DELETE");
+    expect(deleteRequest.url).toContain("/api/v1/flags/flag-1");
+  });
+
+  it("should throw SmplNotFoundError when key does not exist", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    await expect(client.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
+  });
+
+  it("should throw on DELETE error", async () => {
+    const client = makeFlagsClient();
+    // GET succeeds
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
+    // DELETE fails
+    mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
+
+    await expect(client.delete("my-flag")).rejects.toThrow(SmplError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error handling
+// ---------------------------------------------------------------------------
+
+describe("Error handling", () => {
+  it("should throw SmplValidationError on 422", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("bad", { default: false });
+
+    mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
+
+    await expect(flag.save()).rejects.toThrow(SmplValidationError);
+  });
+
+  it("should throw SmplConflictError on 409", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("dup", { default: false });
+
+    mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
+
+    await expect(flag.save()).rejects.toThrow(SmplConflictError);
+  });
+
+  it("should throw SmplNotFoundError on 404", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("missing", { default: false });
+    flag.id = "uuid-missing";
+
+    mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
+
+    await expect(flag.save()).rejects.toThrow(SmplNotFoundError);
+  });
+
+  it("should throw SmplConnectionError on network error (TypeError)", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("x", { default: false });
+
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    await expect(flag.save()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should throw SmplError on 500 server error", async () => {
+    const client = makeFlagsClient();
+    const flag = client.newBooleanFlag("x", { default: false });
+
+    mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
+
+    await expect(flag.save()).rejects.toThrow(SmplError);
+  });
+
+  it("should throw SmplTimeoutError when fetch is aborted", async () => {
+    const { SmplTimeoutError } = await import("../../../src/errors.js");
+    lastMockWs = createMockSharedWs();
+    const client = new FlagsClient(API_KEY, () => lastMockWs as never, 1);
+
+    mockFetch.mockImplementationOnce(
+      (request: Request) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = request.signal;
+          if (signal?.aborted) {
+            reject(new DOMException("The operation was aborted", "AbortError"));
+            return;
+          }
+          signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted", "AbortError"));
+          });
+        }),
+    );
+
+    await expect(client.list()).rejects.toThrow(SmplTimeoutError);
+  });
+
+  it("should re-throw SDK errors without wrapping", async () => {
+    const client = makeFlagsClient();
+    // A 422 response creates SmplValidationError via checkError, which passes through wrapFetchError
+    mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
+
+    await expect(client.list()).rejects.toThrow(SmplValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FlagsClient runtime helpers
+// ---------------------------------------------------------------------------
+
+describe("FlagsClient runtime", () => {
+  it("should connect via _connectInternal and evaluate flags", async () => {
+    const client = makeFlagsClient();
+
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
@@ -631,139 +1008,40 @@ describe("FlagsClient runtime", () => {
     );
 
     await client._connectInternal("staging");
-    // connectionStatus delegates to the mock WS which returns "disconnected"
-    // The important thing is that connect() doesn't throw
 
-    const handle = client.boolFlag("my-flag", false);
+    const handle = client.booleanFlag("my-flag", false);
     expect(handle.get()).toBe(false);
   });
 
   it("should disconnect and clear state", async () => {
     const client = makeFlagsClient();
 
-    // connect
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
     await client._connectInternal("staging");
 
-    // disconnect (flushContexts may call fetch)
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
     await client.disconnect();
 
     expect(client.connectionStatus()).toBe("disconnected");
   });
 
-  it("should refresh and fire listeners", async () => {
+  it("should initialize idempotently", async () => {
     const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: null };
 
-    // connect
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "my-flag",
-              name: "F",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.initialize();
 
-    const changes: string[] = [];
-    client.onChange((e) => changes.push(e.key));
+    // Second call should not make another fetch
+    await client.initialize();
 
-    // refresh
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "my-flag",
-              name: "F",
-              type: "BOOLEAN",
-              default: true,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client.refresh();
-
-    expect(changes).toContain("my-flag");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("should register global and flag-specific listeners", async () => {
+  it("should evaluate tier 1 without being initialized", async () => {
     const client = makeFlagsClient();
-    const events: string[] = [];
+    const { Context } = await import("../../../src/flags/types.js");
 
-    client.onChange((e) => events.push(`global:${e.key}`));
-    client.onChangeAny((e) => events.push(`any:${e.key}`));
-
-    const handle = client.boolFlag("test-flag", false);
-    handle.onChange((e) => events.push(`flag:${e.key}`));
-
-    // connect with the flag in store
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "test-flag",
-              name: "T",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
-
-    // refresh to fire listeners
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "test-flag",
-              name: "T",
-              type: "BOOLEAN",
-              default: true,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client.refresh();
-
-    expect(events).toContain("global:test-flag");
-    expect(events).toContain("any:test-flag");
-    expect(events).toContain("flag:test-flag");
-  });
-
-  it("should evaluate tier 1 (not connected)", async () => {
-    const client = makeFlagsClient();
-
-    // evaluate() fetches flags since not connected
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
@@ -779,12 +1057,7 @@ describe("FlagsClient runtime", () => {
               environments: {
                 staging: {
                   enabled: true,
-                  rules: [
-                    {
-                      logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                      value: "blue",
-                    },
-                  ],
+                  rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: "blue" }],
                 },
               },
             },
@@ -793,7 +1066,6 @@ describe("FlagsClient runtime", () => {
       }),
     );
 
-    const { Context } = await import("../../../src/flags/types.js");
     const result = await client.evaluate("color", {
       environment: "staging",
       context: [new Context("user", "u-1", { plan: "enterprise" })],
@@ -803,9 +1075,9 @@ describe("FlagsClient runtime", () => {
 
   it("should return null for unknown flag in evaluate", async () => {
     const client = makeFlagsClient();
+    const { Context } = await import("../../../src/flags/types.js");
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-    const { Context } = await import("../../../src/flags/types.js");
     const result = await client.evaluate("nonexistent", {
       environment: "staging",
       context: [new Context("user", "u-1")],
@@ -813,260 +1085,10 @@ describe("FlagsClient runtime", () => {
     expect(result).toBeNull();
   });
 
-  it("should flush contexts to server", async () => {
+  it("should use local store for tier 1 evaluate when initialized", async () => {
     const client = makeFlagsClient();
     const { Context } = await import("../../../src/flags/types.js");
 
-    client.register(new Context("user", "u-1", { plan: "enterprise" }));
-
-    mockFetch.mockResolvedValueOnce(jsonResponse({}));
-    await client.flushContexts();
-
-    // Verify POST was called
-    expect(mockFetch).toHaveBeenCalled();
-  });
-
-  it("should not flush when no pending contexts", async () => {
-    const client = makeFlagsClient();
-    await client.flushContexts();
-    // No fetch calls for empty batch
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("should swallow errors from change listeners", async () => {
-    const client = makeFlagsClient();
-
-    // Register a listener that throws
-    client.onChange(() => {
-      throw new Error("listener error");
-    });
-
-    // Register a flag handle with a listener that throws
-    const handle = client.boolFlag("test-flag", false);
-    handle.onChange(() => {
-      throw new Error("handle listener error");
-    });
-
-    // connect
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "test-flag",
-              name: "T",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
-
-    // refresh triggers listeners — should not throw
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "test-flag",
-              name: "T",
-              type: "BOOLEAN",
-              default: true,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await expect(client.refresh()).resolves.not.toThrow();
-  });
-
-  it("should swallow errors from context flush", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    client.register(new Context("user", "u-1", { plan: "enterprise" }));
-
-    // Make flush fail
-    mockFetch.mockRejectedValueOnce(new Error("network error"));
-    await expect(client.flushContexts()).resolves.not.toThrow();
-  });
-
-  it("should handle flag_changed WebSocket events", async () => {
-    const client = makeFlagsClient();
-
-    // connect
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "my-flag",
-              name: "F",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
-
-    const changes: string[] = [];
-    client.onChange((e) => changes.push(e.key));
-
-    // Simulate flag_changed WS event — the handler re-fetches flags
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "my-flag",
-              name: "F",
-              type: "BOOLEAN",
-              default: true,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-
-    lastMockWs._emit("flag_changed", { key: "my-flag" });
-
-    // Wait for async handler to complete
-    await vi.waitFor(() => expect(changes).toContain("my-flag"));
-  });
-
-  it("should handle flag_deleted WebSocket events", async () => {
-    const client = makeFlagsClient();
-
-    // connect
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "del-flag",
-              name: "D",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: {},
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
-
-    const changes: string[] = [];
-    client.onChange((e) => changes.push(e.key));
-
-    // Simulate flag_deleted WS event
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    lastMockWs._emit("flag_deleted", { key: "del-flag" });
-
-    await vi.waitFor(() => expect(changes).toContain("del-flag"));
-  });
-
-  it("should handle _fetchFlagsList error via wrapFetchError", async () => {
-    const client = makeFlagsClient();
-
-    // Make the GET /api/v1/flags fail with a network error
-    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-
-    await expect(client._connectInternal("staging")).rejects.toThrow(SmplConnectionError);
-  });
-
-  it("should auto-flush context buffer when it reaches batch size", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    // connect
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          {
-            id: "f1",
-            type: "flag",
-            attributes: {
-              key: "my-flag",
-              name: "F",
-              type: "BOOLEAN",
-              default: false,
-              values: [],
-              environments: { staging: { enabled: true, rules: [] } },
-            },
-          },
-        ],
-      }),
-    );
-    await client._connectInternal("staging");
-
-    // Register many contexts to exceed CONTEXT_BATCH_FLUSH_SIZE (100)
-    for (let i = 0; i < 100; i++) {
-      client.register(new Context("user", `u-${i}`, { plan: "free" }));
-    }
-
-    // Set up a provider that adds one more context
-    client.setContextProvider(() => [new Context("user", "u-trigger", { plan: "enterprise" })]);
-
-    // Mock the flush PUT call
-    mockFetch.mockResolvedValueOnce(jsonResponse({}));
-
-    // This get() call triggers the provider which will push past the batch limit
-    const handle = client.boolFlag("my-flag", false);
-    handle.get();
-
-    // Give the fire-and-forget flush a moment
-    await new Promise((r) => setTimeout(r, 10));
-  });
-
-  it("should support contextProvider decorator-style alias", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    const fn = client.contextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
-    expect(fn).toBeTypeOf("function");
-    // Provider is now registered
-    expect(fn()).toHaveLength(1);
-  });
-
-  it("should return WS connectionStatus when connected", async () => {
-    const client = makeFlagsClient();
-
-    // connect
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await client._connectInternal("staging");
-
-    // lastMockWs has connectionStatus: "connected"
-    expect(client.connectionStatus()).toBe("connected");
-  });
-
-  it("should use local store for tier 1 evaluate when connected", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    // connect with a flag in the store
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
@@ -1092,21 +1114,149 @@ describe("FlagsClient runtime", () => {
     );
     await client._connectInternal("staging");
 
-    // evaluate should use local store, no additional fetch
     const result = await client.evaluate("color", {
       environment: "staging",
       context: [new Context("user", "u-1", { plan: "enterprise" })],
     });
     expect(result).toBe("blue");
 
-    // Only 1 fetch (for connect), not 2
+    // Only 1 fetch (for _connectInternal), not 2
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should auto-inject service context in evaluate()", async () => {
+    const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: "my-svc" };
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "flag-svc",
+            type: "flag",
+            attributes: {
+              key: "svc-flag",
+              name: "Service Flag",
+              type: "BOOLEAN",
+              default: false,
+              values: [],
+              environments: {
+                staging: {
+                  enabled: true,
+                  rules: [{ logic: { "==": [{ var: "service.key" }, "my-svc"] }, value: true }],
+                },
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const result = await client.evaluate("svc-flag", {
+      environment: "staging",
+      context: [],
+    });
+    expect(result).toBe(true);
+  });
+
+  it("should refresh and fire listeners", async () => {
+    const client = makeFlagsClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "f1",
+            type: "flag",
+            attributes: {
+              key: "my-flag",
+              name: "F",
+              type: "BOOLEAN",
+              default: false,
+              values: [],
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+    await client._connectInternal("staging");
+
+    const changes: string[] = [];
+    client.onChange((e) => changes.push(e.key));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "f1",
+            type: "flag",
+            attributes: {
+              key: "my-flag",
+              name: "F",
+              type: "BOOLEAN",
+              default: true,
+              values: [],
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+    await client.refresh();
+
+    expect(changes).toContain("my-flag");
+  });
+
+  it("should return WS connectionStatus when connected", async () => {
+    const client = makeFlagsClient();
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client._connectInternal("staging");
+
+    expect(client.connectionStatus()).toBe("connected");
+  });
+
+  it("should flush contexts to server", async () => {
+    const client = makeFlagsClient();
+    const { Context } = await import("../../../src/flags/types.js");
+
+    client.register(new Context("user", "u-1", { plan: "enterprise" }));
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    await client.flushContexts();
+
+    expect(mockFetch).toHaveBeenCalled();
+  });
+
+  it("should not flush when no pending contexts", async () => {
+    const client = makeFlagsClient();
+    await client.flushContexts();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("should swallow errors from context flush", async () => {
+    const client = makeFlagsClient();
+    const { Context } = await import("../../../src/flags/types.js");
+
+    client.register(new Context("user", "u-1", { plan: "enterprise" }));
+
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    await expect(client.flushContexts()).resolves.not.toThrow();
+  });
+
+  it("should support contextProvider decorator-style alias", async () => {
+    const client = makeFlagsClient();
+    const { Context } = await import("../../../src/flags/types.js");
+
+    const fn = client.contextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
+    expect(fn).toBeTypeOf("function");
+    expect(fn()).toHaveLength(1);
   });
 
   it("should return code default when flag evaluates to null", async () => {
     const client = makeFlagsClient();
 
-    // connect with a flag that has a null-returning environment config
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
@@ -1133,79 +1283,59 @@ describe("FlagsClient runtime", () => {
     expect(handle.get()).toBe("fallback");
   });
 
-  it("should throw SmplTimeoutError when fetch is aborted by timeout", async () => {
-    // Create client with a very short timeout
-    const client = new FlagsClient(API_KEY, () => lastMockWs as never, 1);
-
-    // Make fetch wait for abort signal, then throw AbortError like real fetch does
-    mockFetch.mockImplementationOnce(
-      (request: Request) =>
-        new Promise<Response>((_resolve, reject) => {
-          const signal = request.signal;
-          if (signal?.aborted) {
-            reject(new DOMException("The operation was aborted", "AbortError"));
-            return;
-          }
-          signal?.addEventListener("abort", () => {
-            reject(new DOMException("The operation was aborted", "AbortError"));
-          });
-        }),
-    );
-
-    const { SmplTimeoutError } = await import("../../../src/errors.js");
-    await expect(client.list()).rejects.toThrow(SmplTimeoutError);
-  });
-
-  it("should re-throw non-abort errors from custom fetch wrapper", async () => {
+  it("should handle _fetchFlagsList error via wrapFetchError", async () => {
     const client = makeFlagsClient();
 
-    // Make fetch throw a non-abort, non-TypeError error
-    mockFetch.mockImplementationOnce(() => {
-      throw new Error("unexpected fetch error");
-    });
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    // The error should propagate through wrapFetchError as SmplConnectionError
-    await expect(client.list()).rejects.toThrow(SmplConnectionError);
+    await expect(client._connectInternal("staging")).rejects.toThrow(SmplConnectionError);
   });
 
-  it("should auto-inject service context in evaluate()", async () => {
+  it("should auto-flush context buffer when it reaches batch size", async () => {
     const client = makeFlagsClient();
-    client._parent = { _environment: "staging", _service: "my-svc" };
+    const { Context } = await import("../../../src/flags/types.js");
 
-    // Mock evaluate fetch with a flag that targets service.key
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
           {
-            id: "flag-svc",
+            id: "f1",
             type: "flag",
             attributes: {
-              key: "svc-flag",
-              name: "Service Flag",
+              key: "my-flag",
+              name: "F",
               type: "BOOLEAN",
               default: false,
               values: [],
-              environments: {
-                staging: {
-                  enabled: true,
-                  rules: [
-                    {
-                      logic: { "==": [{ var: "service.key" }, "my-svc"] },
-                      value: true,
-                    },
-                  ],
-                },
-              },
+              environments: { staging: { enabled: true, rules: [] } },
             },
           },
         ],
       }),
     );
+    await client._connectInternal("staging");
 
-    const result = await client.evaluate("svc-flag", {
-      environment: "staging",
-      context: [],
+    for (let i = 0; i < 100; i++) {
+      client.register(new Context("user", `u-${i}`, { plan: "free" }));
+    }
+
+    client.setContextProvider(() => [new Context("user", "u-trigger", { plan: "enterprise" })]);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+
+    const handle = client.booleanFlag("my-flag", false);
+    handle.get();
+
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("should re-throw non-abort errors from custom fetch wrapper", async () => {
+    const client = makeFlagsClient();
+
+    mockFetch.mockImplementationOnce(() => {
+      throw new Error("unexpected fetch error");
     });
-    expect(result).toBe(true);
+
+    await expect(client.list()).rejects.toThrow(SmplConnectionError);
   });
 });

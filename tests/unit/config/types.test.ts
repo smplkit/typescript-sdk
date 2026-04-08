@@ -1,291 +1,236 @@
 import { describe, expect, it, vi } from "vitest";
 import { Config } from "../../../src/config/types.js";
+import type { ConfigClient } from "../../../src/config/client.js";
 
-/** Create a mock client that returns an updated Config from _updateConfig. */
-function makeMockClient(overrides?: Partial<Config>) {
-  const client = {
+/** Create a minimal mock of ConfigClient with the methods Config needs. */
+function makeMockClient() {
+  return {
     _apiKey: "sk_test",
     _baseUrl: "https://config.smplkit.com",
+    _createConfig: vi.fn(),
     _updateConfig: vi.fn(),
-    get: vi.fn(),
-  };
-
-  // By default, _updateConfig returns a Config with the same fields
-  client._updateConfig.mockImplementation(async (payload: Record<string, unknown>) => {
-    return new Config(client, {
-      id: payload.configId as string,
-      key: (payload.key as string) ?? "",
-      name: (payload.name as string) ?? "",
-      description: (payload.description as string | null) ?? null,
-      parent: (payload.parent as string | null) ?? null,
-      items: (payload.items as Record<string, unknown>) ?? {},
-      environments: (payload.environments as Record<string, unknown>) ?? {},
-      createdAt: null,
-      updatedAt: new Date("2024-02-01T00:00:00Z"),
-      ...overrides,
-    });
-  });
-
-  return client;
+    _getById: vi.fn(),
+  } as unknown as ConfigClient;
 }
 
 function makeConfig(
-  client: ReturnType<typeof makeMockClient>,
+  client: ConfigClient,
   fields?: Partial<{
-    id: string;
+    id: string | null;
     key: string;
     name: string;
     description: string | null;
     parent: string | null;
     items: Record<string, unknown>;
     environments: Record<string, unknown>;
-    createdAt: Date | null;
-    updatedAt: Date | null;
+    createdAt: string | null;
+    updatedAt: string | null;
   }>,
-) {
+): Config {
   return new Config(client, {
     id: "cfg-1",
-    key: "my_config",
+    key: "my-config",
     name: "My Config",
     description: "A test config",
     parent: null,
     items: { timeout: 30 },
     environments: {},
-    createdAt: new Date("2024-01-01T00:00:00Z"),
-    updatedAt: new Date("2024-01-02T00:00:00Z"),
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-02T00:00:00Z",
     ...fields,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
 
 describe("Config", () => {
   describe("constructor", () => {
     it("should set all fields from constructor args", () => {
       const client = makeMockClient();
       const config = makeConfig(client);
+
       expect(config.id).toBe("cfg-1");
-      expect(config.key).toBe("my_config");
+      expect(config.key).toBe("my-config");
       expect(config.name).toBe("My Config");
       expect(config.description).toBe("A test config");
       expect(config.parent).toBeNull();
       expect(config.items).toEqual({ timeout: 30 });
       expect(config.environments).toEqual({});
-      expect(config.createdAt).toBeInstanceOf(Date);
-      expect(config.updatedAt).toBeInstanceOf(Date);
+      expect(config.createdAt).toBe("2024-01-01T00:00:00Z");
+      expect(config.updatedAt).toBe("2024-01-02T00:00:00Z");
+    });
+
+    it("should accept null id for unsaved configs", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { id: null });
+
+      expect(config.id).toBeNull();
+    });
+
+    it("should accept null timestamps", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { createdAt: null, updatedAt: null });
+
+      expect(config.createdAt).toBeNull();
+      expect(config.updatedAt).toBeNull();
+    });
+
+    it("should store reference to client", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client);
+
+      expect(config._client).toBe(client);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // toString
+  // ---------------------------------------------------------------------------
 
   describe("toString", () => {
     it("should return a human-readable string", () => {
       const client = makeMockClient();
       const config = makeConfig(client);
-      expect(config.toString()).toBe("Config(id=cfg-1, key=my_config, name=My Config)");
+
+      expect(config.toString()).toBe("Config(id=cfg-1, key=my-config, name=My Config)");
+    });
+
+    it("should handle null id", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { id: null });
+
+      expect(config.toString()).toBe("Config(id=null, key=my-config, name=My Config)");
     });
   });
 
-  describe("update", () => {
-    it("should call _updateConfig with merged fields", async () => {
+  // ---------------------------------------------------------------------------
+  // save()
+  // ---------------------------------------------------------------------------
+
+  describe("save", () => {
+    it("should call _createConfig when id is null and apply result", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client);
-
-      await config.update({ name: "Updated Name" });
-
-      expect(client._updateConfig).toHaveBeenCalledWith({
-        configId: "cfg-1",
-        name: "Updated Name",
-        key: "my_config",
-        description: "A test config",
-        parent: null,
-        items: { timeout: 30 },
-        environments: {},
+      const savedConfig = makeConfig(client, {
+        id: "new-uuid",
+        createdAt: "2024-02-01T00:00:00Z",
+        updatedAt: "2024-02-01T00:00:00Z",
       });
+      (client._createConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(savedConfig);
+
+      const config = makeConfig(client, { id: null });
+      expect(config.id).toBeNull();
+
+      await config.save();
+
+      expect(client._createConfig).toHaveBeenCalledWith(config);
+      expect(config.id).toBe("new-uuid");
+      expect(config.createdAt).toBe("2024-02-01T00:00:00Z");
     });
 
-    it("should update local fields after successful update", async () => {
+    it("should call _updateConfig when id is set and apply result", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client);
+      const updatedConfig = makeConfig(client, {
+        name: "Updated Name",
+        updatedAt: "2024-03-01T00:00:00Z",
+      });
+      (client._updateConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(updatedConfig);
 
-      await config.update({ name: "New Name", description: "New desc" });
+      const config = makeConfig(client, { id: "existing-uuid" });
 
+      await config.save();
+
+      expect(client._updateConfig).toHaveBeenCalledWith(config);
+      expect(config.name).toBe("Updated Name");
+      expect(config.updatedAt).toBe("2024-03-01T00:00:00Z");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // _apply()
+  // ---------------------------------------------------------------------------
+
+  describe("_apply", () => {
+    it("should copy all fields from another Config", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, {
+        id: "original-id",
+        key: "original-key",
+        name: "Original",
+        description: "Original desc",
+        parent: null,
+        items: { a: 1 },
+        environments: {},
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      });
+
+      const other = makeConfig(client, {
+        id: "new-id",
+        key: "new-key",
+        name: "New Name",
+        description: "New desc",
+        parent: "parent-uuid",
+        items: { b: 2 },
+        environments: { prod: { values: { x: 1 } } },
+        createdAt: "2024-02-01T00:00:00Z",
+        updatedAt: "2024-02-02T00:00:00Z",
+      });
+
+      config._apply(other);
+
+      expect(config.id).toBe("new-id");
+      expect(config.key).toBe("new-key");
       expect(config.name).toBe("New Name");
       expect(config.description).toBe("New desc");
-      expect(config.updatedAt).toBeInstanceOf(Date);
+      expect(config.parent).toBe("parent-uuid");
+      expect(config.items).toEqual({ b: 2 });
+      expect(config.environments).toEqual({ prod: { values: { x: 1 } } });
+      expect(config.createdAt).toBe("2024-02-01T00:00:00Z");
+      expect(config.updatedAt).toBe("2024-02-02T00:00:00Z");
     });
 
-    it("should allow clearing description with empty string", async () => {
+    it("should handle applying config with null fields", () => {
       const client = makeMockClient();
       const config = makeConfig(client);
 
-      await config.update({ description: "" });
+      const other = makeConfig(client, {
+        id: null,
+        description: null,
+        parent: null,
+        createdAt: null,
+        updatedAt: null,
+      });
 
-      expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ description: "" }),
-      );
-    });
+      config._apply(other);
 
-    it("should replace items entirely when provided", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client);
-
-      await config.update({ items: { new_key: "new_val" } });
-
-      expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ items: { new_key: "new_val" } }),
-      );
-    });
-
-    it("should replace environments entirely when provided", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client);
-
-      await config.update({ environments: { prod: { values: { x: 1 } } } });
-
-      expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ environments: { prod: { values: { x: 1 } } } }),
-      );
+      expect(config.id).toBeNull();
+      expect(config.description).toBeNull();
+      expect(config.parent).toBeNull();
+      expect(config.createdAt).toBeNull();
+      expect(config.updatedAt).toBeNull();
     });
   });
 
-  describe("setValues", () => {
-    it("should replace base items when no environment is given", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, { items: { old: true } });
-
-      await config.setValues({ new_key: "val" });
-
-      expect(client._updateConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ items: { new_key: "val" } }),
-      );
-    });
-
-    it("should set environment values with nested format when environment is given", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client);
-
-      await config.setValues({ retries: 5 }, "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production).toEqual({ values: { retries: 5 } });
-      // base items should be preserved
-      expect(call.items).toEqual({ timeout: 30 });
-    });
-
-    it("should preserve existing environment entries when setting a different environment", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: {
-          staging: { values: { x: 1 } },
-        },
-      });
-
-      await config.setValues({ y: 2 }, "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.staging).toEqual({ values: { x: 1 } });
-      expect(call.environments.production).toEqual({ values: { y: 2 } });
-    });
-
-    it("should replace existing env values entirely", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: {
-          production: { values: { old_key: "old" } },
-        },
-      });
-
-      await config.setValues({ new_key: "new" }, "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production.values).toEqual({ new_key: "new" });
-    });
-
-    it("should handle null existing environment entry", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: { production: null as unknown as Record<string, unknown> },
-      });
-
-      await config.setValues({ x: 1 }, "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production).toEqual({ values: { x: 1 } });
-    });
-
-    it("should update local items/environments after success", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client);
-
-      await config.setValues({ new_val: 42 });
-
-      expect(config.items).toEqual({ new_val: 42 });
-      expect(config.updatedAt).toBeInstanceOf(Date);
-    });
-  });
-
-  describe("setValue", () => {
-    it("should merge a single key into base items when no environment is given", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, { items: { a: 1 } });
-
-      await config.setValue("b", 2);
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.items).toEqual({ a: 1, b: 2 });
-    });
-
-    it("should merge a single key into environment values", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: {
-          production: { values: { existing: "yes" } },
-        },
-      });
-
-      await config.setValue("new_key", "val", "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production.values).toEqual({
-        existing: "yes",
-        new_key: "val",
-      });
-    });
-
-    it("should handle environment with no existing values", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, { environments: {} });
-
-      await config.setValue("key", "val", "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production).toEqual({ values: { key: "val" } });
-    });
-
-    it("should handle null environment entry for setValue", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: { production: null as unknown as Record<string, unknown> },
-      });
-
-      await config.setValue("key", "val", "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production).toEqual({ values: { key: "val" } });
-    });
-
-    it("should handle environment entry with null values sub-key", async () => {
-      const client = makeMockClient();
-      const config = makeConfig(client, {
-        environments: { production: { values: null } },
-      });
-
-      await config.setValue("key", "val", "production");
-
-      const call = client._updateConfig.mock.calls[0][0];
-      expect(call.environments.production.values).toEqual({ key: "val" });
-    });
-  });
+  // ---------------------------------------------------------------------------
+  // _buildChain()
+  // ---------------------------------------------------------------------------
 
   describe("_buildChain", () => {
-    it("should build chain for config with parent", async () => {
+    it("should return single-element chain for root config (no parent)", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { parent: null });
+
+      const chain = await config._buildChain();
+
+      expect(chain).toHaveLength(1);
+      expect(chain[0].id).toBe("cfg-1");
+      expect(chain[0].items).toEqual({ timeout: 30 });
+      expect(client._getById).not.toHaveBeenCalled();
+    });
+
+    it("should walk single-parent chain", async () => {
       const client = makeMockClient();
       const config = makeConfig(client, {
         id: "child-id",
@@ -294,34 +239,101 @@ describe("Config", () => {
         environments: {},
       });
 
-      client.get.mockResolvedValueOnce(
-        new Config(client, {
-          id: "parent-id",
-          key: "parent",
-          name: "Parent",
-          description: null,
-          parent: null,
-          items: { parent_val: 2 },
-          environments: {},
-          createdAt: null,
-          updatedAt: null,
-        }),
-      );
+      const parentConfig = makeConfig(client, {
+        id: "parent-id",
+        key: "parent",
+        name: "Parent",
+        parent: null,
+        items: { parent_val: 2 },
+        environments: {},
+      });
+
+      (client._getById as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parentConfig);
 
       const chain = await config._buildChain();
+
       expect(chain).toHaveLength(2);
       expect(chain[0].id).toBe("child-id");
+      expect(chain[0].items).toEqual({ child_val: 1 });
       expect(chain[1].id).toBe("parent-id");
-      expect(client.get).toHaveBeenCalledWith({ id: "parent-id" });
+      expect(chain[1].items).toEqual({ parent_val: 2 });
+      expect(client._getById).toHaveBeenCalledWith("parent-id");
     });
 
-    it("should return single-element chain for root config", async () => {
+    it("should walk multi-level parent chain (grandchild -> child -> root)", async () => {
       const client = makeMockClient();
-      const config = makeConfig(client, { parent: null });
+
+      const grandchild = makeConfig(client, {
+        id: "gc-id",
+        parent: "child-id",
+        items: { level: "grandchild" },
+        environments: {},
+      });
+
+      const child = makeConfig(client, {
+        id: "child-id",
+        parent: "root-id",
+        items: { level: "child" },
+        environments: {},
+      });
+
+      const root = makeConfig(client, {
+        id: "root-id",
+        parent: null,
+        items: { level: "root" },
+        environments: {},
+      });
+
+      (client._getById as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(child)
+        .mockResolvedValueOnce(root);
+
+      const chain = await grandchild._buildChain();
+
+      expect(chain).toHaveLength(3);
+      expect(chain[0].id).toBe("gc-id");
+      expect(chain[1].id).toBe("child-id");
+      expect(chain[2].id).toBe("root-id");
+      expect(client._getById).toHaveBeenCalledTimes(2);
+      expect(client._getById).toHaveBeenCalledWith("child-id");
+      expect(client._getById).toHaveBeenCalledWith("root-id");
+    });
+
+    it("should use empty string for null id in chain entry", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, {
+        id: null,
+        parent: null,
+        items: { a: 1 },
+      });
 
       const chain = await config._buildChain();
-      expect(chain).toHaveLength(1);
-      expect(client.get).not.toHaveBeenCalled();
+
+      expect(chain[0].id).toBe("");
+    });
+
+    it("should include environments in chain entries", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, {
+        id: "child-id",
+        parent: "parent-id",
+        items: { retries: 3 },
+        environments: { prod: { values: { retries: 5 } } },
+      });
+
+      const parent = makeConfig(client, {
+        id: "parent-id",
+        parent: null,
+        items: { timeout: 30 },
+        environments: { prod: { values: { timeout: 60 } } },
+      });
+
+      (client._getById as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parent);
+
+      const chain = await config._buildChain();
+
+      expect(chain[0].environments).toEqual({ prod: { values: { retries: 5 } } });
+      expect(chain[1].environments).toEqual({ prod: { values: { timeout: 60 } } });
     });
   });
 });

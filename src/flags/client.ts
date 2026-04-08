@@ -2,29 +2,27 @@
  * FlagsClient — management + prescriptive runtime for Smpl Flags.
  *
  * Uses the generated OpenAPI types (`src/generated/flags.d.ts`) via
- * `openapi-fetch` for all flag HTTP calls. Context type management and
- * context registration use the generated app service types
- * (`src/generated/app.d.ts`) via a separate `openapi-fetch` client.
+ * `openapi-fetch` for all flag HTTP calls. Context registration uses
+ * the generated app service types (`src/generated/app.d.ts`).
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
 import type { components } from "../generated/flags.d.ts";
-import type { components as appComponents } from "../generated/app.d.ts";
 import {
   SmplConflictError,
   SmplError,
-  SmplNotConnectedError,
   SmplNotFoundError,
   SmplTimeoutError,
   SmplValidationError,
   throwForStatus,
 } from "../errors.js";
 
-import { Flag, ContextType } from "./models.js";
-import type { Context, FlagType } from "./types.js";
+import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "./models.js";
+import type { Context } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
+import { keyToDisplayName } from "../helpers.js";
 
 // Use require-style import for json-logic-js (no TS types)
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -90,7 +88,6 @@ function sortedStringify(obj: any): string {
 /** Compute a stable hash for a context evaluation dict. @internal */
 function hashContext(evalDict: Record<string, any>): string {
   const serialized = sortedStringify(evalDict);
-  // Simple hash — no crypto needed, just cache keying
   let hash = 0;
   for (let i = 0; i < serialized.length; i++) {
     const chr = serialized.charCodeAt(i);
@@ -223,103 +220,6 @@ export class FlagStats {
 }
 
 // ---------------------------------------------------------------------------
-// Typed flag handles
-// ---------------------------------------------------------------------------
-
-/** @internal */
-class FlagHandleBase {
-  /** @internal */ readonly _namespace: FlagsClient;
-  /** @internal */ readonly _key: string;
-  /** @internal */ readonly _default: any;
-  /** @internal */ _listeners: Array<(event: FlagChangeEvent) => void> = [];
-
-  constructor(namespace: FlagsClient, key: string, defaultValue: any) {
-    this._namespace = namespace;
-    this._key = key;
-    this._default = defaultValue;
-  }
-
-  get key(): string {
-    return this._key;
-  }
-
-  get default(): any {
-    return this._default;
-  }
-
-  /* v8 ignore next 3 — overridden by all exported subclasses */
-  get(options?: { context?: Context[] }): any {
-    return this._namespace._evaluateHandle(this._key, this._default, options?.context ?? null);
-  }
-
-  /** Register a flag-specific change listener. Works as a decorator. */
-  onChange(callback: (event: FlagChangeEvent) => void): (event: FlagChangeEvent) => void {
-    this._listeners.push(callback);
-    return callback;
-  }
-}
-
-/** Typed handle for a boolean flag. */
-export class BoolFlagHandle extends FlagHandleBase {
-  get(options?: { context?: Context[] }): boolean {
-    const value = this._namespace._evaluateHandle(
-      this._key,
-      this._default,
-      options?.context ?? null,
-    );
-    if (typeof value === "boolean") {
-      return value;
-    }
-    return this._default;
-  }
-}
-
-/** Typed handle for a string flag. */
-export class StringFlagHandle extends FlagHandleBase {
-  get(options?: { context?: Context[] }): string {
-    const value = this._namespace._evaluateHandle(
-      this._key,
-      this._default,
-      options?.context ?? null,
-    );
-    if (typeof value === "string") {
-      return value;
-    }
-    return this._default;
-  }
-}
-
-/** Typed handle for a numeric flag. */
-export class NumberFlagHandle extends FlagHandleBase {
-  get(options?: { context?: Context[] }): number {
-    const value = this._namespace._evaluateHandle(
-      this._key,
-      this._default,
-      options?.context ?? null,
-    );
-    if (typeof value === "number") {
-      return value;
-    }
-    return this._default;
-  }
-}
-
-/** Typed handle for a JSON flag. */
-export class JsonFlagHandle extends FlagHandleBase {
-  get(options?: { context?: Context[] }): Record<string, any> {
-    const value = this._namespace._evaluateHandle(
-      this._key,
-      this._default,
-      options?.context ?? null,
-    );
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      return value as Record<string, any>;
-    }
-    return this._default;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Context registration buffer
 // ---------------------------------------------------------------------------
 
@@ -383,14 +283,15 @@ export class FlagsClient {
   // Runtime state
   private _environment: string | null = null;
   private _flagStore: Record<string, Record<string, any>> = {};
-  private _connected = false;
+  private _initialized = false;
   private _cache = new ResolutionCache();
   private _contextProvider: (() => Context[]) | null = null;
   private _contextBuffer = new ContextRegistrationBuffer();
-  private _handles: Record<string, FlagHandleBase> = {};
+  private _handles: Record<string, Flag> = {};
   private _globalListeners: Array<(event: FlagChangeEvent) => void> = [];
+  private _keyListeners: Map<string, Array<(event: FlagChangeEvent) => void>> = new Map();
 
-  // Shared WebSocket (set during connect)
+  // Shared WebSocket (set during initialize)
   private _wsManager: SharedWebSocket | null = null;
   private readonly _ensureWs: () => SharedWebSocket;
 
@@ -438,68 +339,124 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Management methods
+  // Management: factory methods (return unsaved flags)
   // ------------------------------------------------------------------
 
-  /** Create a flag. */
-  async create(
+  /** Create an unsaved boolean flag. Call `.save()` to persist. */
+  newBooleanFlag(
+    key: string,
+    options: { default: boolean; name?: string; description?: string },
+  ): BooleanFlag {
+    return new BooleanFlag(this, {
+      id: null,
+      key,
+      name: options.name ?? keyToDisplayName(key),
+      type: "BOOLEAN",
+      default: options.default,
+      values: [
+        { name: "True", value: true },
+        { name: "False", value: false },
+      ],
+      description: options.description ?? null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+  }
+
+  /** Create an unsaved string flag. Call `.save()` to persist. */
+  newStringFlag(
     key: string,
     options: {
-      name: string;
-      type: FlagType;
-      default: unknown;
+      default: string;
+      name?: string;
       description?: string;
       values?: Array<{ name: string; value: unknown }>;
     },
-  ): Promise<Flag> {
-    let values = options.values;
-    if (values === undefined && options.type === "BOOLEAN") {
-      values = [
-        { name: "True", value: true },
-        { name: "False", value: false },
-      ];
-    }
-
-    const body = {
-      data: {
-        type: "flag" as const,
-        attributes: {
-          key,
-          name: options.name,
-          description: options.description ?? "",
-          type: options.type,
-          default: options.default,
-          values: values ?? [],
-        },
-      },
-    };
-
-    let data: components["schemas"]["FlagResponse"] | undefined;
-    try {
-      const result = await this._http.POST("/api/v1/flags", { body });
-      if (result.error !== undefined) await checkError(result.response, "Failed to create flag");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError("Failed to create flag");
-    return this._resourceToModel(data.data);
+  ): StringFlag {
+    return new StringFlag(this, {
+      id: null,
+      key,
+      name: options.name ?? keyToDisplayName(key),
+      type: "STRING",
+      default: options.default,
+      values: options.values ?? [],
+      description: options.description ?? null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
   }
 
-  /** Fetch a flag by UUID. */
-  async get(flagId: string): Promise<Flag> {
-    let data: components["schemas"]["FlagResponse"] | undefined;
+  /** Create an unsaved number flag. Call `.save()` to persist. */
+  newNumberFlag(
+    key: string,
+    options: {
+      default: number;
+      name?: string;
+      description?: string;
+      values?: Array<{ name: string; value: unknown }>;
+    },
+  ): NumberFlag {
+    return new NumberFlag(this, {
+      id: null,
+      key,
+      name: options.name ?? keyToDisplayName(key),
+      type: "NUMERIC",
+      default: options.default,
+      values: options.values ?? [],
+      description: options.description ?? null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+  }
+
+  /** Create an unsaved JSON flag. Call `.save()` to persist. */
+  newJsonFlag(
+    key: string,
+    options: {
+      default: Record<string, any>;
+      name?: string;
+      description?: string;
+      values?: Array<{ name: string; value: unknown }>;
+    },
+  ): JsonFlag {
+    return new JsonFlag(this, {
+      id: null,
+      key,
+      name: options.name ?? keyToDisplayName(key),
+      type: "JSON",
+      default: options.default,
+      values: options.values ?? [],
+      description: options.description ?? null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Management: CRUD
+  // ------------------------------------------------------------------
+
+  /** Fetch a flag by key. */
+  async get(key: string): Promise<Flag> {
+    let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
-      const result = await this._http.GET("/api/v1/flags/{id}", {
-        params: { path: { id: flagId } },
+      const result = await this._http.GET("/api/v1/flags", {
+        params: { query: { "filter[key]": key } },
       });
-      if (result.error !== undefined) await checkError(result.response, `Flag ${flagId} not found`);
+      if (result.error !== undefined)
+        await checkError(result.response, `Flag with key '${key}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data) throw new SmplNotFoundError(`Flag ${flagId} not found`);
-    return this._resourceToModel(data.data);
+    if (!data || !data.data || data.data.length === 0) {
+      throw new SmplNotFoundError(`Flag with key '${key}' not found`);
+    }
+    return this._resourceToModel(data.data[0]);
   }
 
   /** List all flags. */
@@ -516,49 +473,66 @@ export class FlagsClient {
     return data.data.map((r) => this._resourceToModel(r));
   }
 
-  /** Delete a flag by UUID. */
-  async delete(flagId: string): Promise<void> {
+  /** Delete a flag by key. */
+  async delete(key: string): Promise<void> {
+    const flag = await this.get(key);
     try {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
-        params: { path: { id: flagId } },
+        params: { path: { id: flag.id! } },
       });
       if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete flag ${flagId}`);
+        await checkError(result.response, `Failed to delete flag '${key}'`);
     } catch (err) {
       wrapFetchError(err);
     }
   }
 
-  /**
-   * Internal: PUT a full flag update.
-   * Called by {@link Flag} instance methods.
-   * @internal
-   */
-  async _updateFlag(options: {
-    flag: Flag;
-    environments?: Record<string, any>;
-    values?: Array<{ name: string; value: unknown }>;
-    default?: unknown;
-    description?: string;
-    name?: string;
-  }): Promise<Flag> {
-    const { flag } = options;
+  // ------------------------------------------------------------------
+  // Management: internal save methods (called by Flag.save())
+  // ------------------------------------------------------------------
+
+  /** @internal — POST a new flag. */
+  async _createFlag(flag: Flag): Promise<Flag> {
     const body = {
       data: {
         type: "flag" as const,
         attributes: {
           key: flag.key,
-          name: options.name !== undefined ? options.name : flag.name,
+          name: flag.name,
+          description: flag.description ?? "",
           type: flag.type,
-          default: options.default !== undefined ? options.default : flag.default,
-          values: options.values !== undefined ? options.values : flag.values,
-          description:
-            options.description !== undefined ? options.description : (flag.description ?? ""),
-          ...(options.environments !== undefined
-            ? { environments: options.environments }
-            : flag.environments && Object.keys(flag.environments).length > 0
-              ? { environments: flag.environments }
-              : {}),
+          default: flag.default,
+          values: flag.values,
+          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
+        },
+      },
+    };
+
+    let data: components["schemas"]["FlagResponse"] | undefined;
+    try {
+      const result = await this._http.POST("/api/v1/flags", { body });
+      if (result.error !== undefined) await checkError(result.response, "Failed to create flag");
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) throw new SmplValidationError("Failed to create flag");
+    return this._resourceToModel(data.data);
+  }
+
+  /** @internal — PUT a flag update. */
+  async _updateFlag(flag: Flag): Promise<Flag> {
+    const body = {
+      data: {
+        type: "flag" as const,
+        attributes: {
+          key: flag.key,
+          name: flag.name,
+          type: flag.type,
+          default: flag.default,
+          values: flag.values,
+          description: flag.description ?? "",
+          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
         },
       },
     };
@@ -566,7 +540,7 @@ export class FlagsClient {
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
       const result = await this._http.PUT("/api/v1/flags/{id}", {
-        params: { path: { id: flag.id } },
+        params: { path: { id: flag.id! } },
         body,
       });
       if (result.error !== undefined)
@@ -580,125 +554,77 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Context type management (via generated app client)
-  // ------------------------------------------------------------------
-
-  /** Create a context type. */
-  async createContextType(key: string, options: { name: string }): Promise<ContextType> {
-    let data: appComponents["schemas"]["ContextTypeResponse"] | undefined;
-    try {
-      const result = await this._appHttp.POST("/api/v1/context_types", {
-        body: {
-          data: { type: "context_type", attributes: { key, name: options.name } },
-        },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, "Failed to create context type");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError("Failed to create context type");
-    return this._parseContextType(data.data);
-  }
-
-  /** Update a context type (merge attributes). */
-  async updateContextType(
-    ctId: string,
-    options: { key: string; name: string; attributes: Record<string, any> },
-  ): Promise<ContextType> {
-    let data: appComponents["schemas"]["ContextTypeResponse"] | undefined;
-    try {
-      const result = await this._appHttp.PUT("/api/v1/context_types/{id}", {
-        params: { path: { id: ctId } },
-        body: {
-          data: {
-            type: "context_type",
-            attributes: { key: options.key, name: options.name, attributes: options.attributes },
-          },
-        },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Failed to update context type ${ctId}`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError(`Failed to update context type ${ctId}`);
-    return this._parseContextType(data.data);
-  }
-
-  /** List all context types. */
-  async listContextTypes(): Promise<ContextType[]> {
-    let data: appComponents["schemas"]["ContextTypeListResponse"] | undefined;
-    try {
-      const result = await this._appHttp.GET("/api/v1/context_types");
-      if (result.error !== undefined)
-        await checkError(result.response, "Failed to list context types");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError("Failed to list context types");
-    return data.data.map((item) => this._parseContextType(item));
-  }
-
-  /** Delete a context type. */
-  async deleteContextType(ctId: string): Promise<void> {
-    try {
-      const result = await this._appHttp.DELETE("/api/v1/context_types/{id}", {
-        params: { path: { id: ctId } },
-      });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete context type ${ctId}`);
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  /** List context instances filtered by context type key. */
-  async listContexts(options: { contextTypeKey: string }): Promise<any[]> {
-    let data: appComponents["schemas"]["ContextListResponse"] | undefined;
-    try {
-      const result = await this._appHttp.GET("/api/v1/contexts", {
-        params: { query: { "filter[context_type_id]": options.contextTypeKey } },
-      });
-      if (result.error !== undefined) await checkError(result.response, "Failed to list contexts");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    return data?.data ?? [];
-  }
-
-  // ------------------------------------------------------------------
   // Runtime: typed flag handles
   // ------------------------------------------------------------------
 
-  /** Declare a boolean flag handle. */
-  boolFlag(key: string, defaultValue: boolean): BoolFlagHandle {
-    const handle = new BoolFlagHandle(this, key, defaultValue);
+  /** Declare a boolean flag handle for runtime evaluation. */
+  booleanFlag(key: string, defaultValue: boolean): BooleanFlag {
+    const handle = new BooleanFlag(this, {
+      id: null,
+      key,
+      name: key,
+      type: "BOOLEAN",
+      default: defaultValue,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
     this._handles[key] = handle;
     return handle;
   }
 
-  /** Declare a string flag handle. */
-  stringFlag(key: string, defaultValue: string): StringFlagHandle {
-    const handle = new StringFlagHandle(this, key, defaultValue);
+  /** Declare a string flag handle for runtime evaluation. */
+  stringFlag(key: string, defaultValue: string): StringFlag {
+    const handle = new StringFlag(this, {
+      id: null,
+      key,
+      name: key,
+      type: "STRING",
+      default: defaultValue,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
     this._handles[key] = handle;
     return handle;
   }
 
-  /** Declare a numeric flag handle. */
-  numberFlag(key: string, defaultValue: number): NumberFlagHandle {
-    const handle = new NumberFlagHandle(this, key, defaultValue);
+  /** Declare a numeric flag handle for runtime evaluation. */
+  numberFlag(key: string, defaultValue: number): NumberFlag {
+    const handle = new NumberFlag(this, {
+      id: null,
+      key,
+      name: key,
+      type: "NUMERIC",
+      default: defaultValue,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
     this._handles[key] = handle;
     return handle;
   }
 
-  /** Declare a JSON flag handle. */
-  jsonFlag(key: string, defaultValue: Record<string, any>): JsonFlagHandle {
-    const handle = new JsonFlagHandle(this, key, defaultValue);
+  /** Declare a JSON flag handle for runtime evaluation. */
+  jsonFlag(key: string, defaultValue: Record<string, any>): JsonFlag {
+    const handle = new JsonFlag(this, {
+      id: null,
+      key,
+      name: key,
+      type: "JSON",
+      default: defaultValue,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
     this._handles[key] = handle;
     return handle;
   }
@@ -710,14 +636,7 @@ export class FlagsClient {
   /**
    * Register a context provider function.
    *
-   * Called on every `handle.get()` to supply the current evaluation
-   * context. Can also be used as a decorator:
-   *
-   * ```typescript
-   * client.flags.setContextProvider(() => [
-   *   new Context("user", userId, { plan: userPlan }),
-   * ]);
-   * ```
+   * Called on every `handle.get()` to supply the current evaluation context.
    */
   setContextProvider(fn: () => Context[]): void {
     this._contextProvider = fn;
@@ -725,10 +644,6 @@ export class FlagsClient {
 
   /**
    * Register a context provider — decorator-style alias.
-   *
-   * ```typescript
-   * const provider = client.flags.contextProvider(() => [...]);
-   * ```
    */
   contextProvider(fn: () => Context[]): () => Context[] {
     this._contextProvider = fn;
@@ -736,18 +651,20 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Runtime: connect / disconnect / refresh
+  // Runtime: initialize / disconnect / refresh
   // ------------------------------------------------------------------
 
   /**
-   * Connect to an environment: fetch flag definitions, register on
-   * shared WebSocket, enable local evaluation.
-   * @internal — called by SmplClient.connect().
+   * Initialize the flags runtime: fetch definitions and wire WebSocket.
+   *
+   * Idempotent — safe to call multiple times. Must be called (and awaited)
+   * before using `.get()` on flag handles.
    */
-  async _connectInternal(environment: string): Promise<void> {
-    this._environment = environment;
+  async initialize(): Promise<void> {
+    if (this._initialized) return;
+    this._environment = this._parent?._environment ?? null;
     await this._fetchAllFlags();
-    this._connected = true;
+    this._initialized = true;
     this._cache.clear();
 
     // Register on the shared WebSocket
@@ -767,7 +684,7 @@ export class FlagsClient {
     await this._flushContexts();
     this._flagStore = {};
     this._cache.clear();
-    this._connected = false;
+    this._initialized = false;
     this._environment = null;
   }
 
@@ -792,24 +709,33 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Runtime: change listeners
+  // Runtime: change listeners (dual-mode)
   // ------------------------------------------------------------------
 
-  /** Register a global change listener that fires for any flag change. */
-  onChangeAny(callback: (event: FlagChangeEvent) => void): (event: FlagChangeEvent) => void {
-    this._globalListeners.push(callback);
-    return callback;
-  }
-
   /**
-   * Register a global change listener — decorator-style alias.
+   * Register a change listener.
    *
-   * ```typescript
-   * const listener = client.flags.onChange((event) => { ... });
-   * ```
+   * - `onChange(callback)` — fires for any flag change (global).
+   * - `onChange(key, callback)` — fires only for the specified flag key.
    */
-  onChange(callback: (event: FlagChangeEvent) => void): (event: FlagChangeEvent) => void {
-    return this.onChangeAny(callback);
+  onChange(
+    callbackOrKey: string | ((event: FlagChangeEvent) => void),
+    callback?: (event: FlagChangeEvent) => void,
+  ): void {
+    if (typeof callbackOrKey === "function") {
+      // Global listener
+      this._globalListeners.push(callbackOrKey);
+    } else {
+      // Key-scoped listener
+      const key = callbackOrKey;
+      if (!callback) {
+        throw new SmplError("onChange(key, callback) requires a callback function.");
+      }
+      if (!this._keyListeners.has(key)) {
+        this._keyListeners.set(key, []);
+      }
+      this._keyListeners.get(key)!.push(callback);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -820,7 +746,7 @@ export class FlagsClient {
    * Explicitly register context(s) for background batch registration.
    *
    * Accepts a single Context or an array. Fire-and-forget — never
-   * blocks. Works before `connect()` is called.
+   * blocks. Works before `initialize()` is called.
    */
   register(context: Context | Context[]): void {
     if (Array.isArray(context)) {
@@ -841,8 +767,6 @@ export class FlagsClient {
 
   /**
    * Tier 1 explicit evaluation — stateless, no provider or cache.
-   *
-   * Useful for scripts, one-off jobs, and infrastructure code.
    */
   async evaluate(key: string, options: { environment: string; context: Context[] }): Promise<any> {
     const evalDict = contextsToEvalDict(options.context);
@@ -852,9 +776,9 @@ export class FlagsClient {
       evalDict["service"] = { key: this._parent._service };
     }
 
-    // Use local store if connected, otherwise fetch
+    // Use local store if initialized, otherwise fetch
     let flagDef: Record<string, any> | null = null;
-    if (this._connected && key in this._flagStore) {
+    if (this._initialized && key in this._flagStore) {
       flagDef = this._flagStore[key];
     } else {
       const flags = await this._fetchFlagsList();
@@ -879,8 +803,8 @@ export class FlagsClient {
 
   /** @internal */
   _evaluateHandle(key: string, defaultValue: any, context: Context[] | null): any {
-    if (!this._connected) {
-      throw new SmplNotConnectedError("SmplClient is not connected. Call client.connect() first.");
+    if (!this._initialized) {
+      throw new SmplError("Flags not initialized. Call await client.flags.initialize() first.");
     }
 
     let evalDict: Record<string, any>;
@@ -924,6 +848,23 @@ export class FlagsClient {
 
     this._cache.put(cacheKey, value);
     return value;
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: _connectInternal (called by SmplClient for backward compat)
+  // ------------------------------------------------------------------
+
+  /** @internal — called by SmplClient constructor / lazy init. */
+  async _connectInternal(environment: string): Promise<void> {
+    this._environment = environment;
+    await this._fetchAllFlags();
+    this._initialized = true;
+    this._cache.clear();
+
+    // Register on the shared WebSocket
+    this._wsManager = this._ensureWs();
+    this._wsManager.on("flag_changed", this._handleFlagChanged);
+    this._wsManager.on("flag_deleted", this._handleFlagDeleted);
   }
 
   // ------------------------------------------------------------------
@@ -980,6 +921,7 @@ export class FlagsClient {
   private _fireChangeListeners(flagKey: string | null, source: string): void {
     if (flagKey) {
       const event = new FlagChangeEvent(flagKey, source);
+      // Global listeners first
       for (const cb of this._globalListeners) {
         try {
           cb(event);
@@ -987,9 +929,10 @@ export class FlagsClient {
           // ignore listener errors
         }
       }
-      const handle = this._handles[flagKey];
-      if (handle) {
-        for (const cb of handle._listeners) {
+      // Key-scoped listeners
+      const keyCallbacks = this._keyListeners.get(flagKey);
+      if (keyCallbacks) {
+        for (const cb of keyCallbacks) {
           try {
             cb(event);
           } catch {
@@ -1032,10 +975,11 @@ export class FlagsClient {
   // Internal: model conversion
   // ------------------------------------------------------------------
 
-  private _resourceToModel(resource: FlagResource): Flag {
+  /** @internal */
+  _resourceToModel(resource: FlagResource): Flag {
     const attrs = resource.attributes;
     return new Flag(this, {
-      id: resource.id ?? "",
+      id: resource.id ?? null,
       key: attrs.key,
       name: attrs.name,
       type: attrs.type,
@@ -1059,15 +1003,5 @@ export class FlagsClient {
       description: attrs.description ?? null,
       environments: attrs.environments ?? {},
     };
-  }
-
-  private _parseContextType(data: any): ContextType {
-    const attrs = data.attributes ?? {};
-    return new ContextType({
-      id: data.id ?? "",
-      key: attrs.key ?? "",
-      name: attrs.name ?? "",
-      attributes: attrs.attributes ?? {},
-    });
   }
 }

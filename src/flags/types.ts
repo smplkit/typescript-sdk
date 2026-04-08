@@ -1,9 +1,8 @@
 /**
- * Public types for the Flags SDK: FlagType, Context, Rule.
+ * Public types for the Flags SDK: Context, Rule.
  */
 
-/** The value type of a flag. */
-export type FlagType = "BOOLEAN" | "STRING" | "NUMERIC" | "JSON";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * A typed evaluation context entity.
@@ -40,8 +39,6 @@ export class Context {
     return `Context(type=${this.type}, key=${this.key}, name=${this.name})`;
   }
 }
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * Fluent builder for JSON Logic rule dicts.
