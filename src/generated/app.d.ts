@@ -3705,6 +3705,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[account]"?: string | null;
+                "filter[email]"?: string | null;
             };
             header?: never;
             path?: never;
