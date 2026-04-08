@@ -260,6 +260,32 @@ describe("Config", () => {
       expect(client._getById).toHaveBeenCalledWith("parent-id");
     });
 
+    it("should use configs list for parent lookup when provided", async () => {
+      const client = makeMockClient();
+      const parentConfig = makeConfig(client, {
+        id: "parent-id",
+        key: "parent",
+        name: "Parent",
+        parent: null,
+        items: { parent_val: 2 },
+        environments: {},
+      });
+
+      const config = makeConfig(client, {
+        id: "child-id",
+        parent: "parent-id",
+        items: { child_val: 1 },
+        environments: {},
+      });
+
+      const chain = await config._buildChain([parentConfig, config]);
+
+      expect(chain).toHaveLength(2);
+      expect(chain[0].id).toBe("child-id");
+      expect(chain[1].id).toBe("parent-id");
+      expect(client._getById).not.toHaveBeenCalled();
+    });
+
     it("should walk multi-level parent chain (grandchild -> child -> root)", async () => {
       const client = makeMockClient();
 

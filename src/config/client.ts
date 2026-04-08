@@ -498,7 +498,7 @@ export class ConfigClient {
     const configs = await this.list();
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
-      const chain = await cfg._buildChain();
+      const chain = await cfg._buildChain(configs);
       newCache[cfg.key] = resolveChain(chain, environment);
     }
     const oldCache = this._configCache;
@@ -520,7 +520,7 @@ export class ConfigClient {
     const configs = await this.list();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
-      const chain = await cfg._buildChain();
+      const chain = await cfg._buildChain(configs);
       cache[cfg.key] = resolveChain(chain, environment);
     }
     this._configCache = cache;
@@ -539,7 +539,7 @@ export class ConfigClient {
     const configs = await this.list();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
-      const chain = await cfg._buildChain();
+      const chain = await cfg._buildChain(configs);
       cache[cfg.key] = resolveChain(chain, environment);
     }
     this._configCache = cache;

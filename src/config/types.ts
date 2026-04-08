@@ -92,9 +92,15 @@ export class Config {
 
   /**
    * Walk the parent chain and return config data objects, child-to-root.
+   *
+   * @param configs - Optional pre-fetched list of configs to look up parents
+   *   by ID, avoiding extra network calls and the key-vs-UUID mismatch with
+   *   {@link ConfigClient.get}.
    * @internal
    */
-  async _buildChain(): Promise<
+  async _buildChain(
+    configs?: Config[],
+  ): Promise<
     Array<{ id: string; items: Record<string, unknown>; environments: Record<string, unknown> }>
   > {
     const chain: Array<{
@@ -103,9 +109,11 @@ export class Config {
       environments: Record<string, unknown>;
     }> = [{ id: this.id ?? "", items: this.items, environments: this.environments }];
 
+    const configsById = new Map(configs?.map((c) => [c.id, c]) ?? []);
+
     let parentId = this.parent;
     while (parentId !== null) {
-      const parentConfig = await this._client._getById(parentId);
+      const parentConfig = configsById.get(parentId) ?? (await this._client._getById(parentId));
       chain.push({
         id: parentConfig.id ?? "",
         items: parentConfig.items,
