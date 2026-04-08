@@ -237,8 +237,6 @@ export class ConfigClient {
   _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
-  /* v8 ignore next — bookkeeping for future use */
-  _configStore: Config[] = [];
   private _initialized = false;
   private _listeners: ChangeListener[] = [];
 
@@ -498,7 +496,6 @@ export class ConfigClient {
       throw new SmplError("No environment set.");
     }
     const configs = await this.list();
-    this._configStore = configs;
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain();
@@ -521,7 +518,6 @@ export class ConfigClient {
       throw new SmplError("No environment set. Ensure SmplClient is configured.");
     }
     const configs = await this.list();
-    this._configStore = configs;
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain();
@@ -541,7 +537,6 @@ export class ConfigClient {
   async _connectInternal(environment: string): Promise<void> {
     if (this._initialized) return;
     const configs = await this.list();
-    this._configStore = configs;
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain();

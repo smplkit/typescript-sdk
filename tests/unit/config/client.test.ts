@@ -944,8 +944,6 @@ describe("ConfigClient", () => {
 
       await client._connectInternal("production");
 
-      expect(client._configStore).toHaveLength(1);
-      expect(client._configStore[0].key).toBe("db");
       expect(client._getCachedConfig("db")).toEqual({
         host: "localhost",
         port: 5432,

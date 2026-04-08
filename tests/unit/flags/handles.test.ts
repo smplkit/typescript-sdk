@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FlagsClient } from "../../../src/flags/client.js";
-import { BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "../../../src/flags/models.js";
+import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "../../../src/flags/models.js";
 import { SmplError } from "../../../src/errors.js";
 
 function makeFlagsClient(): FlagsClient {
@@ -228,7 +228,7 @@ describe("Typed flag handles", () => {
   });
 
   describe("Flag.get() (base class)", () => {
-    it("should return evaluated value when initialized", () => {
+    it("should evaluate via the base Flag class directly", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         "my-flag": {
@@ -238,9 +238,20 @@ describe("Typed flag handles", () => {
         },
       });
 
-      // Use base Flag class via handle registration
-      const handle = client.stringFlag("my-flag", "fallback");
-      expect(handle.get()).toBe("hello");
+      // Instantiate the base Flag class directly (as _resourceToModel does)
+      const flag = new Flag(client, {
+        id: "f-1",
+        key: "my-flag",
+        name: "My Flag",
+        type: "STRING",
+        default: "fallback",
+        values: [],
+        description: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(flag.get()).toBe("hello");
     });
 
     it("should return code default when flag not in store", () => {

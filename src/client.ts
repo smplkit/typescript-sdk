@@ -11,7 +11,7 @@ import { FlagsClient } from "./flags/client.js";
 import { LoggingClient } from "./logging/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveApiKey } from "./resolve.js";
-import { SmplError, SmplTimeoutError } from "./errors.js";
+import { SmplError } from "./errors.js";
 
 const APP_BASE_URL = "https://app.smplkit.com";
 
@@ -119,27 +119,11 @@ export class SmplClient {
 
     this._timeout = options.timeout ?? 30_000;
 
-    const ms = this._timeout;
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
       baseUrl: APP_BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
-      },
-      fetch: async (request: Request): Promise<Response> => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), ms);
-        try {
-          return await fetch(new Request(request, { signal: controller.signal }));
-        } catch (err) {
-          /* v8 ignore next 4 — abort path is tested in sub-clients; this client is only used for fire-and-forget registration */
-          if (err instanceof DOMException && err.name === "AbortError") {
-            throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
-          }
-          throw err;
-        } finally {
-          clearTimeout(timer);
-        }
       },
     });
 

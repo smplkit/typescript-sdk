@@ -921,45 +921,6 @@ describe("refresh", () => {
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
   });
-
-  it("should update _configStore on refresh", async () => {
-    const client = makeClient();
-
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "cfg-1",
-            key: "app",
-            items: { retries: 3 },
-          }),
-        ],
-      }),
-    );
-
-    await client.resolve("app");
-    expect(client._configStore).toHaveLength(1);
-
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "cfg-1",
-            key: "app",
-            items: { retries: 7 },
-          }),
-          configResource({
-            id: "cfg-2",
-            key: "db",
-            items: { host: "localhost" },
-          }),
-        ],
-      }),
-    );
-
-    await client.refresh();
-    expect(client._configStore).toHaveLength(2);
-  });
 });
 
 // ---------------------------------------------------------------------------

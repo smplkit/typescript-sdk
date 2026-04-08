@@ -152,7 +152,6 @@ export class Flag {
    *
    * Requires `initialize()` to have been called.
    */
-  /* v8 ignore next 3 — overridden by all exported subclasses */
   get(options?: { context?: Context[] }): unknown {
     return this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
   }
