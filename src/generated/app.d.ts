@@ -561,6 +561,10 @@ export interface components {
              * Format: date-time
              */
             readonly deleted_at?: string | null;
+            /** Product Subscriptions */
+            readonly product_subscriptions?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * AccountResource
