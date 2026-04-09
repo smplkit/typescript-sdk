@@ -112,14 +112,14 @@ export interface components {
             type: string;
             /**
              * Default
-             * @description Default value; must reference a value in the values array
+             * @description Default value; must reference a value in the values array (constrained) or match the flag type (unconstrained)
              */
             default: unknown;
             /**
              * Values
-             * @description Closed set of possible values
+             * @description Ordered set of allowed values (constrained), or null (unconstrained)
              */
-            values: components["schemas"]["FlagValue"][];
+            values?: components["schemas"]["FlagValue"][] | null;
             /** Environments */
             environments?: {
                 [key: string]: components["schemas"]["FlagEnvironment"];
