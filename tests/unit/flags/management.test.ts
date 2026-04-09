@@ -186,10 +186,10 @@ describe("FlagsClient factory methods", () => {
       ]);
     });
 
-    it("should default to empty values", () => {
+    it("should default to null values (unconstrained)", () => {
       const client = makeFlagsClient();
       const flag = client.newStringFlag("color", { default: "red" });
-      expect(flag.values).toEqual([]);
+      expect(flag.values).toBeNull();
     });
   });
 

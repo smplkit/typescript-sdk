@@ -28,8 +28,8 @@ export class Flag {
   type: string;
   /** Flag-level default value. */
   default: unknown;
-  /** Closed set of possible values. */
-  values: Array<{ name: string; value: unknown }>;
+  /** Closed set of possible values (constrained), or null (unconstrained). */
+  values: Array<{ name: string; value: unknown }> | null;
   /** Optional description. */
   description: string | null;
   /** Per-environment configuration. */
@@ -51,7 +51,7 @@ export class Flag {
       name: string;
       type: string;
       default: unknown;
-      values: Array<{ name: string; value: unknown }>;
+      values: Array<{ name: string; value: unknown }> | null;
       description: string | null;
       environments: Record<string, any>;
       createdAt: string | null;
