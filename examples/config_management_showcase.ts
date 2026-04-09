@@ -287,5 +287,6 @@ async function main(): Promise<void> {
   console.log("  All configs have been cleaned up.\n");
 }
 
-main().catch(console.error);
-process.exit(0);
+main()
+  .catch(console.error)
+  .finally(() => process.exit(0));

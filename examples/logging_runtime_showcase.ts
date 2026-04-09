@@ -238,5 +238,6 @@ async function main(): Promise<void> {
   console.log("  The Logging Runtime showcase completed successfully.\n");
 }
 
-main().catch(console.error);
-process.exit(0);
+main()
+  .catch(console.error)
+  .finally(() => process.exit(0));
