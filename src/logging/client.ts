@@ -20,6 +20,7 @@ import {
 } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
 import type { LoggerChangeEvent } from "./types.js";
+import type { LoggingAdapter } from "./adapters/base.js";
 import { keyToDisplayName } from "../helpers.js";
 import type { SharedWebSocket } from "../ws.js";
 
@@ -77,6 +78,9 @@ export class LoggingClient {
   private _globalListeners: Array<(event: LoggerChangeEvent) => void> = [];
   private _keyListeners: Map<string, Array<(event: LoggerChangeEvent) => void>> = new Map();
 
+  private _adapters: LoggingAdapter[] = [];
+  private _explicitAdapters = false;
+
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
     this._apiKey = apiKey;
@@ -104,6 +108,24 @@ export class LoggingClient {
         }
       },
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Adapter registration
+  // ------------------------------------------------------------------
+
+  /**
+   * Register a logging framework adapter.
+   *
+   * Must be called before `start()`. Disables auto-loading of built-in
+   * adapters — only explicitly registered adapters will be used.
+   */
+  registerAdapter(adapter: LoggingAdapter): void {
+    if (this._started) {
+      throw new Error("Cannot register adapters after start()");
+    }
+    this._explicitAdapters = true;
+    this._adapters.push(adapter);
   }
 
   // ------------------------------------------------------------------
@@ -348,16 +370,70 @@ export class LoggingClient {
   /**
    * Start the logging runtime.
    *
-   * Fetches existing loggers/groups and wires WebSocket listeners for
-   * live updates. Idempotent — safe to call multiple times.
+   * Performs the full runtime pipeline:
+   *   1. Auto-load adapters (if none registered explicitly)
+   *   2. Discover existing loggers from each adapter
+   *   3. Install hooks on each adapter for new logger creation
+   *   4. Bulk-register discovered loggers with the server
+   *   5. Fetch all loggers and groups from the server
+   *   6. Resolve levels and apply to adapters
+   *   7. Wire WebSocket for live updates
    *
-   * Note: Node.js auto-discovery (equivalent to Python's logging module
-   * monkey-patching) is deferred. Management methods work without start().
+   * Idempotent — safe to call multiple times.
+   * Management methods work without start().
    */
   async start(): Promise<void> {
     if (this._started) return;
 
-    // Wire WebSocket for logger_changed events
+    // 1. Auto-load adapters if none registered explicitly
+    if (!this._explicitAdapters) {
+      this._adapters = this._autoLoadAdapters();
+    }
+
+    // 2. Discover existing loggers from each adapter
+    const discovered: Array<{ name: string; level: string }> = [];
+    for (const adapter of this._adapters) {
+      try {
+        const loggers = adapter.discover();
+        discovered.push(...loggers);
+      } catch {
+        // ignore adapter discovery errors
+      }
+    }
+
+    // 3. Install hooks on each adapter for new logger creation
+    for (const adapter of this._adapters) {
+      try {
+        adapter.installHook((name: string, level: string) => {
+          this._onAdapterNewLogger(name, level);
+        });
+      } catch {
+        // ignore hook installation errors
+      }
+    }
+
+    // 4. Bulk-register discovered loggers with the server
+    for (const { name, level } of discovered) {
+      try {
+        const logger = this.new(name, { managed: true });
+        logger.setLevel(level as any);
+        await logger.save();
+      } catch {
+        // Logger may already exist — ignore
+      }
+    }
+
+    // 5. Fetch all loggers and groups from the server, resolve levels
+    try {
+      const [serverLoggers] = await Promise.all([this.list(), this.listGroups()]);
+
+      // 6. Apply levels from server to adapters
+      this._applyLevels(serverLoggers);
+    } catch {
+      // Server may be unreachable — continue with WebSocket wiring
+    }
+
+    // 7. Wire WebSocket for logger_changed events
     this._wsManager = this._ensureWs();
     this._wsManager.on("logger_changed", this._handleLoggerChanged);
 
@@ -398,11 +474,85 @@ export class LoggingClient {
 
   /** @internal */
   _close(): void {
+    // Uninstall adapter hooks
+    for (const adapter of this._adapters) {
+      try {
+        adapter.uninstallHook();
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+
     if (this._wsManager !== null) {
       this._wsManager.off("logger_changed", this._handleLoggerChanged);
       this._wsManager = null;
     }
     this._started = false;
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: adapter helpers
+  // ------------------------------------------------------------------
+
+  /** Auto-load built-in adapters by attempting to require each framework. */
+  private _autoLoadAdapters(): LoggingAdapter[] {
+    const adapters: LoggingAdapter[] = [];
+    const builtins = [
+      { module: "./adapters/winston.js", className: "WinstonAdapter" },
+      { module: "./adapters/pino.js", className: "PinoAdapter" },
+    ];
+    for (const { module: mod, className } of builtins) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const m = require(mod);
+        const AdapterClass = m[className];
+        adapters.push(new AdapterClass());
+      } catch {
+        // Dependency not installed — skip
+      }
+    }
+    if (adapters.length === 0) {
+      console.warn(
+        "[smplkit] No logging framework detected. Runtime logging control requires a supported framework (winston, pino).",
+      );
+    }
+    return adapters;
+  }
+
+  /** Apply resolved levels from server loggers to all adapters. */
+  private _applyLevels(serverLoggers: Logger[]): void {
+    for (const logger of serverLoggers) {
+      if (!logger.level) continue;
+
+      // Resolve environment-specific level if available
+      const env = this._parent?._environment;
+      let effectiveLevel = logger.level;
+      if (env && logger.environments) {
+        const envOverride = (logger.environments as Record<string, any>)[env];
+        if (envOverride?.level) {
+          effectiveLevel = envOverride.level;
+        }
+      }
+
+      for (const adapter of this._adapters) {
+        try {
+          adapter.applyLevel(logger.key, effectiveLevel);
+        } catch {
+          // ignore adapter errors
+        }
+      }
+    }
+  }
+
+  /** Called by adapter hooks when a new logger is created in the framework. */
+  private _onAdapterNewLogger(_name: string, _level: string): void {
+    // Register with server asynchronously — fire-and-forget.
+    // Errors are swallowed to avoid breaking the framework's logger creation.
+    const logger = this.new(_name, { managed: true });
+    logger.setLevel(_level as any);
+    logger.save().catch(() => {
+      // ignore — logger may already exist
+    });
   }
 
   // ------------------------------------------------------------------

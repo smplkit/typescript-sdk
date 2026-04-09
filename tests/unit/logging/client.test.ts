@@ -527,9 +527,28 @@ describe("LoggingClient — log group management", () => {
 // ===========================================================================
 
 describe("LoggingClient — runtime", () => {
+  /**
+   * Helper to make start() work with the expanded pipeline.
+   * Registers an empty mock adapter and stubs fetch for list/listGroups.
+   */
+  function prepareForStart(client: LoggingClient): void {
+    // Register a no-op adapter to skip auto-loading
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    // Mock the HTTP calls made during start (list + listGroups).
+    // Use mockImplementation to create fresh Response objects per call.
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  }
+
   describe("start()", () => {
     it("should be idempotent", async () => {
       const client = makeClient();
+      prepareForStart(client);
 
       await client.start();
       await client.start();
@@ -540,6 +559,7 @@ describe("LoggingClient — runtime", () => {
 
     it("should wire a WebSocket listener for logger_changed", async () => {
       const client = makeClient();
+      prepareForStart(client);
       await client.start();
 
       expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
@@ -549,6 +569,7 @@ describe("LoggingClient — runtime", () => {
   describe("onChange()", () => {
     it("should register a global listener", async () => {
       const client = makeClient();
+      prepareForStart(client);
       const cb = vi.fn();
       client.onChange(cb);
 
@@ -566,6 +587,7 @@ describe("LoggingClient — runtime", () => {
 
     it("should register a key-scoped listener", async () => {
       const client = makeClient();
+      prepareForStart(client);
       const cb = vi.fn();
       client.onChange("test.logger", cb);
 
@@ -591,6 +613,7 @@ describe("LoggingClient — runtime", () => {
   describe("_close()", () => {
     it("should unregister from the WebSocket", async () => {
       const client = makeClient();
+      prepareForStart(client);
       await client.start();
 
       client._close();
@@ -600,11 +623,14 @@ describe("LoggingClient — runtime", () => {
 
     it("should allow start() again after close", async () => {
       const client = makeClient();
+      prepareForStart(client);
       await client.start();
       client._close();
 
       // Reset mock to track new calls
       lastMockWs.on.mockClear();
+      mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+      // Re-register adapter since _close resets state but _explicitAdapters stays true
       await client.start();
 
       expect(lastMockWs.on).toHaveBeenCalledTimes(1);
@@ -757,8 +783,20 @@ describe("LoggingClient — error handling", () => {
 // ===========================================================================
 
 describe("LoggingClient — listener error swallowing", () => {
+  function prepareForStart(client: LoggingClient): void {
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  }
+
   it("should swallow errors thrown by global listeners", async () => {
     const client = makeClient();
+    prepareForStart(client);
     const throwingCb = vi.fn(() => {
       throw new Error("listener boom");
     });
@@ -777,6 +815,7 @@ describe("LoggingClient — listener error swallowing", () => {
 
   it("should swallow errors thrown by key-scoped listeners", async () => {
     const client = makeClient();
+    prepareForStart(client);
     const throwingCb = vi.fn(() => {
       throw new Error("key listener boom");
     });
@@ -795,6 +834,7 @@ describe("LoggingClient — listener error swallowing", () => {
 
   it("should ignore events without a key field", async () => {
     const client = makeClient();
+    prepareForStart(client);
     const cb = vi.fn();
     client.onChange(cb);
 

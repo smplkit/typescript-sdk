@@ -27,6 +27,11 @@ export { LoggingClient } from "./logging/client.js";
 export { Logger, LogGroup } from "./logging/models.js";
 export { LogLevel } from "./logging/types.js";
 export type { LoggerChangeEvent } from "./logging/types.js";
+export type { LoggingAdapter } from "./logging/adapters/base.js";
+export { WinstonAdapter } from "./logging/adapters/winston.js";
+export type { WinstonAdapterConfig } from "./logging/adapters/winston.js";
+export { PinoAdapter } from "./logging/adapters/pino.js";
+export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 
 // Shared WebSocket
 export { SharedWebSocket } from "./ws.js";
