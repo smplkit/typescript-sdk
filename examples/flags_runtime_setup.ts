@@ -105,12 +105,6 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   const retryFlag = client.flags.newNumberFlag("max-retries", {
     default: 3,
     description: "Maximum number of API retries before failing.",
-    values: [
-      { name: "Low (1)", value: 1 },
-      { name: "Standard (3)", value: 3 },
-      { name: "High (5)", value: 5 },
-      { name: "Aggressive (10)", value: 10 },
-    ],
   });
 
   // Configure staging: enabled with a rule for large accounts.

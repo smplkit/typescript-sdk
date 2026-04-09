@@ -107,6 +107,9 @@ async function main(): Promise<void> {
     // ----------------------------------------------------------------
     section("2b. Create a String Flag");
 
+    // The values parameter defines a closed set — this flag can only
+    // serve "red", "green", or "blue". This makes it a constrained
+    // flag. The Console UI shows dropdowns for value selection.
     const bannerFlag = client.flags.newStringFlag("banner-color", {
       default: "red",
       description: "Controls the banner color shown to users.",
@@ -127,17 +130,17 @@ async function main(): Promise<void> {
     // ----------------------------------------------------------------
     // 2c. Number flag
     // ----------------------------------------------------------------
-    section("2c. Create a Number Flag");
+    section("2c. Create a Number Flag — Unconstrained");
 
+    // Unlike banner-color above, this flag has no predefined values.
+    // Any number is valid as a default or rule serve-value. This is
+    // useful for tunables like thresholds, retry counts, and timeouts
+    // where the value space is open-ended.
+    //
+    // Omitting the values parameter creates an unconstrained flag.
     const retryFlag = client.flags.newNumberFlag("max-retries", {
       default: 3,
       description: "Maximum number of API retries before failing.",
-      values: [
-        { name: "Low (1)", value: 1 },
-        { name: "Standard (3)", value: 3 },
-        { name: "High (5)", value: 5 },
-        { name: "Aggressive (10)", value: 10 },
-      ],
     });
     step(`Unsaved: key=${retryFlag.key}, default=${retryFlag.default}`);
 
@@ -150,6 +153,8 @@ async function main(): Promise<void> {
     // ----------------------------------------------------------------
     section("2d. Create a JSON Flag");
 
+    // Like banner-color, this JSON flag is constrained — only the
+    // three declared theme objects can be served.
     const themeFlag = client.flags.newJsonFlag("ui-theme", {
       default: { mode: "light", accent: "#0066cc" },
       description: "Controls the UI theme configuration.",
