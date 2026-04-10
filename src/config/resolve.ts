@@ -1,28 +1,19 @@
 /**
- * Deep-merge resolution algorithm for config inheritance chains.
- *
- * Mirrors the Python SDK's `_resolver.py` (ADR-024 §2.5–2.6).
+ * Resolution algorithm for config inheritance chains.
  */
 
 /** A single entry in a config inheritance chain (child-to-root ordering). */
 export interface ChainConfig {
   /** Config UUID. */
   id: string;
-  /** Base key-value pairs (unwrapped from typed item definitions). */
+  /** Base key-value pairs. */
   items: Record<string, unknown>;
-  /**
-   * Per-environment overrides.
-   * Each entry is `{ values: { key: value, ... } }` — values are already
-   * unwrapped from the server's `{ value: raw }` wrapper by the client layer.
-   */
+  /** Per-environment overrides. */
   environments: Record<string, unknown>;
 }
 
 /**
- * Recursively merge two dicts, with `override` taking precedence.
- *
- * Nested dicts are merged recursively. Non-dict values (strings, numbers,
- * booleans, arrays, null) are replaced wholesale.
+ * Recursively merge two objects, with `override` taking precedence.
  */
 export function deepMerge(
   base: Record<string, unknown>,
@@ -53,12 +44,8 @@ export function deepMerge(
 /**
  * Resolve the full configuration for an environment given a config chain.
  *
- * Walks from root (last element) to child (first element), accumulating
- * values via deep merge so that child configs override parent configs.
- *
- * For each config in the chain, base `values` are merged with
- * environment-specific values (env wins), then that result is merged
- * on top of the accumulated parent result (child wins over parent).
+ * Child configs override parent configs, and environment-specific values
+ * override base values.
  *
  * @param chain - Ordered list of config data from child (index 0) to root ancestor (last).
  * @param environment - The environment key to resolve for.

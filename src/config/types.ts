@@ -28,7 +28,7 @@ export class Config {
   /** Parent config UUID, or null if this is a root config. */
   parent: string | null;
 
-  /** Base key-value pairs (unwrapped from typed item definitions). */
+  /** Base key-value pairs. */
   items: Record<string, unknown>;
 
   /**

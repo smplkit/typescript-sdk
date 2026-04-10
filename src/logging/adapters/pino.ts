@@ -1,8 +1,5 @@
 /**
  * Pino logging framework adapter.
- *
- * Integrates the smplkit logging runtime with Pino. Tracks logger
- * instances (including child loggers) for discovery and level control.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

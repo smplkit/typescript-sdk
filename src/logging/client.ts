@@ -1,5 +1,5 @@
 /**
- * LoggingClient — management plane + scaffolded runtime for Smpl Logging.
+ * LoggingClient — management and runtime for Smpl Logging.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -51,7 +51,7 @@ function wrapFetchError(err: unknown): never {
 }
 
 /**
- * Client for the smplkit Logging API — management plane + scaffolded runtime.
+ * Client for the smplkit Logging API.
  *
  * Obtained via `SmplClient.logging`.
  */
@@ -114,8 +114,8 @@ export class LoggingClient {
   /**
    * Register a logging framework adapter.
    *
-   * Must be called before `start()`. Disables auto-loading of built-in
-   * adapters — only explicitly registered adapters will be used.
+   * Must be called before `start()`. When called, only explicitly
+   * registered adapters will be used.
    */
   registerAdapter(adapter: LoggingAdapter): void {
     if (this._started) {
@@ -367,12 +367,9 @@ export class LoggingClient {
   /**
    * Start the logging runtime.
    *
-   * Discovers loggers from registered adapters, syncs them with the
-   * server, applies server-side log levels, and subscribes to live
-   * level updates.
-   *
-   * Idempotent — safe to call multiple times.
-   * Management methods work without start().
+   * Synchronizes loggers with the server and subscribes to live level
+   * updates. Idempotent — safe to call multiple times.
+   * Management methods work without calling `start()`.
    */
   async start(): Promise<void> {
     if (this._started) return;
@@ -433,13 +430,13 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Runtime: change listeners (dual-mode)
+  // Runtime: change listeners
   // ------------------------------------------------------------------
 
   /**
    * Register a change listener.
    *
-   * - `onChange(callback)` — fires for any logger change (global).
+   * - `onChange(callback)` — fires for any logger change.
    * - `onChange(key, callback)` — fires only for the specified logger key.
    */
   onChange(

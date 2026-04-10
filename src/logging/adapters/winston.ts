@@ -1,9 +1,5 @@
 /**
  * Winston logging framework adapter.
- *
- * Integrates the smplkit logging runtime with Winston. Discovers
- * existing loggers, tracks new logger creation, and applies
- * server-managed log levels.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

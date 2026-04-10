@@ -1,5 +1,5 @@
 /**
- * FlagsClient — management + prescriptive runtime for Smpl Flags.
+ * FlagsClient — management and runtime for Smpl Flags.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -204,7 +204,7 @@ class ResolutionCache {
   }
 }
 
-/** Cache statistics for the flags runtime. */
+/** Evaluation statistics for the flags runtime. */
 export class FlagStats {
   readonly cacheHits: number;
   readonly cacheMisses: number;
@@ -261,7 +261,7 @@ class ContextRegistrationBuffer {
 // ---------------------------------------------------------------------------
 
 /**
- * Client for the smplkit Flags API — management plane + prescriptive runtime.
+ * Client for the smplkit Flags API.
  *
  * Obtained via `SmplClient.flags`.
  */
@@ -651,7 +651,7 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   /**
-   * Initialize the flags runtime: fetch definitions and wire WebSocket.
+   * Initialize the flags runtime.
    *
    * Idempotent — safe to call multiple times. Must be called (and awaited)
    * before using `.get()` on flag handles.
@@ -669,7 +669,7 @@ export class FlagsClient {
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
   }
 
-  /** Disconnect: unregister from WebSocket, flush contexts, clear state. */
+  /** Disconnect the flags runtime and release resources. */
   async disconnect(): Promise<void> {
     if (this._wsManager !== null) {
       this._wsManager.off("flag_changed", this._handleFlagChanged);
@@ -684,14 +684,14 @@ export class FlagsClient {
     this._environment = null;
   }
 
-  /** Re-fetch all flag definitions and clear cache. */
+  /** Refresh all flag definitions from the server. */
   async refresh(): Promise<void> {
     await this._fetchAllFlags();
     this._cache.clear();
     this._fireChangeListenersAll("manual");
   }
 
-  /** Return the current WebSocket connection status. */
+  /** Return the current real-time connection status. */
   connectionStatus(): string {
     if (this._wsManager !== null) {
       return this._wsManager.connectionStatus;
@@ -699,19 +699,19 @@ export class FlagsClient {
     return "disconnected";
   }
 
-  /** Return cache statistics. */
+  /** Return evaluation statistics. */
   stats(): FlagStats {
     return new FlagStats(this._cache.cacheHits, this._cache.cacheMisses);
   }
 
   // ------------------------------------------------------------------
-  // Runtime: change listeners (dual-mode)
+  // Runtime: change listeners
   // ------------------------------------------------------------------
 
   /**
    * Register a change listener.
    *
-   * - `onChange(callback)` — fires for any flag change (global).
+   * - `onChange(callback)` — fires for any flag change.
    * - `onChange(key, callback)` — fires only for the specified flag key.
    */
   onChange(
@@ -741,8 +741,7 @@ export class FlagsClient {
   /**
    * Register context(s) with the server.
    *
-   * Accepts a single Context or an array. Registration is asynchronous
-   * and never blocks. Works before `initialize()` is called.
+   * Accepts a single Context or an array. Works before `initialize()` is called.
    */
   register(context: Context | Context[]): void {
     if (Array.isArray(context)) {
@@ -763,8 +762,6 @@ export class FlagsClient {
 
   /**
    * Evaluate a flag with an explicit environment and context.
-   *
-   * Stateless — does not use the context provider or cached results.
    */
   async evaluate(key: string, options: { environment: string; context: Context[] }): Promise<any> {
     const evalDict = contextsToEvalDict(options.context);

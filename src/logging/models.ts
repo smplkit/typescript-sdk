@@ -10,9 +10,7 @@ import { LogLevel } from "./types.js";
 /**
  * A logger resource managed by the smplkit platform.
  *
- * Management: mutate properties and call `save()` to persist.
- * Convenience methods (`setLevel`, `setEnvironmentLevel`, etc.) are
- * sync local mutations — no HTTP until `save()`.
+ * Mutate properties or use convenience methods, then call `save()` to persist.
  */
 export class Logger {
   /** UUID of the logger, or `null` if unsaved. */
@@ -78,24 +76,24 @@ export class Logger {
     this._apply(saved);
   }
 
-  /** Set the base log level (sync local mutation). */
+  /** Set the base log level. Call `save()` to persist. */
   setLevel(level: LogLevel): void {
     this.level = level;
   }
 
-  /** Clear the base log level (sync local mutation). */
+  /** Clear the base log level. Call `save()` to persist. */
   clearLevel(): void {
     this.level = null;
   }
 
-  /** Set an environment-specific log level (sync local mutation). */
+  /** Set an environment-specific log level. Call `save()` to persist. */
   setEnvironmentLevel(env: string, level: LogLevel): void {
     const envs = { ...this.environments };
     envs[env] = { ...(envs[env] ?? {}), level: level };
     this.environments = envs;
   }
 
-  /** Clear an environment-specific log level (sync local mutation). */
+  /** Clear an environment-specific log level. Call `save()` to persist. */
   clearEnvironmentLevel(env: string): void {
     const envs = { ...this.environments };
     if (envs[env]) {
@@ -106,7 +104,7 @@ export class Logger {
     }
   }
 
-  /** Clear all environment-specific log levels (sync local mutation). */
+  /** Clear all environment-specific log levels. Call `save()` to persist. */
   clearAllEnvironmentLevels(): void {
     this.environments = {};
   }
@@ -191,24 +189,24 @@ export class LogGroup {
     this._apply(saved);
   }
 
-  /** Set the base log level (sync local mutation). */
+  /** Set the base log level. Call `save()` to persist. */
   setLevel(level: LogLevel): void {
     this.level = level;
   }
 
-  /** Clear the base log level (sync local mutation). */
+  /** Clear the base log level. Call `save()` to persist. */
   clearLevel(): void {
     this.level = null;
   }
 
-  /** Set an environment-specific log level (sync local mutation). */
+  /** Set an environment-specific log level. Call `save()` to persist. */
   setEnvironmentLevel(env: string, level: LogLevel): void {
     const envs = { ...this.environments };
     envs[env] = { ...(envs[env] ?? {}), level: level };
     this.environments = envs;
   }
 
-  /** Clear an environment-specific log level (sync local mutation). */
+  /** Clear an environment-specific log level. Call `save()` to persist. */
   clearEnvironmentLevel(env: string): void {
     const envs = { ...this.environments };
     if (envs[env]) {
@@ -219,7 +217,7 @@ export class LogGroup {
     }
   }
 
-  /** Clear all environment-specific log levels (sync local mutation). */
+  /** Clear all environment-specific log levels. Call `save()` to persist. */
   clearAllEnvironmentLevels(): void {
     this.environments = {};
   }

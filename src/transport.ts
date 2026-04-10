@@ -1,9 +1,6 @@
 /**
  * Internal HTTP client wrapper.
  *
- * Uses native `fetch` with `AbortController` for timeouts. Maps network
- * errors and HTTP status codes to typed SDK exceptions.
- *
  * @internal This module is not part of the public API.
  */
 

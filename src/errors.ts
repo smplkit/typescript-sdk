@@ -169,11 +169,6 @@ function deriveMessage(errors: ApiErrorObject[], statusCode: number, body?: stri
 /**
  * Parse an HTTP error response and throw the appropriate typed SDK exception.
  *
- * 1. Attempts to parse the body as a JSON:API error envelope.
- * 2. Derives a message from the first error's detail > title > status.
- * 3. Maps 400/422 -> SmplValidationError, 404 -> SmplNotFoundError,
- *    409 -> SmplConflictError, others -> SmplError.
- *
  * @internal
  */
 export function throwForStatus(statusCode: number, body: string): never {

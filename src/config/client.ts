@@ -1,5 +1,5 @@
 /**
- * ConfigClient — management plane + runtime for Smpl Config.
+ * ConfigClient — management and runtime for Smpl Config.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -213,7 +213,7 @@ function buildRequestBody(options: {
 }
 
 /**
- * Client for the smplkit Config API — management plane + runtime.
+ * Client for the smplkit Config API.
  *
  * Obtained via `SmplClient.config`.
  */
@@ -399,9 +399,7 @@ export class ConfigClient {
   /**
    * Resolve a config's values for the current environment.
    *
-   * Returns a flat dict of resolved key-value pairs with inherited
-   * values and environment overrides applied.
-   *
+   * Returns the resolved key-value pairs for the given config.
    * Optionally pass a model class to map the resolved values.
    */
   async resolve<T = Record<string, unknown>>(
@@ -420,8 +418,8 @@ export class ConfigClient {
   }
 
   /**
-   * Subscribe to a config's values — returns a live proxy that
-   * auto-updates when the underlying config changes.
+   * Subscribe to a config's values. Returns a proxy whose properties
+   * always reflect the latest resolved values.
    *
    * Optionally pass a model class to map the resolved values.
    */
@@ -481,8 +479,8 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /**
-   * Re-fetch all configs and re-resolve values.
-   * Fires change listeners for any values that differ.
+   * Refresh all config values from the server.
+   * Fires change listeners for any values that changed.
    */
   async refresh(): Promise<void> {
     if (!this._initialized) {

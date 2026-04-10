@@ -1,9 +1,5 @@
 /**
- * Unified Flag hierarchy — management model + runtime handle.
- *
- * A single {@link Flag} class replaces the old separate Flag + FlagHandle
- * classes. Typed subclasses ({@link BooleanFlag}, {@link StringFlag},
- * {@link NumberFlag}, {@link JsonFlag}) override `get()` for type safety.
+ * Flag model hierarchy with typed subclasses for type-safe evaluation.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -12,10 +8,9 @@ import type { FlagsClient } from "./client.js";
 import type { Context } from "./types.js";
 
 /**
- * A flag resource that doubles as a runtime handle.
+ * A flag resource.
  *
- * Management: call `save()` to persist (creates if new, updates if existing).
- * Runtime: call `get()` to evaluate the flag locally.
+ * Call `save()` to persist changes. Call `get()` to evaluate the flag.
  */
 export class Flag {
   /** UUID of the flag, or `null` if unsaved. */
@@ -88,10 +83,10 @@ export class Flag {
   }
 
   /**
-   * Add a rule to a specific environment (sync local mutation).
+   * Add a rule to a specific environment.
    *
    * The built rule must include an `environment` key (set via
-   * `Rule(...).environment("env_key")`). No HTTP call is made.
+   * `Rule(...).environment("env_key")`). Call `save()` to persist.
    *
    * @returns `this` for chaining.
    */
@@ -119,7 +114,7 @@ export class Flag {
     return this;
   }
 
-  /** Enable or disable a flag in a specific environment (sync local mutation). */
+  /** Enable or disable a flag in a specific environment. Call `save()` to persist. */
   setEnvironmentEnabled(envKey: string, enabled: boolean): void {
     const envs = { ...this.environments };
     const envData = { ...(envs[envKey] ?? { enabled: false, rules: [] }) };
@@ -128,7 +123,7 @@ export class Flag {
     this.environments = envs;
   }
 
-  /** Set the default value for a specific environment (sync local mutation). */
+  /** Set the default value for a specific environment. Call `save()` to persist. */
   setEnvironmentDefault(envKey: string, defaultValue: unknown): void {
     const envs = { ...this.environments };
     const envData = { ...(envs[envKey] ?? { enabled: false, rules: [] }) };
@@ -137,7 +132,7 @@ export class Flag {
     this.environments = envs;
   }
 
-  /** Clear all rules for a specific environment (sync local mutation). */
+  /** Clear all rules for a specific environment. Call `save()` to persist. */
   clearRules(envKey: string): void {
     const envs = { ...this.environments };
     const envData = envs[envKey];
@@ -148,9 +143,9 @@ export class Flag {
   }
 
   /**
-   * Evaluate the flag locally.
+   * Evaluate the flag and return its current value.
    *
-   * Requires `initialize()` to have been called.
+   * Requires `initialize()` to have been called on the flags client.
    */
   get(options?: { context?: Context[] }): unknown {
     return this._client._evaluateHandle(this.key, this.default, options?.context ?? null);

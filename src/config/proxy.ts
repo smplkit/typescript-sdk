@@ -1,9 +1,5 @@
 /**
  * LiveConfigProxy — live configuration access.
- *
- * Property reads always return the latest resolved values. When the
- * underlying config changes, subsequent reads automatically reflect
- * the new values.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -11,16 +7,14 @@
 import type { ConfigClient } from "./client.js";
 
 /**
- * A live proxy that auto-updates when the underlying config changes.
- *
- * Access properties directly — each read returns the latest resolved value.
+ * A live proxy whose properties always reflect the latest config values.
  *
  * @example
  * ```typescript
  * const proxy = await client.config.subscribe("user-service");
- * console.log(proxy.timeout);  // reads from live cache
- * // ... later, after a WebSocket update ...
- * console.log(proxy.timeout);  // reads the updated value
+ * console.log(proxy.timeout);  // current value
+ * // ... later, after a config change ...
+ * console.log(proxy.timeout);  // updated value
  * ```
  */
 export class LiveConfigProxy<T = Record<string, unknown>> {

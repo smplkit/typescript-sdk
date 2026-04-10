@@ -1,18 +1,5 @@
 /**
- * Shared WebSocket connection to the app service event gateway.
- *
- * A single {@link SharedWebSocket} instance is shared across all product
- * modules (config, flags) within one {@link SmplClient}.  Product modules
- * register listeners for specific event types; the shared connection
- * dispatches incoming events to the appropriate listeners.
- *
- * Protocol:
- * - Connect to `wss://app.smplkit.com/api/ws/v1/events?api_key={key}`
- * - Receive `{"type": "connected"}` on success
- * - Receive events: `{"event": "config_changed", ...}`, `{"event": "flag_changed", ...}`
- * - No subscribe message — the API key determines the account
- * - Heartbeat: server sends `ping`, client responds with `pong`
- * - Reconnect with exponential backoff
+ * Shared WebSocket connection for real-time event delivery.
  */
 
 import WebSocket from "ws";
@@ -24,9 +11,7 @@ type EventCallback = (data: Record<string, any>) => void;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000];
 
 /**
- * Manages a single WebSocket connection to the app service event gateway.
- *
- * Shared across config and flags modules for efficient multiplexing.
+ * Manages a WebSocket connection for real-time event delivery.
  */
 export class SharedWebSocket {
   private readonly _appBaseUrl: string;

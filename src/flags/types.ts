@@ -41,7 +41,7 @@ export class Context {
 }
 
 /**
- * Fluent builder for JSON Logic rule dicts.
+ * Fluent builder for flag targeting rules.
  *
  * @example
  * ```typescript
@@ -52,8 +52,7 @@ export class Context {
  *     .build()
  * ```
  *
- * Multiple `.when()` calls are AND'd.  `.environment()` tags the
- * built dict with an environment key for use with `Flag.addRule()`.
+ * Multiple `.when()` calls are combined with AND logic.
  */
 export class Rule {
   private _description: string;
