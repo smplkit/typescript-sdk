@@ -137,15 +137,15 @@ export interface components {
          *           "level": "ERROR"
          *         }
          *       },
-         *       "key": "database-loggers",
+         *       "id": "database-loggers",
          *       "level": "WARN",
          *       "name": "Database Loggers",
          *       "updated_at": "2026-04-01T10:00:00Z"
          *     }
          */
         LogGroup: {
-            /** Key */
-            key?: string | null;
+            /** Id */
+            id?: string | null;
             /** Name */
             name: string;
             /** Level */
@@ -176,12 +176,11 @@ export interface components {
          *             "level": "ERROR"
          *           }
          *         },
-         *         "key": "database-loggers",
          *         "level": "WARN",
          *         "name": "Database Loggers",
          *         "updated_at": "2026-04-01T10:00:00Z"
          *       },
-         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "id": "database-loggers",
          *       "type": "log_group"
          *     }
          */
@@ -211,8 +210,8 @@ export interface components {
          *           "level": "DEBUG"
          *         }
          *       },
-         *       "group": "550e8400-e29b-41d4-a716-446655440000",
-         *       "key": "com.example.sql",
+         *       "group": "database-loggers",
+         *       "id": "com.example.sql",
          *       "level": "DEBUG",
          *       "managed": true,
          *       "name": "SQL Logger",
@@ -226,8 +225,8 @@ export interface components {
          *     }
          */
         Logger: {
-            /** Key */
-            key?: string | null;
+            /** Id */
+            id?: string | null;
             /** Name */
             name: string;
             /** Level */
@@ -252,10 +251,10 @@ export interface components {
         /** LoggerBulkItem */
         LoggerBulkItem: {
             /**
-             * Key
+             * Id
              * @description Normalized logger name
              */
-            key: string;
+            id: string;
             /**
              * Level
              * @description Observed log level in smplkit canonical format
@@ -295,8 +294,7 @@ export interface components {
          *             "level": "DEBUG"
          *           }
          *         },
-         *         "group": "660e8400-e29b-41d4-a716-446655440000",
-         *         "key": "com.example.sql",
+         *         "group": "database-loggers",
          *         "level": "DEBUG",
          *         "managed": true,
          *         "name": "SQL Logger",
@@ -308,7 +306,7 @@ export interface components {
          *         ],
          *         "updated_at": "2026-04-01T10:00:00Z"
          *       },
-         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "id": "com.example.sql",
          *       "type": "logger"
          *     }
          */
@@ -377,7 +375,6 @@ export interface operations {
     list_loggers: {
         parameters: {
             query?: {
-                "filter[key]"?: string | null;
                 "filter[managed]"?: boolean | null;
             };
             header?: never;
