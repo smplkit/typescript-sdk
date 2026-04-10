@@ -797,17 +797,13 @@ export interface components {
          *         "plan": {}
          *       },
          *       "created_at": "2026-03-31T10:00:00Z",
-         *       "key": "user",
          *       "name": "User",
          *       "updated_at": "2026-03-31T10:00:00Z"
          *     }
          */
         ContextType: {
-            /**
-             * Key
-             * @description Programmatic identifier: user, account, device
-             */
-            key: string;
+            /** Id */
+            id?: string | null;
             /**
              * Name
              * @description Display label: User, Account, Device
@@ -1949,9 +1945,7 @@ export interface operations {
     };
     list_environments: {
         parameters: {
-            query?: {
-                "filter[key]"?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -2948,7 +2942,7 @@ export interface operations {
     list_contexts: {
         parameters: {
             query?: {
-                "filter[context_type_id]"?: string | null;
+                "filter[context_type]"?: string | null;
             };
             header?: never;
             path?: never;
@@ -3119,9 +3113,7 @@ export interface operations {
     };
     list_services: {
         parameters: {
-            query?: {
-                "filter[key]"?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
