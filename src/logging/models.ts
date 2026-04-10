@@ -71,7 +71,7 @@ export class Logger {
   /**
    * Persist this logger to the server.
    *
-   * POST if `id` is null (new), PUT if `id` is set (update).
+   * Creates if new, updates if existing.
    */
   async save(): Promise<void> {
     const saved = await this._client._saveLogger(this);
@@ -184,7 +184,7 @@ export class LogGroup {
   /**
    * Persist this log group to the server.
    *
-   * POST if `id` is null (new), PUT if `id` is set (update).
+   * Creates if new, updates if existing.
    */
   async save(): Promise<void> {
     const saved = await this._client._saveLogGroup(this);

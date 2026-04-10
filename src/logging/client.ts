@@ -1,8 +1,5 @@
 /**
  * LoggingClient — management plane + scaffolded runtime for Smpl Logging.
- *
- * Uses the generated OpenAPI types (`src/generated/logging.d.ts`) via
- * `openapi-fetch` for all HTTP calls.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -370,14 +367,9 @@ export class LoggingClient {
   /**
    * Start the logging runtime.
    *
-   * Performs the full runtime pipeline:
-   *   1. Auto-load adapters (if none registered explicitly)
-   *   2. Discover existing loggers from each adapter
-   *   3. Install hooks on each adapter for new logger creation
-   *   4. Bulk-register discovered loggers with the server
-   *   5. Fetch all loggers and groups from the server
-   *   6. Resolve levels and apply to adapters
-   *   7. Wire WebSocket for live updates
+   * Discovers loggers from registered adapters, syncs them with the
+   * server, applies server-side log levels, and subscribes to live
+   * level updates.
    *
    * Idempotent — safe to call multiple times.
    * Management methods work without start().

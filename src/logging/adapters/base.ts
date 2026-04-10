@@ -1,11 +1,8 @@
 /**
  * Contract for pluggable logging framework integration.
  *
- * Adapters bridge the smplkit logging runtime to a specific logging framework.
- * The core LoggingClient delegates all framework-specific work through this interface.
- *
- * Adapters are NOT responsible for: key normalization, caching, bulk registration,
- * level resolution, or WebSocket handling. Those remain in the core client.
+ * Adapters bridge the smplkit logging runtime to a specific logging
+ * framework (e.g., Winston, Pino).
  */
 export interface LoggingAdapter {
   /** Human-readable adapter name for diagnostics (e.g., 'winston'). */

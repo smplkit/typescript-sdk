@@ -14,8 +14,8 @@ import type { Context } from "./types.js";
 /**
  * A flag resource that doubles as a runtime handle.
  *
- * Management: call `save()` to persist (POST if new, PUT if existing).
- * Runtime: call `get()` for local JSON Logic evaluation.
+ * Management: call `save()` to persist (creates if new, updates if existing).
+ * Runtime: call `get()` to evaluate the flag locally.
  */
 export class Flag {
   /** UUID of the flag, or `null` if unsaved. */
@@ -74,7 +74,7 @@ export class Flag {
   /**
    * Persist this flag to the server.
    *
-   * POST if `id` is null (new flag), PUT if `id` is set (update).
+   * Creates if new, updates if existing.
    * Updates this instance in-place with the server response.
    */
   async save(): Promise<void> {
@@ -148,7 +148,7 @@ export class Flag {
   }
 
   /**
-   * Evaluate the flag locally (sync, no HTTP).
+   * Evaluate the flag locally.
    *
    * Requires `initialize()` to have been called.
    */

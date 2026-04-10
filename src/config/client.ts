@@ -1,8 +1,5 @@
 /**
  * ConfigClient — management plane + runtime for Smpl Config.
- *
- * Uses the generated OpenAPI types (`src/generated/config.d.ts`) via
- * `openapi-fetch` for all HTTP calls.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -402,8 +399,8 @@ export class ConfigClient {
   /**
    * Resolve a config's values for the current environment.
    *
-   * Returns a flat dict of resolved key-value pairs, walking the
-   * parent chain and applying environment overrides.
+   * Returns a flat dict of resolved key-value pairs with inherited
+   * values and environment overrides applied.
    *
    * Optionally pass a model class to map the resolved values.
    */
@@ -484,7 +481,7 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /**
-   * Re-fetch all configs, re-resolve values, and update the cache.
+   * Re-fetch all configs and re-resolve values.
    * Fires change listeners for any values that differ.
    */
   async refresh(): Promise<void> {

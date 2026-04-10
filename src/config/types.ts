@@ -10,7 +10,7 @@ import type { ConfigClient } from "./client.js";
  * A configuration resource managed by the smplkit platform.
  *
  * Management: mutate properties directly and call `save()` to persist.
- * POST if `id` is null (new), PUT if `id` is set (update).
+ * Creates if new, updates if existing.
  */
 export class Config {
   /** UUID of the config, or `null` if unsaved. */
@@ -33,8 +33,7 @@ export class Config {
 
   /**
    * Per-environment overrides.
-   * Stored as `{ env_name: { values: { key: value } } }` — values are
-   * unwrapped from the server's `{ value: raw }` wrapper.
+   * Structured as `{ env_name: { values: { key: value } } }`.
    */
   environments: Record<string, unknown>;
 
@@ -77,7 +76,7 @@ export class Config {
   /**
    * Persist this config to the server.
    *
-   * POST if `id` is null (new config), PUT if `id` is set (update).
+   * Creates if new, updates if existing.
    * Updates this instance in-place with the server response.
    */
   async save(): Promise<void> {

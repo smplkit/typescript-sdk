@@ -1,9 +1,5 @@
 /**
  * FlagsClient — management + prescriptive runtime for Smpl Flags.
- *
- * Uses the generated OpenAPI types (`src/generated/flags.d.ts`) via
- * `openapi-fetch` for all flag HTTP calls. Context registration uses
- * the generated app service types (`src/generated/app.d.ts`).
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -743,10 +739,10 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   /**
-   * Explicitly register context(s) for background batch registration.
+   * Register context(s) with the server.
    *
-   * Accepts a single Context or an array. Fire-and-forget — never
-   * blocks. Works before `initialize()` is called.
+   * Accepts a single Context or an array. Registration is asynchronous
+   * and never blocks. Works before `initialize()` is called.
    */
   register(context: Context | Context[]): void {
     if (Array.isArray(context)) {
@@ -766,7 +762,9 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   /**
-   * Tier 1 explicit evaluation — stateless, no provider or cache.
+   * Evaluate a flag with an explicit environment and context.
+   *
+   * Stateless — does not use the context provider or cached results.
    */
   async evaluate(key: string, options: { environment: string; context: Context[] }): Promise<any> {
     const evalDict = contextsToEvalDict(options.context);

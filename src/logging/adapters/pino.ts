@@ -1,10 +1,8 @@
 /**
  * Pino logging framework adapter.
  *
- * Pino has no global logger registry. This adapter builds its own internal
- * registry by monkey-patching the pino module's default export and the
- * `child()` method on created loggers. Logger instances are tracked via
- * WeakRef to avoid memory leaks.
+ * Integrates the smplkit logging runtime with Pino. Tracks logger
+ * instances (including child loggers) for discovery and level control.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

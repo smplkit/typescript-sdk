@@ -1,9 +1,9 @@
 /**
- * LiveConfigProxy — ES6 Proxy-based live configuration access.
+ * LiveConfigProxy — live configuration access.
  *
- * Property reads are delegated to the latest resolved values in the
- * ConfigClient cache. When the cache updates via WebSocket, subsequent
- * reads automatically reflect the new values.
+ * Property reads always return the latest resolved values. When the
+ * underlying config changes, subsequent reads automatically reflect
+ * the new values.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -13,7 +13,7 @@ import type { ConfigClient } from "./client.js";
 /**
  * A live proxy that auto-updates when the underlying config changes.
  *
- * Access properties directly — each read re-resolves from the cache.
+ * Access properties directly — each read returns the latest resolved value.
  *
  * @example
  * ```typescript

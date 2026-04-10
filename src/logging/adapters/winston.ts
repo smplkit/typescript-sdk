@@ -1,10 +1,9 @@
 /**
  * Winston logging framework adapter.
  *
- * Bridges the smplkit logging runtime to winston's logger container.
- * Discovers loggers via `winston.loggers` (the Container), hooks into
- * new logger creation by monkey-patching `Container.add()`, and applies
- * levels by setting `logger.level` on the winston logger instance.
+ * Integrates the smplkit logging runtime with Winston. Discovers
+ * existing loggers, tracks new logger creation, and applies
+ * server-managed log levels.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
