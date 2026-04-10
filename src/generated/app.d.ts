@@ -447,6 +447,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/metrics/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Ingest Metrics */
+        post: operations["bulk_ingest_metrics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Metrics */
+        get: operations["list_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metric_rollups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Metric Rollups */
+        get: operations["list_metric_rollups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1059,6 +1110,82 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MetricAttributes */
+        MetricAttributes: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: number | string;
+            /** Unit */
+            unit?: string | null;
+            /** Period Seconds */
+            period_seconds: number;
+            /** Dimensions */
+            dimensions?: {
+                [key: string]: string;
+            };
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at?: string | null;
+        };
+        /** MetricBulkRequest */
+        MetricBulkRequest: {
+            /** Data */
+            data: components["schemas"]["MetricResource"][];
+        };
+        /** MetricListResponse */
+        MetricListResponse: {
+            /** Data */
+            data: components["schemas"]["MetricResource"][];
+        };
+        /** MetricResource */
+        MetricResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "metric";
+            attributes: components["schemas"]["MetricAttributes"];
+        };
+        /** MetricRollupAttributes */
+        MetricRollupAttributes: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Bucket
+             * Format: date-time
+             */
+            bucket: string;
+            /** Rollup */
+            rollup: string;
+        };
+        /** MetricRollupListResponse */
+        MetricRollupListResponse: {
+            /** Data */
+            data: components["schemas"]["MetricRollupResource"][];
+        };
+        /** MetricRollupResource */
+        MetricRollupResource: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "metric_rollup";
+            attributes: components["schemas"]["MetricRollupAttributes"];
         };
         /**
          * OidcProvider
@@ -3657,6 +3784,185 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["InvitationResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bulk_ingest_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["MetricBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": unknown;
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_metrics: {
+        parameters: {
+            query: {
+                "filter[name]": string;
+                "filter[recorded_at]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["MetricListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_metric_rollups: {
+        parameters: {
+            query: {
+                "filter[name]": string;
+                "filter[rollup]": string;
+                "filter[recorded_at]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["MetricRollupListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
