@@ -295,7 +295,7 @@ describe("Flag.save()", () => {
     // Verify body structure
     const body = JSON.parse(await mockFetch.mock.calls[0][0].clone().text());
     expect(body.data.type).toBe("flag");
-    expect(body.data.id).toBe("checkout-v2");
+    expect(body.data.attributes.id).toBe("checkout-v2");
     expect(body.data.attributes.name).toBe("Checkout V2");
     expect(body.data.attributes.type).toBe("BOOLEAN");
     expect(body.data.attributes.values).toEqual([

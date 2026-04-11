@@ -491,9 +491,9 @@ export class FlagsClient {
   async _createFlag(flag: Flag): Promise<Flag> {
     const body = {
       data: {
-        id: flag.id,
         type: "flag" as const,
         attributes: {
+          id: flag.id,
           name: flag.name,
           description: flag.description ?? "",
           type: flag.type,
