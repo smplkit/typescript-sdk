@@ -447,6 +447,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/metric_names": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Metric Names
+         * @description Return distinct metric names (with a representative unit) for this account.
+         *
+         *     Used by the dashboard to discover which product sections to render.
+         *     Plain JSON response (not JSON:API) — this is metadata, not a metric resource.
+         */
+        get: operations["list_metric_names"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/metrics/bulk": {
         parameters: {
             query?: never;
@@ -1145,6 +1168,18 @@ export interface components {
         MetricListResponse: {
             /** Data */
             data: components["schemas"]["MetricResource"][];
+        };
+        /** MetricNameItem */
+        MetricNameItem: {
+            /** Name */
+            name: string;
+            /** Unit */
+            unit?: string | null;
+        };
+        /** MetricNamesResponse */
+        MetricNamesResponse: {
+            /** Data */
+            data: components["schemas"]["MetricNameItem"][];
         };
         /** MetricResource */
         MetricResource: {
@@ -3784,6 +3819,62 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["InvitationResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_metric_names: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["MetricNamesResponse"];
                 };
             };
             /** @description Validation error or malformed request */
