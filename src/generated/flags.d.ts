@@ -89,8 +89,6 @@ export interface components {
          *     }
          */
         Flag: {
-            /** Id */
-            id?: string | null;
             /**
              * Name
              * @description Human-readable display name
