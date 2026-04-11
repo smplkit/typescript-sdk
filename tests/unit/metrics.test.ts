@@ -63,8 +63,8 @@ describe("MetricsReporter — counter accumulation", () => {
   });
 
   it("should keep separate counters for different dimensions", () => {
-    reporter.record("flags.evaluations", 1, "evaluations", { flag_id: "a" });
-    reporter.record("flags.evaluations", 1, "evaluations", { flag_id: "b" });
+    reporter.record("flags.evaluations", 1, "evaluations", { flag: "a" });
+    reporter.record("flags.evaluations", 1, "evaluations", { flag: "b" });
 
     reporter.flush();
 
@@ -83,14 +83,14 @@ describe("MetricsReporter — counter accumulation", () => {
   });
 
   it("should merge custom dimensions with base dimensions", () => {
-    reporter.record("flags.evaluations", 1, "evaluations", { flag_id: "my-flag" });
+    reporter.record("flags.evaluations", 1, "evaluations", { flag: "my-flag" });
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
     const dims = body.data[0].attributes.dimensions;
     expect(dims.environment).toBe("test");
     expect(dims.service).toBe("test-service");
-    expect(dims.flag_id).toBe("my-flag");
+    expect(dims.flag).toBe("my-flag");
   });
 
   it("should use first-write-wins for unit", () => {
@@ -251,7 +251,7 @@ describe("MetricsReporter — flush", () => {
   });
 
   it("should produce correct JSON:API payload shape", () => {
-    reporter.record("flags.evaluations", 3, "evaluations", { flag_id: "checkout-v2" });
+    reporter.record("flags.evaluations", 3, "evaluations", { flag: "checkout-v2" });
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -269,7 +269,7 @@ describe("MetricsReporter — flush", () => {
         dimensions: expect.objectContaining({
           environment: "test",
           service: "test-service",
-          flag_id: "checkout-v2",
+          flag: "checkout-v2",
         }),
       }),
     );
@@ -536,7 +536,7 @@ describe("FlagsClient — metrics instrumentation", () => {
     flag.get();
     expect(recordSpy).toHaveBeenCalledWith("flags.cache_misses", 1, "misses");
     expect(recordSpy).toHaveBeenCalledWith("flags.evaluations", 1, "evaluations", {
-      flag_id: "my-flag",
+      flag: "my-flag",
     });
 
     // Second call = cache hit
@@ -544,7 +544,7 @@ describe("FlagsClient — metrics instrumentation", () => {
     flag.get();
     expect(recordSpy).toHaveBeenCalledWith("flags.cache_hits", 1, "hits");
     expect(recordSpy).toHaveBeenCalledWith("flags.evaluations", 1, "evaluations", {
-      flag_id: "my-flag",
+      flag: "my-flag",
     });
 
     metrics.close();
@@ -638,7 +638,7 @@ describe("ConfigClient — metrics instrumentation", () => {
     const result = await client.resolve("my-config");
     expect(result).toEqual({ host: "localhost" });
     expect(recordSpy).toHaveBeenCalledWith("config.resolutions", 1, "resolutions", {
-      config_id: "my-config",
+      config: "my-config",
     });
 
     metrics.close();
@@ -793,7 +793,7 @@ describe("LoggingClient — metrics instrumentation", () => {
     await client.start();
 
     expect(recordSpy).toHaveBeenCalledWith("logging.level_changes", 1, "changes", {
-      logger_id: "app",
+      logger: "app",
     });
 
     client._close();
@@ -876,7 +876,7 @@ describe("ConfigClient — config.changes instrumentation", () => {
     await client.refresh();
 
     expect(recordSpy).toHaveBeenCalledWith("config.changes", 1, "changes", {
-      config_id: "my-config",
+      config: "my-config",
     });
 
     metrics.close();
@@ -901,7 +901,7 @@ describe("MetricsReporter — payload format (JSON:API)", () => {
   it("should produce payload identical in structure to Python SDK", () => {
     const reporter = makeReporter();
 
-    reporter.record("flags.evaluations", 3, "evaluations", { flag_id: "checkout-v2" });
+    reporter.record("flags.evaluations", 3, "evaluations", { flag: "checkout-v2" });
     reporter.recordGauge("platform.websocket_connections", 1, "connections");
     reporter.flush();
 

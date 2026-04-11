@@ -534,7 +534,7 @@ export class LoggingClient {
 
       const metrics = this._parent?._metrics;
       if (metrics) {
-        metrics.record("logging.level_changes", 1, "changes", { logger_id: logger.id! });
+        metrics.record("logging.level_changes", 1, "changes", { logger: logger.id! });
       }
 
       for (const adapter of this._adapters) {

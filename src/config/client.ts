@@ -409,7 +409,7 @@ export class ConfigClient {
     }
     const metrics = this._parent?._metrics;
     if (metrics) {
-      metrics.record("config.resolutions", 1, "resolutions", { config_id: id });
+      metrics.record("config.resolutions", 1, "resolutions", { config: id });
     }
     if (model) {
       return new model(values);
@@ -577,7 +577,7 @@ export class ConfigClient {
         if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
           const metrics = this._parent?._metrics;
           if (metrics) {
-            metrics.record("config.changes", 1, "changes", { config_id: cfgKey });
+            metrics.record("config.changes", 1, "changes", { config: cfgKey });
           }
           const event: ConfigChangeEvent = {
             configId: cfgKey,

@@ -825,7 +825,7 @@ export class FlagsClient {
       const metrics = this._parent?._metrics;
       if (metrics) {
         metrics.record("flags.cache_hits", 1, "hits");
-        metrics.record("flags.evaluations", 1, "evaluations", { flag_id: key });
+        metrics.record("flags.evaluations", 1, "evaluations", { flag: key });
       }
       return cachedValue;
     }
@@ -834,7 +834,7 @@ export class FlagsClient {
     const metrics = this._parent?._metrics;
     if (metrics) {
       metrics.record("flags.cache_misses", 1, "misses");
-      metrics.record("flags.evaluations", 1, "evaluations", { flag_id: key });
+      metrics.record("flags.evaluations", 1, "evaluations", { flag: key });
     }
 
     const flagDef = this._flagStore[key];
