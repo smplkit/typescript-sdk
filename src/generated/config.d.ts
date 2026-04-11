@@ -79,8 +79,6 @@ export interface components {
          *     }
          */
         Config: {
-            /** Id */
-            id?: string | null;
             /** Name */
             name: string;
             /** Description */
