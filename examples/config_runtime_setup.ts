@@ -17,6 +17,12 @@ import type { Config } from "@smplkit/sdk";
 export async function setupDemoConfigs(
   client: SmplClient,
 ): Promise<{ configs: Config[]; common: Config }> {
+  // Pre-cleanup: delete any configs left over from a previous run.
+  // Children must be deleted before parents.
+  for (const id of ["auth_module", "user_service"]) {
+    try { await client.config.delete(id); } catch { /* not present — ignore */ }
+  }
+
   // 1. Update the common config with base values + environment overrides
   const common = await client.config.get("common");
   common.description = "Organization-wide shared configuration";
@@ -34,7 +40,7 @@ export async function setupDemoConfigs(
   await common.save();
 
   // 2. Create user-service config
-  const userService = client.config.new("user-service", {
+  const userService = client.config.new("user_service", {
     name: "User Service",
     description: "Configuration for the user microservice.",
   });
@@ -59,7 +65,7 @@ export async function setupDemoConfigs(
   await userService.save();
 
   // 3. Create auth-module config as child of user-service
-  const authModule = client.config.new("auth-module", {
+  const authModule = client.config.new("auth_module", {
     name: "Auth Module",
     description: "Authentication module within the user service.",
   });

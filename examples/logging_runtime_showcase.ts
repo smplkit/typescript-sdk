@@ -99,9 +99,9 @@ async function main(): Promise<void> {
     step(`  ${g.id} — level=${g.level}`);
   }
 
-  // Fetch a specific logger
-  const sqlLogger = await client.logging.get("sqlalchemy.engine");
-  step(`Fetched sqlalchemy.engine: level=${sqlLogger.level}, group=${sqlLogger.group}`);
+  // Fetch a specific logger (use server-assigned id from demo setup)
+  const sqlLogger = await client.logging.get(demo.loggers[0].id);
+  step(`Fetched ${sqlLogger.id}: level=${sqlLogger.level}, group=${sqlLogger.group}`);
 
   // ======================================================================
   // 3. REGISTER CHANGE LISTENERS BEFORE start()
@@ -127,21 +127,21 @@ async function main(): Promise<void> {
   });
   step("Global change listener registered");
 
-  // Scoped listener — fires only for sqlalchemy.engine
+  // Scoped listener — fires only for sqlalchemy.engine (use server-assigned id)
   const sqlChanges: Array<{ id: string; level: unknown }> = [];
-  client.logging.onChange("sqlalchemy.engine", (event) => {
+  client.logging.onChange(demo.loggers[0].id, (event) => {
     sqlChanges.push({ id: event.id, level: event.level });
-    console.log(`    [SQL] sqlalchemy.engine changed: level=${event.level}`);
+    console.log(`    [SQL] ${demo.loggers[0].id} changed: level=${event.level}`);
   });
-  step("Scoped change listener registered for 'sqlalchemy.engine'");
+  step(`Scoped change listener registered for '${demo.loggers[0].id}'`);
 
   // Scoped listener for httpx — should NOT fire for sqlalchemy changes
   const httpxChanges: Array<{ id: string; level: unknown }> = [];
-  client.logging.onChange("httpx", (event) => {
+  client.logging.onChange(demo.loggers[1].id, (event) => {
     httpxChanges.push({ id: event.id, level: event.level });
-    console.log(`    [HTTPX] httpx changed: level=${event.level}`);
+    console.log(`    [HTTPX] ${demo.loggers[1].id} changed: level=${event.level}`);
   });
-  step("Scoped change listener registered for 'httpx'");
+  step(`Scoped change listener registered for '${demo.loggers[1].id}'`);
 
   // ======================================================================
   // 4. START THE LOGGING RUNTIME
@@ -178,11 +178,11 @@ async function main(): Promise<void> {
 
   section("5. Simulate Live Updates");
 
-  // Modify sqlalchemy.engine via management API
-  const sqlRefresh = await client.logging.get("sqlalchemy.engine");
+  // Modify sqlalchemy.engine via management API (use server-assigned id)
+  const sqlRefresh = await client.logging.get(demo.loggers[0].id);
   sqlRefresh.setLevel(LogLevel.DEBUG);
   await sqlRefresh.save();
-  step("Updated sqlalchemy.engine level to DEBUG via management API");
+  step(`Updated ${demo.loggers[0].id} level to DEBUG via management API`);
 
   // Give the WebSocket a moment to deliver the event
   await sleep(2000);
@@ -191,11 +191,11 @@ async function main(): Promise<void> {
   step(`SQL-scoped changes received: ${sqlChanges.length}`);
   step(`HTTPX-scoped changes received: ${httpxChanges.length}`);
 
-  // Modify httpx via management API
-  const httpxRefresh = await client.logging.get("httpx");
+  // Modify httpx via management API (use server-assigned id)
+  const httpxRefresh = await client.logging.get(demo.loggers[1].id);
   httpxRefresh.setLevel(LogLevel.ERROR);
   await httpxRefresh.save();
-  step("Updated httpx level to ERROR via management API");
+  step(`Updated ${demo.loggers[1].id} level to ERROR via management API`);
 
   await sleep(2000);
 

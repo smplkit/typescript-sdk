@@ -22,6 +22,20 @@ import type { Logger, LogGroup } from "@smplkit/sdk";
 export async function setupDemoLoggers(
   client: SmplClient,
 ): Promise<{ loggers: Logger[]; groups: LogGroup[] }> {
+  // Pre-cleanup: delete any loggers and groups from previous runs.
+  // Server assigns IDs from the logger name, not the client-provided key.
+  for (const id of ["Sqlalchemy.Engine", "HTTPX Client", "Celery Worker"]) {
+    try { await client.logging.delete(id); } catch { /* not present — ignore */ }
+  }
+  try {
+    const existingGroups = await client.logging.listGroups();
+    for (const g of existingGroups) {
+      if (g.name === "SQL Loggers") {
+        try { await client.logging.deleteGroup(g.id); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore */ }
+
   // 1. Create log group: sql
   const sqlGroup = client.logging.newGroup("sql", { name: "SQL Loggers" });
   sqlGroup.setLevel(LogLevel.WARN);

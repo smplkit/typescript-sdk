@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
   section("2. Resolve — Flat Dict");
 
-  const values = await client.config.resolve("user-service");
+  const values = await client.config.resolve("user_service");
   step(`Resolved user-service: ${JSON.stringify(values)}`);
   step(`  database_host = ${values.database_host}`);
   step(`  pool_size = ${values.pool_size}`);
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
 
   section("3. Resolve — Typed Model");
 
-  const typed = await client.config.resolve("user-service", UserServiceConfig);
+  const typed = await client.config.resolve("user_service", UserServiceConfig);
   step(`Typed resolve: database_host=${typed.database_host}`);
   step(`  pool_size=${typed.pool_size} (type: ${typeof typed.pool_size})`);
   step(`  cache_ttl_seconds=${typed.cache_ttl_seconds} (type: ${typeof typed.cache_ttl_seconds})`);
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
 
   section("4. Subscribe — Live Proxy");
 
-  const proxy = await client.config.subscribe("user-service");
+  const proxy = await client.config.subscribe("user_service");
 
   // Property reads go through the proxy to the live cache
   step(`proxy.database_host = ${(proxy as Record<string, unknown>).database_host}`);
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
   step(`proxy.cache_ttl_seconds = ${(proxy as Record<string, unknown>).cache_ttl_seconds}`);
 
   // You can also subscribe with a model class for typed access
-  const typedProxy = await client.config.subscribe("user-service", UserServiceConfig);
+  const typedProxy = await client.config.subscribe("user_service", UserServiceConfig);
   step(`typedProxy.pool_size = ${typedProxy.pool_size} (type: ${typeof typedProxy.pool_size})`);
 
   // ======================================================================

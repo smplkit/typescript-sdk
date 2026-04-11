@@ -62,6 +62,20 @@ async function main(): Promise<void> {
   });
   step("SmplClient initialized (environment=production)");
 
+  // Pre-cleanup: delete any loggers and groups from previous runs.
+  // Server assigns IDs from the logger name, not the client-provided key.
+  for (const id of ["Sqlalchemy.Engine", "HTTPX Client", "Celery Worker"]) {
+    try { await client.logging.delete(id); } catch { /* not present — ignore */ }
+  }
+  try {
+    const existingGroups = await client.logging.listGroups();
+    for (const g of existingGroups) {
+      if (["SQL Loggers", "SQL Loggers (Updated)", "Infrastructure Loggers"].includes(g.name)) {
+        try { await client.logging.deleteGroup(g.id); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore */ }
+
   // ======================================================================
   // 2. CREATE LOGGERS
   // ======================================================================
@@ -129,8 +143,8 @@ async function main(): Promise<void> {
   // ======================================================================
   section("3. Fetch and Update a Logger");
 
-  // Fetch by id
-  const fetched = await client.logging.get("sqlalchemy.engine");
+  // Fetch by id (use server-assigned id from save())
+  const fetched = await client.logging.get(sqlLogger.id);
   step(`Fetched: id=${fetched.id}, level=${fetched.level}`);
   step(`  environments: ${JSON.stringify(fetched.environments)}`);
 
@@ -182,7 +196,7 @@ async function main(): Promise<void> {
   // ------------------------------------------------------------------
   section("5b. Delete a Logger");
 
-  await client.logging.delete("celery.worker");
+  await client.logging.delete(celeryLogger.id);
   step("Deleted celery.worker");
 
   const afterDelete = await client.logging.list();
@@ -230,7 +244,7 @@ async function main(): Promise<void> {
   // ======================================================================
   section("7. Fetch and Update a Log Group");
 
-  const fetchedGroup = await client.logging.getGroup("sql");
+  const fetchedGroup = await client.logging.getGroup(sqlGroup.id);
   step(`Fetched: id=${fetchedGroup.id}, level=${fetchedGroup.level}`);
 
   fetchedGroup.name = "SQL Loggers (Updated)";
@@ -248,7 +262,7 @@ async function main(): Promise<void> {
 
   section("8. Assign Logger to Group");
 
-  const sqlLoggerRefresh = await client.logging.get("sqlalchemy.engine");
+  const sqlLoggerRefresh = await client.logging.get(sqlLogger.id);
   step(`Before: sqlalchemy.engine group = ${sqlLoggerRefresh.group}`);
 
   sqlLoggerRefresh.group = sqlGroup.id;
@@ -256,7 +270,7 @@ async function main(): Promise<void> {
   step(`After: sqlalchemy.engine group = ${sqlLoggerRefresh.group}`);
 
   // Assign httpx to infrastructure group
-  const httpxRefresh = await client.logging.get("httpx");
+  const httpxRefresh = await client.logging.get(httpxLogger.id);
   httpxRefresh.group = infraGroup.id;
   await httpxRefresh.save();
   step(`Assigned httpx to infrastructure group: ${httpxRefresh.group}`);
@@ -280,7 +294,7 @@ async function main(): Promise<void> {
   await httpxRefresh.save();
   step("Unassigned httpx from infrastructure group");
 
-  await client.logging.deleteGroup("infrastructure");
+  await client.logging.deleteGroup(infraGroup.id);
   step("Deleted infrastructure group");
 
   const afterGroupDelete = await client.logging.listGroups();
@@ -296,15 +310,19 @@ async function main(): Promise<void> {
   await sqlLoggerRefresh.save();
   step("Unassigned sqlalchemy.engine from sql group");
 
-  // Delete loggers
-  await client.logging.delete("sqlalchemy.engine");
+  // Delete loggers (use server-assigned ids)
+  await client.logging.delete(sqlLogger.id);
   step("Deleted sqlalchemy.engine");
 
-  await client.logging.delete("httpx");
+  await client.logging.delete(httpxLogger.id);
   step("Deleted httpx");
 
+  // celery.worker was already deleted in section 5b — ignore if gone
+  try { await client.logging.delete(celeryLogger.id); } catch { /* already deleted */ }
+  step("Deleted celery.worker");
+
   // Delete remaining groups
-  await client.logging.deleteGroup("sql");
+  await client.logging.deleteGroup(sqlGroup.id);
   step("Deleted sql group");
 
   client.close();

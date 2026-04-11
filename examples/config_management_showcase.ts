@@ -83,6 +83,14 @@ async function main(): Promise<void> {
   step("SmplClient initialized (environment=production)");
 
   // ======================================================================
+  // Pre-cleanup: delete any configs left over from a previous run.
+  // Children must be deleted before parents.
+  // ======================================================================
+  for (const id of ["auth_module", "user_service", "payment_service"]) {
+    try { await client.config.delete(id); } catch { /* not present — ignore */ }
+  }
+
+  // ======================================================================
   // 2. CREATE A CONFIG WITH new() + MUTATE + save()
   // ======================================================================
   //
@@ -95,7 +103,7 @@ async function main(): Promise<void> {
 
   section("2. Create a Config (new → mutate → save)");
 
-  const paymentService = client.config.new("payment-service", {
+  const paymentService = client.config.new("payment_service", {
     name: "Payment Service",
   });
   step(`Created unsaved config: id=${paymentService.id}`);
@@ -139,7 +147,7 @@ async function main(): Promise<void> {
   // ------------------------------------------------------------------
   section("3a. Get Config by Id");
 
-  const fetched = await client.config.get("payment-service");
+  const fetched = await client.config.get("payment_service");
   step(`Fetched: id=${fetched.id}, name=${fetched.name}`);
   step(`  id: ${fetched.id}`);
   step(`  items: ${JSON.stringify(fetched.items)}`);
@@ -203,7 +211,7 @@ async function main(): Promise<void> {
 
   section("5a. Create Parent: User Service Config");
 
-  const userService = client.config.new("user-service", {
+  const userService = client.config.new("user_service", {
     name: "User Service",
     description: "Configuration for the user microservice.",
   });
@@ -228,7 +236,7 @@ async function main(): Promise<void> {
   // ------------------------------------------------------------------
   section("5b. Create Child: Auth Module (child of User Service)");
 
-  const authModule = client.config.new("auth-module", {
+  const authModule = client.config.new("auth_module", {
     name: "Auth Module",
     description: "Authentication module within the user service.",
   });
@@ -252,7 +260,7 @@ async function main(): Promise<void> {
   // Verify hierarchy
   const allConfigs = await client.config.list();
   for (const cfg of allConfigs) {
-    if (cfg.id === "auth-module") {
+    if (cfg.id === "auth_module") {
       step(`  auth-module parent: ${cfg.parent}`);
     }
   }
@@ -263,13 +271,13 @@ async function main(): Promise<void> {
   section("6. Cleanup — Delete Configs");
 
   // Delete child first (children must be deleted before parents)
-  await client.config.delete("auth-module");
+  await client.config.delete("auth_module");
   step("Deleted auth-module");
 
-  await client.config.delete("user-service");
+  await client.config.delete("user_service");
   step("Deleted user-service");
 
-  await client.config.delete("payment-service");
+  await client.config.delete("payment_service");
   step("Deleted payment-service");
 
   // Verify deletion
