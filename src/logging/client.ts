@@ -18,6 +18,7 @@ import {
 import { Logger, LogGroup } from "./models.js";
 import type { LoggerChangeEvent } from "./types.js";
 import type { LoggingAdapter } from "./adapters/base.js";
+import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
 import type { SharedWebSocket } from "../ws.js";
 
@@ -67,7 +68,11 @@ export class LoggingClient {
   >;
 
   /** @internal — set by SmplClient after construction. */
-  _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
+  _parent: {
+    readonly _environment: string;
+    readonly _service: string | null;
+    readonly _metrics: MetricsReporter | null;
+  } | null = null;
 
   private readonly _ensureWs: () => SharedWebSocket;
   private _wsManager: SharedWebSocket | null = null;
@@ -401,7 +406,15 @@ export class LoggingClient {
       }
     }
 
-    // 4. Bulk-register discovered loggers with the server
+    // 4. Record discovery metric
+    if (discovered.length > 0) {
+      const metrics = this._parent?._metrics;
+      if (metrics) {
+        metrics.record("logging.loggers_discovered", discovered.length, "loggers");
+      }
+    }
+
+    // 5. Bulk-register discovered loggers with the server
     for (const { name, level } of discovered) {
       try {
         const logger = this.new(name, { managed: true });
@@ -521,6 +534,11 @@ export class LoggingClient {
         if (envOverride?.level) {
           effectiveLevel = envOverride.level;
         }
+      }
+
+      const metrics = this._parent?._metrics;
+      if (metrics) {
+        metrics.record("logging.level_changes", 1, "changes", { logger_id: logger.key });
       }
 
       for (const adapter of this._adapters) {

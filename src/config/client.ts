@@ -18,6 +18,7 @@ import {
 import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
+import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
 
 /** Describes a single config value change detected on refresh. */
@@ -231,7 +232,11 @@ export class ConfigClient {
   _getSharedWs?: () => import("../ws.js").SharedWebSocket;
 
   /** @internal — set by SmplClient after construction. */
-  _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
+  _parent: {
+    readonly _environment: string;
+    readonly _service: string | null;
+    readonly _metrics: MetricsReporter | null;
+  } | null = null;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
   private _initialized = false;
@@ -411,6 +416,10 @@ export class ConfigClient {
     if (values === undefined) {
       throw new SmplNotFoundError(`Config with key '${key}' not found in cache`);
     }
+    const metrics = this._parent?._metrics;
+    if (metrics) {
+      metrics.record("config.resolutions", 1, "resolutions", { config_id: key });
+    }
     if (model) {
       return new model(values);
     }
@@ -575,6 +584,10 @@ export class ConfigClient {
         const oldVal = iKey in oldItems ? oldItems[iKey] : null;
         const newVal = iKey in newItems ? newItems[iKey] : null;
         if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+          const metrics = this._parent?._metrics;
+          if (metrics) {
+            metrics.record("config.changes", 1, "changes", { config_id: cfgKey });
+          }
           const event: ConfigChangeEvent = {
             configKey: cfgKey,
             itemKey: iKey,

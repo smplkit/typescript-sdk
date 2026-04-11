@@ -18,6 +18,7 @@ import {
 import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "./models.js";
 import type { Context } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
+import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
 
 // Use require-style import for json-logic-js (no TS types)
@@ -292,7 +293,11 @@ export class FlagsClient {
   private readonly _ensureWs: () => SharedWebSocket;
 
   /** @internal — set by SmplClient after construction. */
-  _parent: { readonly _environment: string; readonly _service: string | null } | null = null;
+  _parent: {
+    readonly _environment: string;
+    readonly _service: string | null;
+    readonly _metrics: MetricsReporter | null;
+  } | null = null;
 
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
@@ -827,7 +832,19 @@ export class FlagsClient {
 
     const [hit, cachedValue] = this._cache.get(cacheKey);
     if (hit) {
+      const metrics = this._parent?._metrics;
+      if (metrics) {
+        metrics.record("flags.cache_hits", 1, "hits");
+        metrics.record("flags.evaluations", 1, "evaluations", { flag_id: key });
+      }
       return cachedValue;
+    }
+
+    // Cache miss
+    const metrics = this._parent?._metrics;
+    if (metrics) {
+      metrics.record("flags.cache_misses", 1, "misses");
+      metrics.record("flags.evaluations", 1, "evaluations", { flag_id: key });
     }
 
     const flagDef = this._flagStore[key];

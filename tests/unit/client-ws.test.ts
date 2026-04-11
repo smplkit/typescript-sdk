@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MetricsReporter } from "../../src/_metrics.js";
 
 // Mock the ws module before importing SmplClient
 let wsInstances: Array<{
@@ -20,6 +21,7 @@ vi.mock("ws", () => {
 });
 
 const { SmplClient } = await import("../../src/client.js");
+const { SharedWebSocket } = await import("../../src/ws.js");
 
 // Mock global fetch so connect() can work
 const mockFetch = vi.fn();
@@ -92,5 +94,44 @@ describe("SmplClient WebSocket lifecycle", () => {
     // no WS created yet
     client.close();
     client.close();
+  });
+});
+
+describe("SharedWebSocket — metrics gauge on connect/disconnect", () => {
+  it("should record gauge 1 on connected message and 0 on close", () => {
+    const metrics = new MetricsReporter({
+      apiKey: "sk_test",
+      environment: "test",
+      service: "test-svc",
+    });
+    const gaugeSpy = vi.spyOn(metrics, "recordGauge");
+
+    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test", metrics);
+    ws.start();
+
+    // The mock WS constructor should have been called
+    expect(wsInstances).toHaveLength(1);
+    const mockWsInstance = wsInstances[0];
+
+    // Find the message handler and simulate "connected"
+    const messageCall = mockWsInstance.on.mock.calls.find((c: any[]) => c[0] === "message");
+    expect(messageCall).toBeDefined();
+    const messageHandler = messageCall![1];
+
+    // Simulate connected message
+    messageHandler(JSON.stringify({ type: "connected" }));
+    expect(gaugeSpy).toHaveBeenCalledWith("platform.websocket_connections", 1, "connections");
+
+    // Find the close handler and simulate close
+    gaugeSpy.mockClear();
+    const closeCall = mockWsInstance.on.mock.calls.find((c: any[]) => c[0] === "close");
+    expect(closeCall).toBeDefined();
+    const closeHandler = closeCall![1];
+
+    closeHandler();
+    expect(gaugeSpy).toHaveBeenCalledWith("platform.websocket_connections", 0, "connections");
+
+    ws.stop();
+    metrics.close();
   });
 });

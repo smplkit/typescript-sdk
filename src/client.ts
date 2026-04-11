@@ -12,6 +12,7 @@ import { LoggingClient } from "./logging/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveApiKey } from "./resolve.js";
 import { SmplError } from "./errors.js";
+import { MetricsReporter } from "./_metrics.js";
 
 const APP_BASE_URL = "https://app.smplkit.com";
 
@@ -52,6 +53,13 @@ export interface SmplClientOptions {
    * @default 30000
    */
   timeout?: number;
+
+  /**
+   * Disable SDK telemetry reporting.
+   * When `true`, no usage metrics are collected or sent.
+   * @default false
+   */
+  disableTelemetry?: boolean;
 }
 
 /**
@@ -95,6 +103,9 @@ export class SmplClient {
   /** @internal */
   readonly _service: string;
 
+  /** @internal */
+  readonly _metrics: MetricsReporter | null = null;
+
   private readonly _timeout: number;
   private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
@@ -126,6 +137,15 @@ export class SmplClient {
         Accept: "application/json",
       },
     });
+
+    // 4. Metrics reporter
+    if (!options.disableTelemetry) {
+      this._metrics = new MetricsReporter({
+        apiKey,
+        environment: this._environment,
+        service: this._service,
+      });
+    }
 
     this.config = new ConfigClient(apiKey, this._timeout);
     this.flags = new FlagsClient(apiKey, () => this._ensureWs(), this._timeout);
@@ -165,7 +185,7 @@ export class SmplClient {
   /** Lazily create and start the shared WebSocket. @internal */
   private _ensureWs(): SharedWebSocket {
     if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(APP_BASE_URL, this._apiKey);
+      this._wsManager = new SharedWebSocket(APP_BASE_URL, this._apiKey, this._metrics);
       this._wsManager.start();
     }
     return this._wsManager;
@@ -173,6 +193,9 @@ export class SmplClient {
 
   /** Close the shared WebSocket and release resources. */
   close(): void {
+    if (this._metrics !== null) {
+      this._metrics.close();
+    }
     this.logging._close();
     if (this._wsManager !== null) {
       this._wsManager.stop();

@@ -3,6 +3,7 @@
  */
 
 import WebSocket from "ws";
+import type { MetricsReporter } from "./_metrics.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -16,6 +17,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000];
 export class SharedWebSocket {
   private readonly _appBaseUrl: string;
   private readonly _apiKey: string;
+  private readonly _metrics: MetricsReporter | null;
 
   private _listeners: Map<string, EventCallback[]> = new Map();
   private _connectionStatus: string = "disconnected";
@@ -24,9 +26,10 @@ export class SharedWebSocket {
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _backoffIndex = 0;
 
-  constructor(appBaseUrl: string, apiKey: string) {
+  constructor(appBaseUrl: string, apiKey: string, metrics?: MetricsReporter | null) {
     this._appBaseUrl = appBaseUrl;
     this._apiKey = apiKey;
+    this._metrics = metrics ?? null;
   }
 
   // ------------------------------------------------------------------
@@ -150,6 +153,9 @@ export class SharedWebSocket {
           if (msg.type === "connected") {
             this._backoffIndex = 0;
             this._connectionStatus = "connected";
+            if (this._metrics) {
+              this._metrics.recordGauge("platform.websocket_connections", 1, "connections");
+            }
             return;
           }
 
@@ -169,6 +175,9 @@ export class SharedWebSocket {
       });
 
       ws.on("close", () => {
+        if (this._metrics) {
+          this._metrics.recordGauge("platform.websocket_connections", 0, "connections");
+        }
         if (!this._closed) {
           this._connectionStatus = "disconnected";
           this._scheduleReconnect();
