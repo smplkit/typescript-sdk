@@ -161,8 +161,8 @@ async function main(): Promise<void> {
   // onChange supports three scoping levels:
   //
   //   1. Global:       onChange(callback)
-  //   2. Config-scoped: onChange(configKey, callback)
-  //   3. Item-scoped:   onChange(configKey, itemKey, callback)
+  //   2. Config-scoped: onChange(configId, callback)
+  //   3. Item-scoped:   onChange(configId, itemKey, callback)
   //
   // Listeners fire when the config cache is updated (via refresh() or
   // WebSocket push).
@@ -177,7 +177,7 @@ async function main(): Promise<void> {
   client.config.onChange((event) => {
     globalChanges.push(event);
     console.log(
-      `    [GLOBAL] ${event.configKey}.${event.itemKey}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
+      `    [GLOBAL] ${event.configId}.${event.itemKey}: ${JSON.stringify(event.oldValue)} → ${JSON.stringify(event.newValue)}`,
     );
   });
   step("Global change listener registered");

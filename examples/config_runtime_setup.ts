@@ -83,7 +83,7 @@ export async function teardownDemoConfigs(
   // Delete child configs (order matters — children before parents)
   for (const cfg of demo.configs.reverse()) {
     try {
-      await client.config.delete(cfg.key);
+      await client.config.delete(cfg.id);
     } catch {
       // ignore
     }

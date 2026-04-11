@@ -53,10 +53,12 @@ describe("Transport", () => {
     it("should append query parameters", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      await transport.get("https://config.smplkit.com/api/v1/configs", { "filter[key]": "common" });
+      await transport.get("https://config.smplkit.com/api/v1/configs", {
+        "filter[name]": "common",
+      });
 
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("filter%5Bkey%5D=common");
+      expect(url).toContain("filter%5Bname%5D=common");
     });
 
     it("should parse JSON response", async () => {

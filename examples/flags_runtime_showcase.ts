@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 
   // Create demo flags (normally done via Console UI).
   console.log("  Setting up demo flags...");
-  const demoFlagKeys = await setupDemoFlags(client);
+  const demoFlagIds = await setupDemoFlags(client);
   console.log("  Demo flags ready.\n");
 
   try {
@@ -306,16 +306,16 @@ async function main(): Promise<void> {
 
     section("6. Scoped Change Listener");
 
-    const bannerChanges: Array<{ key: string; source: string }> = [];
+    const bannerChanges: Array<{ id: string; source: string }> = [];
     client.flags.onChange("banner-color", (event) => {
-      bannerChanges.push({ key: event.key, source: event.source });
+      bannerChanges.push({ id: event.id, source: event.source });
       console.log(`    [BANNER] banner-color changed via ${event.source}`);
     });
     step("Scoped listener registered for banner-color");
 
-    const checkoutChanges: Array<{ key: string; source: string }> = [];
+    const checkoutChanges: Array<{ id: string; source: string }> = [];
     client.flags.onChange("checkout-v2", (event) => {
-      checkoutChanges.push({ key: event.key, source: event.source });
+      checkoutChanges.push({ id: event.id, source: event.source });
       console.log(`    [CHECKOUT] checkout-v2 changed via ${event.source}`);
     });
     step("Scoped listener registered for checkout-v2");
@@ -330,10 +330,10 @@ async function main(): Promise<void> {
 
     section("7. Global Change Listener");
 
-    const allChanges: Array<{ key: string; source: string }> = [];
+    const allChanges: Array<{ id: string; source: string }> = [];
     client.flags.onChange((event) => {
-      allChanges.push({ key: event.key, source: event.source });
-      console.log(`    [GLOBAL] Flag '${event.key}' changed via ${event.source}`);
+      allChanges.push({ id: event.id, source: event.source });
+      console.log(`    [GLOBAL] Flag '${event.id}' changed via ${event.source}`);
     });
     step("Global change listener registered (fires for any flag)");
 
@@ -427,7 +427,7 @@ async function main(): Promise<void> {
     await client.flags.disconnect();
     step("Disconnected from flags runtime");
 
-    await teardownDemoFlags(client, demoFlagKeys);
+    await teardownDemoFlags(client, demoFlagIds);
     step("Demo flags deleted");
 
     client.close();
@@ -447,7 +447,7 @@ async function main(): Promise<void> {
     } catch {
       // ignore
     }
-    await teardownDemoFlags(client, demoFlagKeys);
+    await teardownDemoFlags(client, demoFlagIds);
     client.close();
     throw error;
   }

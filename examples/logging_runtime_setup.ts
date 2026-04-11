@@ -75,7 +75,7 @@ export async function teardownDemoLoggers(
         logger.group = null;
         await logger.save();
       }
-      await client.logging.delete(logger.key);
+      await client.logging.delete(logger.id);
     } catch {
       // ignore
     }
@@ -84,7 +84,7 @@ export async function teardownDemoLoggers(
   // Delete groups
   for (const group of demo.groups) {
     try {
-      await client.logging.deleteGroup(group.key);
+      await client.logging.deleteGroup(group.id);
     } catch {
       // ignore
     }

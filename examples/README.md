@@ -24,7 +24,7 @@ Demonstrates the management plane for Smpl Config:
 - Factory method: `client.config.new()` for unsaved configs
 - Direct mutation of items, environments, and metadata
 - Persist via `save()` (POST if new, PUT if existing)
-- Fetch, list, and delete configs by key
+- Fetch, list, and delete configs by id
 - Parent-child config hierarchy
 
 ```bash
@@ -93,7 +93,7 @@ npx tsx examples/flags_runtime_showcase.ts
 Demonstrates the management plane for Smpl Logging:
 
 - Logger CRUD: `new()` → `setLevel()` → `setEnvironmentLevel()` → `save()`
-- Fetch, mutate, list, and delete loggers by key
+- Fetch, mutate, list, and delete loggers by id
 - Level clearing: `clearLevel()`, `clearEnvironmentLevel()`, `clearAllEnvironmentLevels()`
 - Log Group CRUD: `newGroup()` → `setLevel()` → `save()`
 - Fetch, mutate, list, and delete log groups
@@ -113,7 +113,7 @@ Demonstrates the runtime experience for Smpl Logging:
 - Starting the logging runtime: `client.logging.start()`
 - Management methods work without `start()`
 - Global onChange listener: fires for any logger change
-- Scoped onChange listener: fires only for a specific logger key
+- Scoped onChange listener: fires only for a specific logger id
 - Live WebSocket-driven updates
 
 ```bash

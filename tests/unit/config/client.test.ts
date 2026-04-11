@@ -58,10 +58,9 @@ function calledAuthHeader(callIndex = 0): string {
 }
 
 const SAMPLE_RESOURCE = {
-  id: "550e8400-e29b-41d4-a716-446655440000",
+  id: "user-service",
   type: "config",
   attributes: {
-    key: "user-service",
     name: "User Service",
     description: "User service configuration",
     parent: null,
@@ -87,12 +86,11 @@ const SAMPLE_RESOURCE = {
 
 describe("ConfigClient", () => {
   describe("new", () => {
-    it("should return a Config with id: null", () => {
+    it("should return a Config with the given id", () => {
       const client = makeClient();
       const config = client.new("user-service");
 
-      expect(config.id).toBeNull();
-      expect(config.key).toBe("user-service");
+      expect(config.id).toBe("user-service");
     });
 
     it("should auto-generate name from key", () => {
@@ -165,8 +163,8 @@ describe("ConfigClient", () => {
   // Config.save() — POST (id is null)
   // ---------------------------------------------------------------------------
 
-  describe("Config.save (POST — id is null)", () => {
-    it("should POST when id is null", async () => {
+  describe("Config.save (POST — createdAt is null)", () => {
+    it("should POST when createdAt is null", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
@@ -197,7 +195,6 @@ describe("ConfigClient", () => {
 
       expect(data.type).toBe("config");
       expect(attrs.name).toBe("User Service");
-      expect(attrs.key).toBe("user-service");
       expect(attrs.description).toBe("User service configuration");
       expect(attrs.items).toEqual({
         timeout: { value: 30 },
@@ -221,10 +218,10 @@ describe("ConfigClient", () => {
       const client = makeClient();
       const config = client.new("user-service");
 
-      expect(config.id).toBeNull();
+      expect(config.createdAt).toBeNull();
       await config.save();
 
-      expect(config.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      expect(config.id).toBe("user-service");
       expect(config.name).toBe("User Service");
       expect(config.items).toEqual({ timeout: 30, retries: 3 });
       expect(config.createdAt).toBe("2024-01-15T10:30:00Z");
@@ -261,8 +258,8 @@ describe("ConfigClient", () => {
   // Config.save() — PUT (id is set)
   // ---------------------------------------------------------------------------
 
-  describe("Config.save (PUT — id is set)", () => {
-    it("should PUT when id is set", async () => {
+  describe("Config.save (PUT — createdAt is set)", () => {
+    it("should PUT when createdAt is set", async () => {
       const updatedResource = {
         ...SAMPLE_RESOURCE,
         attributes: { ...SAMPLE_RESOURCE.attributes, name: "Updated Service" },
@@ -271,14 +268,14 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("user-service");
-      // Simulate a previously-saved config with an id
-      config.id = "550e8400-e29b-41d4-a716-446655440000";
+      // Simulate a previously-saved config with createdAt set
+      config.createdAt = "2024-01-15T10:30:00Z";
       config.name = "Updated Service";
 
       await config.save();
 
       expect(calledMethod()).toBe("PUT");
-      expect(calledUrl()).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
+      expect(calledUrl()).toContain("/api/v1/configs/user-service");
     });
 
     it("should send correct JSON:API body for PUT", async () => {
@@ -286,14 +283,14 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("user-service");
-      config.id = "550e8400-e29b-41d4-a716-446655440000";
+      config.createdAt = "2024-01-15T10:30:00Z";
       config.items = { timeout: 30 };
 
       await config.save();
 
       const body = (await calledBodyJson()) as Record<string, unknown>;
       const data = body.data as Record<string, unknown>;
-      expect(data.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      expect(data.id).toBe("user-service");
       expect(data.type).toBe("config");
     });
 
@@ -310,7 +307,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("user-service");
-      config.id = "550e8400-e29b-41d4-a716-446655440000";
+      config.createdAt = "2024-01-15T10:30:00Z";
 
       await config.save();
 
@@ -323,7 +320,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("user-service");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
 
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
@@ -334,14 +331,13 @@ describe("ConfigClient", () => {
   // ---------------------------------------------------------------------------
 
   describe("get", () => {
-    it("should fetch a config by key using filter[key] query param", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
+    it("should fetch a config by id using GET /api/v1/configs/{id}", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
       const config = await client.get("user-service");
 
-      expect(config.key).toBe("user-service");
-      expect(config.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      expect(config.id).toBe("user-service");
       expect(config.name).toBe("User Service");
       expect(config.description).toBe("User service configuration");
       expect(config.parent).toBeNull();
@@ -350,16 +346,8 @@ describe("ConfigClient", () => {
       expect(config.createdAt).toBe("2024-01-15T10:30:00Z");
       expect(config.updatedAt).toBe("2024-01-16T14:00:00Z");
 
-      expect(calledUrl()).toContain("/api/v1/configs");
-      expect(calledUrl()).toMatch(/filter\[key\]=user-service/);
+      expect(calledUrl()).toContain("/api/v1/configs/user-service");
       expect(calledAuthHeader()).toBe("Bearer sk_api_test");
-    });
-
-    it("should throw SmplNotFoundError when no results", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-      const client = makeClient();
-      await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplNotFoundError when data is undefined", async () => {
@@ -396,10 +384,7 @@ describe("ConfigClient", () => {
   // ---------------------------------------------------------------------------
 
   describe("delete", () => {
-    it("should resolve key to UUID then DELETE", async () => {
-      // First call: get(key) → list with filter
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
-      // Second call: DELETE by UUID
+    it("should DELETE by id directly", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
       const client = makeClient();
@@ -407,22 +392,11 @@ describe("ConfigClient", () => {
 
       expect(result).toBeUndefined();
 
-      // First call: get by key
-      expect(calledUrl(0)).toMatch(/filter\[key\]=user-service/);
-      // Second call: DELETE by UUID
-      expect(calledUrl(1)).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
-      expect(calledMethod(1)).toBe("DELETE");
-    });
-
-    it("should throw SmplNotFoundError when key does not exist", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-      const client = makeClient();
-      await expect(client.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
+      expect(calledUrl(0)).toContain("/api/v1/configs/user-service");
+      expect(calledMethod(0)).toBe("DELETE");
     });
 
     it("should throw SmplConflictError on 409 from DELETE", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
       mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
 
       const client = makeClient();
@@ -430,7 +404,6 @@ describe("ConfigClient", () => {
     });
 
     it("should throw SmplConflictError on JSON 409 from DELETE", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
       mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Conflict" }] }, 409));
 
       const client = makeClient();
@@ -438,7 +411,6 @@ describe("ConfigClient", () => {
     });
 
     it("should throw SmplConnectionError on network failure during DELETE", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
@@ -454,11 +426,10 @@ describe("ConfigClient", () => {
     it("should return an array of Config objects", async () => {
       const secondResource = {
         ...SAMPLE_RESOURCE,
-        id: "660e8400-e29b-41d4-a716-446655440000",
+        id: "other-service",
         attributes: {
           ...SAMPLE_RESOURCE.attributes,
           name: "Other Service",
-          key: "other-service",
         },
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE, secondResource] }));
@@ -468,9 +439,9 @@ describe("ConfigClient", () => {
 
       expect(configs).toHaveLength(2);
       expect(configs[0].name).toBe("User Service");
-      expect(configs[0].key).toBe("user-service");
+      expect(configs[0].id).toBe("user-service");
       expect(configs[1].name).toBe("Other Service");
-      expect(configs[1].key).toBe("other-service");
+      expect(configs[1].id).toBe("other-service");
     });
 
     it("should return an empty array when no configs exist", async () => {
@@ -598,7 +569,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("test");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
 
@@ -607,12 +578,11 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("test");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
       await expect(config.save()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw on error response for delete", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
       mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
 
       const client = makeClient();
@@ -641,7 +611,7 @@ describe("ConfigClient", () => {
           parent: null,
         },
       };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [resource] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -659,7 +629,7 @@ describe("ConfigClient", () => {
           environments: null,
         },
       };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [resource] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -679,7 +649,7 @@ describe("ConfigClient", () => {
           },
         },
       };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [resource] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -691,7 +661,7 @@ describe("ConfigClient", () => {
     });
 
     it("should store timestamps as strings (not Date)", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -711,27 +681,13 @@ describe("ConfigClient", () => {
           updated_at: null,
         },
       };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [resource] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
       const config = await client.get("user-service");
 
       expect(config.createdAt).toBeNull();
       expect(config.updatedAt).toBeNull();
-    });
-
-    it("should use empty string fallback when key is null", async () => {
-      const resource = {
-        ...SAMPLE_RESOURCE,
-        attributes: { ...SAMPLE_RESOURCE.attributes, key: null },
-      };
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [resource] }));
-
-      const client = makeClient();
-      // Use list() since it processes the same resourceToConfig path
-      const configs = await client.list();
-
-      expect(configs[0].key).toBe("");
     });
 
     it("should use null when id is null in resource", async () => {
@@ -749,7 +705,7 @@ describe("ConfigClient", () => {
     });
 
     it("should unwrap items from {value: raw} to raw", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -759,7 +715,7 @@ describe("ConfigClient", () => {
     });
 
     it("should unwrap environment values from {value: raw} to raw", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
       const config = await client.get("user-service");
@@ -776,15 +732,15 @@ describe("ConfigClient", () => {
   // ---------------------------------------------------------------------------
 
   describe("_getById", () => {
-    it("should fetch a config by UUID", async () => {
+    it("should fetch a config by id", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = await client._getById("550e8400-e29b-41d4-a716-446655440000");
+      const config = await client._getById("user-service");
 
-      expect(config.id).toBe("550e8400-e29b-41d4-a716-446655440000");
-      expect(config.key).toBe("user-service");
-      expect(calledUrl()).toContain("/api/v1/configs/550e8400-e29b-41d4-a716-446655440000");
+      expect(config.id).toBe("user-service");
+      expect(config.name).toBe("User Service");
+      expect(calledUrl()).toContain("/api/v1/configs/user-service");
     });
 
     it("should throw SmplNotFoundError when config not found", async () => {
@@ -837,7 +793,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("test");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = {
         production: { values: { timeout: 60 } },
       };
@@ -856,7 +812,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("test");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = {
         staging: null as unknown,
         legacy: "disabled" as unknown,
@@ -874,7 +830,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       const config = client.new("test");
-      config.id = "some-uuid";
+      config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = { staging: { description: "no values here" } };
 
       await config.save();
@@ -927,10 +883,9 @@ describe("ConfigClient", () => {
         jsonResponse({
           data: [
             {
-              id: "cfg-1",
+              id: "db",
               type: "config",
               attributes: {
-                key: "db",
                 name: "DB Config",
                 description: null,
                 parent: null,
@@ -957,10 +912,9 @@ describe("ConfigClient", () => {
         jsonResponse({
           data: [
             {
-              id: "cfg-1",
+              id: "db",
               type: "config",
               attributes: {
-                key: "db",
                 name: "DB",
                 description: null,
                 parent: null,

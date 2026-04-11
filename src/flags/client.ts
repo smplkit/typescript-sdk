@@ -149,11 +149,11 @@ function evaluateFlag(
 
 /** Describes a flag definition change. */
 export class FlagChangeEvent {
-  readonly key: string;
+  readonly id: string;
   readonly source: string;
 
-  constructor(key: string, source: string) {
-    this.key = key;
+  constructor(id: string, source: string) {
+    this.id = id;
     this.source = source;
   }
 }
@@ -345,13 +345,12 @@ export class FlagsClient {
 
   /** Create an unsaved boolean flag. Call `.save()` to persist. */
   newBooleanFlag(
-    key: string,
+    id: string,
     options: { default: boolean; name?: string; description?: string },
   ): BooleanFlag {
     return new BooleanFlag(this, {
-      id: null,
-      key,
-      name: options.name ?? keyToDisplayName(key),
+      id,
+      name: options.name ?? keyToDisplayName(id),
       type: "BOOLEAN",
       default: options.default,
       values: [
@@ -367,7 +366,7 @@ export class FlagsClient {
 
   /** Create an unsaved string flag. Call `.save()` to persist. */
   newStringFlag(
-    key: string,
+    id: string,
     options: {
       default: string;
       name?: string;
@@ -376,9 +375,8 @@ export class FlagsClient {
     },
   ): StringFlag {
     return new StringFlag(this, {
-      id: null,
-      key,
-      name: options.name ?? keyToDisplayName(key),
+      id,
+      name: options.name ?? keyToDisplayName(id),
       type: "STRING",
       default: options.default,
       values: options.values ?? null,
@@ -391,7 +389,7 @@ export class FlagsClient {
 
   /** Create an unsaved number flag. Call `.save()` to persist. */
   newNumberFlag(
-    key: string,
+    id: string,
     options: {
       default: number;
       name?: string;
@@ -400,9 +398,8 @@ export class FlagsClient {
     },
   ): NumberFlag {
     return new NumberFlag(this, {
-      id: null,
-      key,
-      name: options.name ?? keyToDisplayName(key),
+      id,
+      name: options.name ?? keyToDisplayName(id),
       type: "NUMERIC",
       default: options.default,
       values: options.values ?? null,
@@ -415,7 +412,7 @@ export class FlagsClient {
 
   /** Create an unsaved JSON flag. Call `.save()` to persist. */
   newJsonFlag(
-    key: string,
+    id: string,
     options: {
       default: Record<string, any>;
       name?: string;
@@ -424,9 +421,8 @@ export class FlagsClient {
     },
   ): JsonFlag {
     return new JsonFlag(this, {
-      id: null,
-      key,
-      name: options.name ?? keyToDisplayName(key),
+      id,
+      name: options.name ?? keyToDisplayName(id),
       type: "JSON",
       default: options.default,
       values: options.values ?? null,
@@ -441,23 +437,23 @@ export class FlagsClient {
   // Management: CRUD
   // ------------------------------------------------------------------
 
-  /** Fetch a flag by key. */
-  async get(key: string): Promise<Flag> {
-    let data: components["schemas"]["FlagListResponse"] | undefined;
+  /** Fetch a flag by id. */
+  async get(id: string): Promise<Flag> {
+    let data: components["schemas"]["FlagResponse"] | undefined;
     try {
-      const result = await this._http.GET("/api/v1/flags", {
-        params: { query: { "filter[key]": key } },
+      const result = await this._http.GET("/api/v1/flags/{id}", {
+        params: { path: { id } },
       });
       if (result.error !== undefined)
-        await checkError(result.response, `Flag with key '${key}' not found`);
+        await checkError(result.response, `Flag with id '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data || data.data.length === 0) {
-      throw new SmplNotFoundError(`Flag with key '${key}' not found`);
+    if (!data || !data.data) {
+      throw new SmplNotFoundError(`Flag with id '${id}' not found`);
     }
-    return this._resourceToModel(data.data[0]);
+    return this._resourceToModel(data.data);
   }
 
   /** List all flags. */
@@ -474,15 +470,14 @@ export class FlagsClient {
     return data.data.map((r) => this._resourceToModel(r));
   }
 
-  /** Delete a flag by key. */
-  async delete(key: string): Promise<void> {
-    const flag = await this.get(key);
+  /** Delete a flag by id. */
+  async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
-        params: { path: { id: flag.id! } },
+        params: { path: { id } },
       });
       if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete flag '${key}'`);
+        await checkError(result.response, `Failed to delete flag '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -496,9 +491,9 @@ export class FlagsClient {
   async _createFlag(flag: Flag): Promise<Flag> {
     const body = {
       data: {
+        id: flag.id,
         type: "flag" as const,
         attributes: {
-          key: flag.key,
           name: flag.name,
           description: flag.description ?? "",
           type: flag.type,
@@ -527,7 +522,6 @@ export class FlagsClient {
       data: {
         type: "flag" as const,
         attributes: {
-          key: flag.key,
           name: flag.name,
           type: flag.type,
           default: flag.default,
@@ -559,11 +553,10 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   /** Declare a boolean flag handle for runtime evaluation. */
-  booleanFlag(key: string, defaultValue: boolean): BooleanFlag {
+  booleanFlag(id: string, defaultValue: boolean): BooleanFlag {
     const handle = new BooleanFlag(this, {
-      id: null,
-      key,
-      name: key,
+      id,
+      name: id,
       type: "BOOLEAN",
       default: defaultValue,
       values: [],
@@ -572,16 +565,15 @@ export class FlagsClient {
       createdAt: null,
       updatedAt: null,
     });
-    this._handles[key] = handle;
+    this._handles[id] = handle;
     return handle;
   }
 
   /** Declare a string flag handle for runtime evaluation. */
-  stringFlag(key: string, defaultValue: string): StringFlag {
+  stringFlag(id: string, defaultValue: string): StringFlag {
     const handle = new StringFlag(this, {
-      id: null,
-      key,
-      name: key,
+      id,
+      name: id,
       type: "STRING",
       default: defaultValue,
       values: [],
@@ -590,16 +582,15 @@ export class FlagsClient {
       createdAt: null,
       updatedAt: null,
     });
-    this._handles[key] = handle;
+    this._handles[id] = handle;
     return handle;
   }
 
   /** Declare a numeric flag handle for runtime evaluation. */
-  numberFlag(key: string, defaultValue: number): NumberFlag {
+  numberFlag(id: string, defaultValue: number): NumberFlag {
     const handle = new NumberFlag(this, {
-      id: null,
-      key,
-      name: key,
+      id,
+      name: id,
       type: "NUMERIC",
       default: defaultValue,
       values: [],
@@ -608,16 +599,15 @@ export class FlagsClient {
       createdAt: null,
       updatedAt: null,
     });
-    this._handles[key] = handle;
+    this._handles[id] = handle;
     return handle;
   }
 
   /** Declare a JSON flag handle for runtime evaluation. */
-  jsonFlag(key: string, defaultValue: Record<string, any>): JsonFlag {
+  jsonFlag(id: string, defaultValue: Record<string, any>): JsonFlag {
     const handle = new JsonFlag(this, {
-      id: null,
-      key,
-      name: key,
+      id,
+      name: id,
       type: "JSON",
       default: defaultValue,
       values: [],
@@ -626,7 +616,7 @@ export class FlagsClient {
       createdAt: null,
       updatedAt: null,
     });
-    this._handles[key] = handle;
+    this._handles[id] = handle;
     return handle;
   }
 
@@ -717,25 +707,25 @@ export class FlagsClient {
    * Register a change listener.
    *
    * - `onChange(callback)` — fires for any flag change.
-   * - `onChange(key, callback)` — fires only for the specified flag key.
+   * - `onChange(id, callback)` — fires only for the specified flag id.
    */
   onChange(
-    callbackOrKey: string | ((event: FlagChangeEvent) => void),
+    callbackOrId: string | ((event: FlagChangeEvent) => void),
     callback?: (event: FlagChangeEvent) => void,
   ): void {
-    if (typeof callbackOrKey === "function") {
+    if (typeof callbackOrId === "function") {
       // Global listener
-      this._globalListeners.push(callbackOrKey);
+      this._globalListeners.push(callbackOrId);
     } else {
-      // Key-scoped listener
-      const key = callbackOrKey;
+      // Id-scoped listener
+      const id = callbackOrId;
       if (!callback) {
-        throw new SmplError("onChange(key, callback) requires a callback function.");
+        throw new SmplError("onChange(id, callback) requires a callback function.");
       }
-      if (!this._keyListeners.has(key)) {
-        this._keyListeners.set(key, []);
+      if (!this._keyListeners.has(id)) {
+        this._keyListeners.set(id, []);
       }
-      this._keyListeners.get(key)!.push(callback);
+      this._keyListeners.get(id)!.push(callback);
     }
   }
 
@@ -768,7 +758,7 @@ export class FlagsClient {
   /**
    * Evaluate a flag with an explicit environment and context.
    */
-  async evaluate(key: string, options: { environment: string; context: Context[] }): Promise<any> {
+  async evaluate(id: string, options: { environment: string; context: Context[] }): Promise<any> {
     const evalDict = contextsToEvalDict(options.context);
 
     // Auto-inject service context if set and not already provided
@@ -778,12 +768,12 @@ export class FlagsClient {
 
     // Use local store if initialized, otherwise fetch
     let flagDef: Record<string, any> | null = null;
-    if (this._initialized && key in this._flagStore) {
-      flagDef = this._flagStore[key];
+    if (this._initialized && id in this._flagStore) {
+      flagDef = this._flagStore[id];
     } else {
       const flags = await this._fetchFlagsList();
       for (const f of flags) {
-        if (f.key === key) {
+        if (f.id === id) {
           flagDef = f;
           break;
         }
@@ -884,19 +874,19 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   private _handleFlagChanged = (data: Record<string, any>): void => {
-    const flagKey = data.key as string | undefined;
+    const flagId = data.id as string | undefined;
     // Re-fetch all flags (async, fire-and-forget)
     void this._fetchAllFlags().then(() => {
       this._cache.clear();
-      this._fireChangeListeners(flagKey ?? null, "websocket");
+      this._fireChangeListeners(flagId ?? null, "websocket");
     });
   };
 
   private _handleFlagDeleted = (data: Record<string, any>): void => {
-    const flagKey = data.key as string | undefined;
+    const flagId = data.id as string | undefined;
     void this._fetchAllFlags().then(() => {
       this._cache.clear();
-      this._fireChangeListeners(flagKey ?? null, "websocket");
+      this._fireChangeListeners(flagId ?? null, "websocket");
     });
   };
 
@@ -908,7 +898,7 @@ export class FlagsClient {
     const flags = await this._fetchFlagsList();
     const store: Record<string, Record<string, any>> = {};
     for (const f of flags) {
-      store[f.key] = f;
+      store[f.id] = f;
     }
     this._flagStore = store;
   }
@@ -930,9 +920,9 @@ export class FlagsClient {
   // Internal: change listeners
   // ------------------------------------------------------------------
 
-  private _fireChangeListeners(flagKey: string | null, source: string): void {
-    if (flagKey) {
-      const event = new FlagChangeEvent(flagKey, source);
+  private _fireChangeListeners(flagId: string | null, source: string): void {
+    if (flagId) {
+      const event = new FlagChangeEvent(flagId, source);
       // Global listeners first
       for (const cb of this._globalListeners) {
         try {
@@ -941,10 +931,10 @@ export class FlagsClient {
           // ignore listener errors
         }
       }
-      // Key-scoped listeners
-      const keyCallbacks = this._keyListeners.get(flagKey);
-      if (keyCallbacks) {
-        for (const cb of keyCallbacks) {
+      // Id-scoped listeners
+      const idCallbacks = this._keyListeners.get(flagId);
+      if (idCallbacks) {
+        for (const cb of idCallbacks) {
           try {
             cb(event);
           } catch {
@@ -956,8 +946,8 @@ export class FlagsClient {
   }
 
   private _fireChangeListenersAll(source: string): void {
-    for (const flagKey of Object.keys(this._flagStore)) {
-      this._fireChangeListeners(flagKey, source);
+    for (const flagId of Object.keys(this._flagStore)) {
+      this._fireChangeListeners(flagId, source);
     }
   }
 
@@ -992,7 +982,6 @@ export class FlagsClient {
     const attrs = resource.attributes;
     return new Flag(this, {
       id: resource.id ?? null,
-      key: attrs.key,
       name: attrs.name,
       type: attrs.type,
       default: attrs.default,
@@ -1007,7 +996,7 @@ export class FlagsClient {
   private _resourceToPlainDict(resource: FlagResource): Record<string, any> {
     const attrs = resource.attributes;
     return {
-      key: attrs.key,
+      id: resource.id ?? null,
       name: attrs.name,
       type: attrs.type,
       default: attrs.default,

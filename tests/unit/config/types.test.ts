@@ -17,7 +17,6 @@ function makeConfig(
   client: ConfigClient,
   fields?: Partial<{
     id: string | null;
-    key: string;
     name: string;
     description: string | null;
     parent: string | null;
@@ -28,8 +27,7 @@ function makeConfig(
   }>,
 ): Config {
   return new Config(client, {
-    id: "cfg-1",
-    key: "my-config",
+    id: "my-config",
     name: "My Config",
     description: "A test config",
     parent: null,
@@ -51,8 +49,7 @@ describe("Config", () => {
       const client = makeMockClient();
       const config = makeConfig(client);
 
-      expect(config.id).toBe("cfg-1");
-      expect(config.key).toBe("my-config");
+      expect(config.id).toBe("my-config");
       expect(config.name).toBe("My Config");
       expect(config.description).toBe("A test config");
       expect(config.parent).toBeNull();
@@ -94,14 +91,14 @@ describe("Config", () => {
       const client = makeMockClient();
       const config = makeConfig(client);
 
-      expect(config.toString()).toBe("Config(id=cfg-1, key=my-config, name=My Config)");
+      expect(config.toString()).toBe("Config(id=my-config, name=My Config)");
     });
 
     it("should handle null id", () => {
       const client = makeMockClient();
       const config = makeConfig(client, { id: null });
 
-      expect(config.toString()).toBe("Config(id=null, key=my-config, name=My Config)");
+      expect(config.toString()).toBe("Config(id=null, name=My Config)");
     });
   });
 
@@ -110,26 +107,26 @@ describe("Config", () => {
   // ---------------------------------------------------------------------------
 
   describe("save", () => {
-    it("should call _createConfig when id is null and apply result", async () => {
+    it("should call _createConfig when createdAt is null and apply result", async () => {
       const client = makeMockClient();
       const savedConfig = makeConfig(client, {
-        id: "new-uuid",
+        id: "new-config",
         createdAt: "2024-02-01T00:00:00Z",
         updatedAt: "2024-02-01T00:00:00Z",
       });
       (client._createConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(savedConfig);
 
-      const config = makeConfig(client, { id: null });
-      expect(config.id).toBeNull();
+      const config = makeConfig(client, { id: "new-config", createdAt: null });
+      expect(config.createdAt).toBeNull();
 
       await config.save();
 
       expect(client._createConfig).toHaveBeenCalledWith(config);
-      expect(config.id).toBe("new-uuid");
+      expect(config.id).toBe("new-config");
       expect(config.createdAt).toBe("2024-02-01T00:00:00Z");
     });
 
-    it("should call _updateConfig when id is set and apply result", async () => {
+    it("should call _updateConfig when createdAt is set and apply result", async () => {
       const client = makeMockClient();
       const updatedConfig = makeConfig(client, {
         name: "Updated Name",
@@ -137,7 +134,7 @@ describe("Config", () => {
       });
       (client._updateConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(updatedConfig);
 
-      const config = makeConfig(client, { id: "existing-uuid" });
+      const config = makeConfig(client, { id: "existing-config" });
 
       await config.save();
 
@@ -156,7 +153,6 @@ describe("Config", () => {
       const client = makeMockClient();
       const config = makeConfig(client, {
         id: "original-id",
-        key: "original-key",
         name: "Original",
         description: "Original desc",
         parent: null,
@@ -168,10 +164,9 @@ describe("Config", () => {
 
       const other = makeConfig(client, {
         id: "new-id",
-        key: "new-key",
         name: "New Name",
         description: "New desc",
-        parent: "parent-uuid",
+        parent: "parent-id",
         items: { b: 2 },
         environments: { prod: { values: { x: 1 } } },
         createdAt: "2024-02-01T00:00:00Z",
@@ -181,10 +176,9 @@ describe("Config", () => {
       config._apply(other);
 
       expect(config.id).toBe("new-id");
-      expect(config.key).toBe("new-key");
       expect(config.name).toBe("New Name");
       expect(config.description).toBe("New desc");
-      expect(config.parent).toBe("parent-uuid");
+      expect(config.parent).toBe("parent-id");
       expect(config.items).toEqual({ b: 2 });
       expect(config.environments).toEqual({ prod: { values: { x: 1 } } });
       expect(config.createdAt).toBe("2024-02-01T00:00:00Z");
@@ -225,7 +219,7 @@ describe("Config", () => {
       const chain = await config._buildChain();
 
       expect(chain).toHaveLength(1);
-      expect(chain[0].id).toBe("cfg-1");
+      expect(chain[0].id).toBe("my-config");
       expect(chain[0].items).toEqual({ timeout: 30 });
       expect(client._getById).not.toHaveBeenCalled();
     });
@@ -241,7 +235,6 @@ describe("Config", () => {
 
       const parentConfig = makeConfig(client, {
         id: "parent-id",
-        key: "parent",
         name: "Parent",
         parent: null,
         items: { parent_val: 2 },
@@ -264,7 +257,6 @@ describe("Config", () => {
       const client = makeMockClient();
       const parentConfig = makeConfig(client, {
         id: "parent-id",
-        key: "parent",
         name: "Parent",
         parent: null,
         items: { parent_val: 2 },

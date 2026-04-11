@@ -509,10 +509,9 @@ describe("FlagsClient — metrics instrumentation", () => {
         JSON.stringify({
           data: [
             {
-              id: "1",
+              id: "my-flag",
               type: "flag",
               attributes: {
-                key: "my-flag",
                 name: "My Flag",
                 type: "BOOLEAN",
                 default: true,
@@ -563,10 +562,9 @@ describe("FlagsClient — metrics instrumentation", () => {
         JSON.stringify({
           data: [
             {
-              id: "1",
+              id: "my-flag",
               type: "flag",
               attributes: {
-                key: "my-flag",
                 name: "My Flag",
                 type: "BOOLEAN",
                 default: true,
@@ -623,10 +621,9 @@ describe("ConfigClient — metrics instrumentation", () => {
         JSON.stringify({
           data: [
             {
-              id: "1",
+              id: "my-config",
               type: "config",
               attributes: {
-                key: "my-config",
                 name: "My Config",
                 items: { host: { value: "localhost" } },
                 environments: {},
@@ -775,10 +772,9 @@ describe("LoggingClient — metrics instrumentation", () => {
             JSON.stringify({
               data: [
                 {
-                  id: "1",
+                  id: "app",
                   type: "logger",
                   attributes: {
-                    key: "app",
                     name: "App",
                     level: "warn",
                     managed: false,
@@ -840,10 +836,9 @@ describe("ConfigClient — config.changes instrumentation", () => {
         JSON.stringify({
           data: [
             {
-              id: "1",
+              id: "my-config",
               type: "config",
               attributes: {
-                key: "my-config",
                 name: "My Config",
                 items: { host: { value: "v1" } },
                 environments: {},
@@ -864,10 +859,9 @@ describe("ConfigClient — config.changes instrumentation", () => {
         JSON.stringify({
           data: [
             {
-              id: "1",
+              id: "my-config",
               type: "config",
               attributes: {
-                key: "my-config",
                 name: "My Config",
                 items: { host: { value: "v2" } },
                 environments: {},

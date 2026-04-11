@@ -18,8 +18,7 @@ function mockClient(): LoggingClient {
 describe("Logger", () => {
   function makeLogger(overrides: Partial<ConstructorParameters<typeof Logger>[1]> = {}): Logger {
     return new Logger(mockClient(), {
-      id: "uuid-1",
-      key: "sqlalchemy.engine",
+      id: "sqlalchemy.engine",
       name: "SQLAlchemy Engine",
       level: "DEBUG",
       group: null,
@@ -35,8 +34,7 @@ describe("Logger", () => {
   describe("constructor", () => {
     it("should set all fields from the fields object", () => {
       const logger = makeLogger();
-      expect(logger.id).toBe("uuid-1");
-      expect(logger.key).toBe("sqlalchemy.engine");
+      expect(logger.id).toBe("sqlalchemy.engine");
       expect(logger.name).toBe("SQLAlchemy Engine");
       expect(logger.level).toBe("DEBUG");
       expect(logger.group).toBeNull();
@@ -50,8 +48,7 @@ describe("Logger", () => {
     it("should store a reference to the client", () => {
       const client = mockClient();
       const logger = new Logger(client, {
-        id: null,
-        key: "test",
+        id: "test",
         name: "Test",
         level: null,
         group: null,
@@ -66,13 +63,11 @@ describe("Logger", () => {
 
     it("should accept null for optional fields", () => {
       const logger = makeLogger({
-        id: null,
         level: null,
         group: null,
         createdAt: null,
         updatedAt: null,
       });
-      expect(logger.id).toBeNull();
       expect(logger.level).toBeNull();
       expect(logger.group).toBeNull();
       expect(logger.createdAt).toBeNull();
@@ -175,13 +170,12 @@ describe("Logger", () => {
 
   describe("_apply()", () => {
     it("should copy all fields from another Logger", () => {
-      const logger = makeLogger({ id: null, key: "old", level: null });
+      const logger = makeLogger({ id: "old", level: null });
       const other = makeLogger({
-        id: "new-uuid",
-        key: "new.key",
+        id: "new.key",
         name: "New Name",
         level: "ERROR",
-        group: "group-uuid",
+        group: "group-id",
         managed: false,
         sources: [{ service: "new-svc" }],
         environments: { staging: { level: "TRACE" } },
@@ -191,11 +185,10 @@ describe("Logger", () => {
 
       logger._apply(other);
 
-      expect(logger.id).toBe("new-uuid");
-      expect(logger.key).toBe("new.key");
+      expect(logger.id).toBe("new.key");
       expect(logger.name).toBe("New Name");
       expect(logger.level).toBe("ERROR");
-      expect(logger.group).toBe("group-uuid");
+      expect(logger.group).toBe("group-id");
       expect(logger.managed).toBe(false);
       expect(logger.sources).toEqual([{ service: "new-svc" }]);
       expect(logger.environments).toEqual({ staging: { level: "TRACE" } });
@@ -208,8 +201,7 @@ describe("Logger", () => {
     it("should call _saveLogger and apply the result", async () => {
       const client = mockClient();
       const logger = new Logger(client, {
-        id: null,
-        key: "test",
+        id: "test",
         name: "Test",
         level: null,
         group: null,
@@ -221,8 +213,7 @@ describe("Logger", () => {
       });
 
       const saved = new Logger(client, {
-        id: "saved-uuid",
-        key: "test",
+        id: "test",
         name: "Test",
         level: null,
         group: null,
@@ -238,20 +229,20 @@ describe("Logger", () => {
       await logger.save();
 
       expect(client._saveLogger).toHaveBeenCalledWith(logger);
-      expect(logger.id).toBe("saved-uuid");
+      expect(logger.id).toBe("test");
       expect(logger.createdAt).toBe("2026-04-01T00:00:00Z");
     });
   });
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const logger = makeLogger({ key: "app.server", level: "INFO" });
-      expect(logger.toString()).toBe("Logger(key=app.server, level=INFO)");
+      const logger = makeLogger({ id: "app.server", level: "INFO" });
+      expect(logger.toString()).toBe("Logger(id=app.server, level=INFO)");
     });
 
     it("should handle null level", () => {
-      const logger = makeLogger({ key: "app.db", level: null });
-      expect(logger.toString()).toBe("Logger(key=app.db, level=null)");
+      const logger = makeLogger({ id: "app.db", level: null });
+      expect(logger.toString()).toBe("Logger(id=app.db, level=null)");
     });
   });
 });
@@ -263,8 +254,7 @@ describe("Logger", () => {
 describe("LogGroup", () => {
   function makeGroup(overrides: Partial<ConstructorParameters<typeof LogGroup>[1]> = {}): LogGroup {
     return new LogGroup(mockClient(), {
-      id: "group-uuid-1",
-      key: "database-loggers",
+      id: "database-loggers",
       name: "Database Loggers",
       level: "WARN",
       group: null,
@@ -278,8 +268,7 @@ describe("LogGroup", () => {
   describe("constructor", () => {
     it("should set all fields from the fields object", () => {
       const group = makeGroup();
-      expect(group.id).toBe("group-uuid-1");
-      expect(group.key).toBe("database-loggers");
+      expect(group.id).toBe("database-loggers");
       expect(group.name).toBe("Database Loggers");
       expect(group.level).toBe("WARN");
       expect(group.group).toBeNull();
@@ -291,8 +280,7 @@ describe("LogGroup", () => {
     it("should store a reference to the client", () => {
       const client = mockClient();
       const group = new LogGroup(client, {
-        id: null,
-        key: "test",
+        id: "test",
         name: "Test",
         level: null,
         group: null,
@@ -361,13 +349,12 @@ describe("LogGroup", () => {
 
   describe("_apply()", () => {
     it("should copy all fields from another LogGroup", () => {
-      const group = makeGroup({ id: null, key: "old" });
+      const group = makeGroup({ id: "old" });
       const other = makeGroup({
-        id: "new-uuid",
-        key: "new-group",
+        id: "new-group",
         name: "New Group",
         level: "FATAL",
-        group: "parent-uuid",
+        group: "parent-group",
         environments: { staging: { level: "TRACE" } },
         createdAt: "2026-05-01T00:00:00Z",
         updatedAt: "2026-05-01T00:00:00Z",
@@ -375,11 +362,10 @@ describe("LogGroup", () => {
 
       group._apply(other);
 
-      expect(group.id).toBe("new-uuid");
-      expect(group.key).toBe("new-group");
+      expect(group.id).toBe("new-group");
       expect(group.name).toBe("New Group");
       expect(group.level).toBe("FATAL");
-      expect(group.group).toBe("parent-uuid");
+      expect(group.group).toBe("parent-group");
       expect(group.environments).toEqual({ staging: { level: "TRACE" } });
       expect(group.createdAt).toBe("2026-05-01T00:00:00Z");
       expect(group.updatedAt).toBe("2026-05-01T00:00:00Z");
@@ -390,8 +376,7 @@ describe("LogGroup", () => {
     it("should call _saveLogGroup and apply the result", async () => {
       const client = mockClient();
       const group = new LogGroup(client, {
-        id: null,
-        key: "test-group",
+        id: "test-group",
         name: "Test Group",
         level: null,
         group: null,
@@ -401,8 +386,7 @@ describe("LogGroup", () => {
       });
 
       const saved = new LogGroup(client, {
-        id: "saved-group-uuid",
-        key: "test-group",
+        id: "test-group",
         name: "Test Group",
         level: null,
         group: null,
@@ -416,20 +400,20 @@ describe("LogGroup", () => {
       await group.save();
 
       expect(client._saveLogGroup).toHaveBeenCalledWith(group);
-      expect(group.id).toBe("saved-group-uuid");
+      expect(group.id).toBe("test-group");
       expect(group.createdAt).toBe("2026-04-01T00:00:00Z");
     });
   });
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const group = makeGroup({ key: "db-loggers", level: "WARN" });
-      expect(group.toString()).toBe("LogGroup(key=db-loggers, level=WARN)");
+      const group = makeGroup({ id: "db-loggers", level: "WARN" });
+      expect(group.toString()).toBe("LogGroup(id=db-loggers, level=WARN)");
     });
 
     it("should handle null level", () => {
-      const group = makeGroup({ key: "misc", level: null });
-      expect(group.toString()).toBe("LogGroup(key=misc, level=null)");
+      const group = makeGroup({ id: "misc", level: null });
+      expect(group.toString()).toBe("LogGroup(id=misc, level=null)");
     });
   });
 });

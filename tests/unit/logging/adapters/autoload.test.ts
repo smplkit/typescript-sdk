@@ -220,10 +220,9 @@ describe("LoggingClient — adapter lifecycle", () => {
 
     // Mock list() to return a logger with a level
     const loggerResource = {
-      id: "uuid-1",
+      id: "my-app",
       type: "logger",
       attributes: {
-        key: "my-app",
         name: "My App",
         level: "WARN",
         group: null,
@@ -252,10 +251,9 @@ describe("LoggingClient — adapter lifecycle", () => {
     (client as any)._parent = { _environment: "production", _service: null };
 
     const loggerResource = {
-      id: "uuid-1",
+      id: "my-app",
       type: "logger",
       attributes: {
-        key: "my-app",
         name: "My App",
         level: "INFO",
         group: null,
@@ -285,10 +283,9 @@ describe("LoggingClient — adapter lifecycle", () => {
     client.registerAdapter(adapter);
 
     const loggerResource = {
-      id: "uuid-1",
+      id: "my-app",
       type: "logger",
       attributes: {
-        key: "my-app",
         name: "My App",
         level: "WARN",
         group: null,

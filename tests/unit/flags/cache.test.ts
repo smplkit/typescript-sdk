@@ -14,7 +14,7 @@ function setFlagStore(client: FlagsClient, store: Record<string, Record<string, 
 }
 
 const FLAG_DEF = {
-  key: "my-flag",
+  id: "my-flag",
   default: false,
   environments: {
     staging: {
@@ -78,10 +78,10 @@ describe("Resolution cache", () => {
     cache._maxSize = 3;
 
     setFlagStore(client, {
-      a: { key: "a", default: "val-a", environments: { staging: { enabled: true, rules: [] } } },
-      b: { key: "b", default: "val-b", environments: { staging: { enabled: true, rules: [] } } },
-      c: { key: "c", default: "val-c", environments: { staging: { enabled: true, rules: [] } } },
-      d: { key: "d", default: "val-d", environments: { staging: { enabled: true, rules: [] } } },
+      a: { id: "a", default: "val-a", environments: { staging: { enabled: true, rules: [] } } },
+      b: { id: "b", default: "val-b", environments: { staging: { enabled: true, rules: [] } } },
+      c: { id: "c", default: "val-c", environments: { staging: { enabled: true, rules: [] } } },
+      d: { id: "d", default: "val-d", environments: { staging: { enabled: true, rules: [] } } },
     });
 
     // Evaluate 4 flags to overflow the cache (max 3)

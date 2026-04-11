@@ -13,11 +13,8 @@ import type { ConfigClient } from "./client.js";
  * Creates if new, updates if existing.
  */
 export class Config {
-  /** UUID of the config, or `null` if unsaved. */
+  /** Unique identifier (slug, e.g. `"user-service"`). */
   id: string | null;
-
-  /** Human-readable key (e.g. `"user-service"`). */
-  key: string;
 
   /** Display name. */
   name: string;
@@ -25,7 +22,7 @@ export class Config {
   /** Optional description. */
   description: string | null;
 
-  /** Parent config UUID, or null if this is a root config. */
+  /** Parent config id (slug), or null if this is a root config. */
   parent: string | null;
 
   /** Base key-value pairs. */
@@ -51,7 +48,6 @@ export class Config {
     client: ConfigClient,
     fields: {
       id: string | null;
-      key: string;
       name: string;
       description: string | null;
       parent: string | null;
@@ -63,7 +59,6 @@ export class Config {
   ) {
     this._client = client;
     this.id = fields.id;
-    this.key = fields.key;
     this.name = fields.name;
     this.description = fields.description;
     this.parent = fields.parent;
@@ -80,7 +75,7 @@ export class Config {
    * Updates this instance in-place with the server response.
    */
   async save(): Promise<void> {
-    if (this.id === null) {
+    if (this.createdAt === null) {
       const created = await this._client._createConfig(this);
       this._apply(created);
     } else {
@@ -127,7 +122,6 @@ export class Config {
   /** @internal — copy all fields from another Config instance. */
   _apply(other: Config): void {
     this.id = other.id;
-    this.key = other.key;
     this.name = other.name;
     this.description = other.description;
     this.parent = other.parent;
@@ -138,6 +132,6 @@ export class Config {
   }
 
   toString(): string {
-    return `Config(id=${this.id}, key=${this.key}, name=${this.name})`;
+    return `Config(id=${this.id}, name=${this.name})`;
   }
 }

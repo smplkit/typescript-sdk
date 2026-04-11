@@ -8,9 +8,9 @@
  * - Factory method: `client.config.new()` for unsaved configs
  * - Direct mutation of items, environments, and metadata
  * - Persist via `save()` (POST if new, PUT if existing)
- * - Fetch by key: `client.config.get()`
+ * - Fetch by id: `client.config.get()`
  * - List all configs: `client.config.list()`
- * - Delete by key: `client.config.delete()`
+ * - Delete by id: `client.config.delete()`
  * - Multi-level inheritance via parent configs
  *
  * Most customers will create and configure configs via the Console UI.
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   const paymentService = client.config.new("payment-service", {
     name: "Payment Service",
   });
-  step(`Created unsaved config: key=${paymentService.key}, id=${paymentService.id}`);
+  step(`Created unsaved config: id=${paymentService.id}`);
 
   // Direct mutation — set base items
   paymentService.items = {
@@ -135,12 +135,12 @@ async function main(): Promise<void> {
   // ======================================================================
 
   // ------------------------------------------------------------------
-  // 3a. Get Config by Key
+  // 3a. Get Config by Id
   // ------------------------------------------------------------------
-  section("3a. Get Config by Key");
+  section("3a. Get Config by Id");
 
   const fetched = await client.config.get("payment-service");
-  step(`Fetched: key=${fetched.key}, name=${fetched.name}`);
+  step(`Fetched: id=${fetched.id}, name=${fetched.name}`);
   step(`  id: ${fetched.id}`);
   step(`  items: ${JSON.stringify(fetched.items)}`);
   step(`  environments: ${JSON.stringify(fetched.environments)}`);
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   step(`Total configs: ${configs.length}`);
   for (const cfg of configs) {
     const parentInfo = cfg.parent ? ` (parent: ${cfg.parent})` : " (root)";
-    step(`  ${cfg.key}${parentInfo} — ${cfg.name}`);
+    step(`  ${cfg.id}${parentInfo} — ${cfg.name}`);
   }
 
   // ======================================================================
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
   // Verify hierarchy
   const allConfigs = await client.config.list();
   for (const cfg of allConfigs) {
-    if (cfg.key === "auth-module") {
+    if (cfg.id === "auth-module") {
       step(`  auth-module parent: ${cfg.parent}`);
     }
   }

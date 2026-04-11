@@ -23,8 +23,8 @@ import { keyToDisplayName } from "../helpers.js";
 
 /** Describes a single config value change detected on refresh. */
 export interface ConfigChangeEvent {
-  /** The config key that changed. */
-  configKey: string;
+  /** The config id that changed. */
+  configId: string;
   /** The item key within the config that changed. */
   itemKey: string;
   /** The previous value (null if the key was absent). */
@@ -38,7 +38,7 @@ export interface ConfigChangeEvent {
 /** @internal */
 interface ChangeListener {
   callback: (event: ConfigChangeEvent) => void;
-  configKey: string | null;
+  configId: string | null;
   itemKey: string | null;
 }
 
@@ -94,7 +94,6 @@ function resourceToConfig(resource: ConfigResource, client: ConfigClient): Confi
   const attrs = resource.attributes;
   return new Config(client, {
     id: resource.id ?? null,
-    key: attrs.key ?? "",
     name: attrs.name,
     description: attrs.description ?? null,
     parent: attrs.parent ?? null,
@@ -187,7 +186,6 @@ function wrapEnvironments(
 function buildRequestBody(options: {
   id?: string | null;
   name: string;
-  key?: string | null;
   description?: string | null;
   parent?: string | null;
   items?: Record<string, unknown> | null;
@@ -196,7 +194,6 @@ function buildRequestBody(options: {
   const attrs: components["schemas"]["Config"] = {
     name: options.name,
   };
-  if (options.key !== undefined) attrs.key = options.key;
   if (options.description !== undefined) attrs.description = options.description;
   if (options.parent !== undefined) attrs.parent = options.parent;
   if (options.items !== undefined)
@@ -274,11 +271,10 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /** Create an unsaved config. Call `.save()` to persist. */
-  new(key: string, options?: { name?: string; description?: string; parent?: string }): Config {
+  new(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
     return new Config(this, {
-      id: null,
-      key,
-      name: options?.name ?? keyToDisplayName(key),
+      id,
+      name: options?.name ?? keyToDisplayName(id),
       description: options?.description ?? null,
       parent: options?.parent ?? null,
       items: {},
@@ -292,9 +288,9 @@ export class ConfigClient {
   // Management: CRUD
   // ------------------------------------------------------------------
 
-  /** Fetch a config by key. */
-  async get(key: string): Promise<Config> {
-    return this._getByKey(key);
+  /** Fetch a config by id. */
+  async get(id: string): Promise<Config> {
+    return this._getById(id);
   }
 
   /** List all configs. */
@@ -311,15 +307,14 @@ export class ConfigClient {
     return data.data.map((r) => resourceToConfig(r, this));
   }
 
-  /** Delete a config by key. */
-  async delete(key: string): Promise<void> {
-    const config = await this.get(key);
+  /** Delete a config by id. */
+  async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/configs/{id}", {
-        params: { path: { id: config.id! } },
+        params: { path: { id } },
       });
       if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete config '${key}'`);
+        await checkError(result.response, `Failed to delete config '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -332,8 +327,8 @@ export class ConfigClient {
   /** @internal — POST a new config. */
   async _createConfig(config: Config): Promise<Config> {
     const body = buildRequestBody({
+      id: config.id,
       name: config.name,
-      key: config.key,
       description: config.description,
       parent: config.parent,
       items: config.items,
@@ -357,7 +352,6 @@ export class ConfigClient {
     const body = buildRequestBody({
       id: config.id,
       name: config.name,
-      key: config.key,
       description: config.description,
       parent: config.parent,
       items: config.items,
@@ -380,20 +374,20 @@ export class ConfigClient {
     return resourceToConfig(data.data, this);
   }
 
-  /** @internal — fetch a config by UUID. */
-  async _getById(configId: string): Promise<Config> {
+  /** @internal — fetch a config by id. */
+  async _getById(id: string): Promise<Config> {
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/configs/{id}", {
-        params: { path: { id: configId } },
+        params: { path: { id } },
       });
       if (result.error !== undefined)
-        await checkError(result.response, `Config ${configId} not found`);
+        await checkError(result.response, `Config with id '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data) throw new SmplNotFoundError(`Config ${configId} not found`);
+    if (!data || !data.data) throw new SmplNotFoundError(`Config with id '${id}' not found`);
     return resourceToConfig(data.data, this);
   }
 
@@ -407,18 +401,15 @@ export class ConfigClient {
    * Returns the resolved key-value pairs for the given config.
    * Optionally pass a model class to map the resolved values.
    */
-  async resolve<T = Record<string, unknown>>(
-    key: string,
-    model?: new (data: any) => T,
-  ): Promise<T> {
+  async resolve<T = Record<string, unknown>>(id: string, model?: new (data: any) => T): Promise<T> {
     await this._ensureInitialized();
-    const values = this._configCache[key];
+    const values = this._configCache[id];
     if (values === undefined) {
-      throw new SmplNotFoundError(`Config with key '${key}' not found in cache`);
+      throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
     }
     const metrics = this._parent?._metrics;
     if (metrics) {
-      metrics.record("config.resolutions", 1, "resolutions", { config_id: key });
+      metrics.record("config.resolutions", 1, "resolutions", { config_id: id });
     }
     if (model) {
       return new model(values);
@@ -433,14 +424,14 @@ export class ConfigClient {
    * Optionally pass a model class to map the resolved values.
    */
   async subscribe<T = Record<string, unknown>>(
-    key: string,
+    id: string,
     model?: new (data: any) => T,
   ): Promise<LiveConfigProxy<T>> {
     await this._ensureInitialized();
-    if (!(key in this._configCache)) {
-      throw new SmplNotFoundError(`Config with key '${key}' not found in cache`);
+    if (!(id in this._configCache)) {
+      throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
     }
-    return new LiveConfigProxy<T>(this, key, model);
+    return new LiveConfigProxy<T>(this, id, model);
   }
 
   // ------------------------------------------------------------------
@@ -451,33 +442,33 @@ export class ConfigClient {
    * Register a change listener.
    *
    * - `onChange(callback)` — fires for any config change (global).
-   * - `onChange(configKey, callback)` — fires for changes to a specific config.
-   * - `onChange(configKey, itemKey, callback)` — fires for a specific item.
+   * - `onChange(configId, callback)` — fires for changes to a specific config.
+   * - `onChange(configId, itemKey, callback)` — fires for a specific item.
    */
   onChange(
-    callbackOrConfigKey: string | ((event: ConfigChangeEvent) => void),
+    callbackOrConfigId: string | ((event: ConfigChangeEvent) => void),
     callbackOrItemKey?: string | ((event: ConfigChangeEvent) => void),
     callback?: (event: ConfigChangeEvent) => void,
   ): void {
-    if (typeof callbackOrConfigKey === "function") {
+    if (typeof callbackOrConfigId === "function") {
       // Global listener: onChange(callback)
       this._listeners.push({
-        callback: callbackOrConfigKey,
-        configKey: null,
+        callback: callbackOrConfigId,
+        configId: null,
         itemKey: null,
       });
     } else if (typeof callbackOrItemKey === "function") {
-      // Config-scoped: onChange(configKey, callback)
+      // Config-scoped: onChange(configId, callback)
       this._listeners.push({
         callback: callbackOrItemKey,
-        configKey: callbackOrConfigKey,
+        configId: callbackOrConfigId,
         itemKey: null,
       });
     } else if (typeof callbackOrItemKey === "string" && callback) {
-      // Item-scoped: onChange(configKey, itemKey, callback)
+      // Item-scoped: onChange(configId, itemKey, callback)
       this._listeners.push({
         callback,
-        configKey: callbackOrConfigKey,
+        configId: callbackOrConfigId,
         itemKey: callbackOrItemKey,
       });
     }
@@ -503,7 +494,7 @@ export class ConfigClient {
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
-      newCache[cfg.key] = resolveChain(chain, environment);
+      newCache[cfg.id!] = resolveChain(chain, environment);
     }
     const oldCache = this._configCache;
     this._configCache = newCache;
@@ -525,7 +516,7 @@ export class ConfigClient {
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
-      cache[cfg.key] = resolveChain(chain, environment);
+      cache[cfg.id!] = resolveChain(chain, environment);
     }
     this._configCache = cache;
     this._initialized = true;
@@ -544,7 +535,7 @@ export class ConfigClient {
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
-      cache[cfg.key] = resolveChain(chain, environment);
+      cache[cfg.id!] = resolveChain(chain, environment);
     }
     this._configCache = cache;
     this._initialized = true;
@@ -589,14 +580,14 @@ export class ConfigClient {
             metrics.record("config.changes", 1, "changes", { config_id: cfgKey });
           }
           const event: ConfigChangeEvent = {
-            configKey: cfgKey,
+            configId: cfgKey,
             itemKey: iKey,
             oldValue: oldVal,
             newValue: newVal,
             source,
           };
           for (const listener of this._listeners) {
-            if (listener.configKey !== null && listener.configKey !== cfgKey) continue;
+            if (listener.configId !== null && listener.configId !== cfgKey) continue;
             if (listener.itemKey !== null && listener.itemKey !== iKey) continue;
             try {
               listener.callback(event);
@@ -607,27 +598,5 @@ export class ConfigClient {
         }
       }
     }
-  }
-
-  // ------------------------------------------------------------------
-  // Internal: fetch by key
-  // ------------------------------------------------------------------
-
-  private async _getByKey(key: string): Promise<Config> {
-    let data: components["schemas"]["ConfigListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/configs", {
-        params: { query: { "filter[key]": key } },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Config with key '${key}' not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data || data.data.length === 0) {
-      throw new SmplNotFoundError(`Config with key '${key}' not found`);
-    }
-    return resourceToConfig(data.data[0], this);
   }
 }

@@ -33,7 +33,6 @@ function jsonResponse(body: object, status = 200): Response {
  */
 function configResource(opts: {
   id: string;
-  key: string;
   items: Record<string, unknown>;
   environments?: Record<string, { values: Record<string, unknown> }>;
   parent?: string | null;
@@ -42,8 +41,7 @@ function configResource(opts: {
     id: opts.id,
     type: "config",
     attributes: {
-      key: opts.key,
-      name: opts.key,
+      name: opts.id,
       description: null,
       parent: opts.parent ?? null,
       items: Object.fromEntries(Object.entries(opts.items).map(([k, v]) => [k, { value: v }])),
@@ -78,8 +76,7 @@ describe("resolve", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
             environments: {
               staging: { values: { timeout: 2000 } },
@@ -102,14 +99,12 @@ describe("resolve", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "child-id",
-            key: "child-service",
+            id: "child-service",
             items: { retries: 5 },
-            parent: "parent-id",
+            parent: "base-service",
           }),
           configResource({
-            id: "parent-id",
-            key: "base-service",
+            id: "base-service",
             items: { retries: 3, timeout: 1000 },
             environments: {
               staging: { values: { timeout: 2000 } },
@@ -119,12 +114,11 @@ describe("resolve", () => {
       }),
     );
 
-    // _buildChain for child calls _getById(parent-id)
+    // _buildChain for child calls _getById(base-service)
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: configResource({
-          id: "parent-id",
-          key: "base-service",
+          id: "base-service",
           items: { retries: 3, timeout: 1000 },
           environments: {
             staging: { values: { timeout: 2000 } },
@@ -146,8 +140,7 @@ describe("resolve", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
           }),
         ],
@@ -177,8 +170,7 @@ describe("resolve", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -195,8 +187,7 @@ describe("resolve", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -230,8 +221,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
           }),
         ],
@@ -252,8 +242,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -270,8 +259,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -299,8 +287,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -320,8 +307,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
           }),
         ],
@@ -340,8 +326,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -367,8 +352,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -395,8 +379,7 @@ describe("subscribe", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
           }),
         ],
@@ -436,8 +419,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -455,8 +437,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 7 },
           }),
         ],
@@ -466,7 +447,7 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(events).toHaveLength(1);
-    expect(events[0].configKey).toBe("app");
+    expect(events[0].configId).toBe("app");
     expect(events[0].itemKey).toBe("retries");
     expect(events[0].oldValue).toBe(3);
     expect(events[0].newValue).toBe(7);
@@ -480,13 +461,11 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
           configResource({
-            id: "cfg-2",
-            key: "db",
+            id: "db",
             items: { host: "localhost" },
           }),
         ],
@@ -505,13 +484,11 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 7 },
           }),
           configResource({
-            id: "cfg-2",
-            key: "db",
+            id: "db",
             items: { host: "prod-db" },
           }),
         ],
@@ -521,10 +498,10 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(appEvents).toHaveLength(1);
-    expect(appEvents[0].configKey).toBe("app");
+    expect(appEvents[0].configId).toBe("app");
 
     expect(dbEvents).toHaveLength(1);
-    expect(dbEvents[0].configKey).toBe("db");
+    expect(dbEvents[0].configId).toBe("db");
   });
 
   it("should fire item-scoped listener only for that specific item", async () => {
@@ -534,8 +511,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, timeout: 1000 },
           }),
         ],
@@ -552,8 +528,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 7, timeout: 2000 },
           }),
         ],
@@ -574,8 +549,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -592,8 +566,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -612,8 +585,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -629,8 +601,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, new_key: "hello" },
           }),
         ],
@@ -652,8 +623,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3, old_key: "bye" },
           }),
         ],
@@ -669,8 +639,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -692,8 +661,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -709,13 +677,11 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
           configResource({
-            id: "cfg-2",
-            key: "db",
+            id: "db",
             items: { host: "localhost" },
           }),
         ],
@@ -725,7 +691,7 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(events).toHaveLength(1);
-    expect(events[0].configKey).toBe("db");
+    expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
     expect(events[0].newValue).toBe("localhost");
   });
@@ -737,13 +703,11 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
           configResource({
-            id: "cfg-2",
-            key: "db",
+            id: "db",
             items: { host: "localhost" },
           }),
         ],
@@ -760,8 +724,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -771,7 +734,7 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(events).toHaveLength(1);
-    expect(events[0].configKey).toBe("db");
+    expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
     expect(events[0].oldValue).toBe("localhost");
     expect(events[0].newValue).toBeNull();
@@ -784,8 +747,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -804,8 +766,7 @@ describe("onChange", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 7 },
           }),
         ],
@@ -831,8 +792,7 @@ describe("refresh", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -847,8 +807,7 @@ describe("refresh", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 7 },
           }),
         ],
@@ -886,8 +845,7 @@ describe("refresh", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: {},
           }),
         ],
@@ -908,8 +866,7 @@ describe("refresh", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: {},
           }),
         ],
@@ -949,8 +906,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -978,8 +934,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -996,8 +951,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 99 },
           }),
         ],
@@ -1030,8 +984,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -1061,8 +1014,7 @@ describe("LiveConfigProxy edge cases", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],
@@ -1086,8 +1038,7 @@ describe("LiveConfigProxy edge cases", () => {
       jsonResponse({
         data: [
           configResource({
-            id: "cfg-1",
-            key: "app",
+            id: "app",
             items: { retries: 3 },
           }),
         ],

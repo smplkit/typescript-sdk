@@ -135,11 +135,10 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   /** Create an unsaved logger. Call `.save()` to persist. */
-  new(key: string, options?: { name?: string; managed?: boolean }): Logger {
+  new(id: string, options?: { name?: string; managed?: boolean }): Logger {
     return new Logger(this, {
-      id: null,
-      key,
-      name: options?.name ?? keyToDisplayName(key),
+      id,
+      name: options?.name ?? keyToDisplayName(id),
       level: null,
       group: null,
       managed: options?.managed ?? false,
@@ -154,23 +153,23 @@ export class LoggingClient {
   // Management: Logger CRUD
   // ------------------------------------------------------------------
 
-  /** Fetch a logger by key. */
-  async get(key: string): Promise<Logger> {
-    let data: components["schemas"]["LoggerListResponse"] | undefined;
+  /** Fetch a logger by id. */
+  async get(id: string): Promise<Logger> {
+    let data: components["schemas"]["LoggerResponse"] | undefined;
     try {
-      const result = await this._http.GET("/api/v1/loggers", {
-        params: { query: { "filter[key]": key } },
+      const result = await this._http.GET("/api/v1/loggers/{id}", {
+        params: { path: { id } },
       });
       if (result.error !== undefined)
-        await checkError(result.response, `Logger with key '${key}' not found`);
+        await checkError(result.response, `Logger with id '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data || data.data.length === 0) {
-      throw new SmplNotFoundError(`Logger with key '${key}' not found`);
+    if (!data || !data.data) {
+      throw new SmplNotFoundError(`Logger with id '${id}' not found`);
     }
-    return this._loggerToModel(data.data[0]);
+    return this._loggerToModel(data.data);
   }
 
   /** List all loggers. */
@@ -187,15 +186,14 @@ export class LoggingClient {
     return data.data.map((r) => this._loggerToModel(r));
   }
 
-  /** Delete a logger by key. */
-  async delete(key: string): Promise<void> {
-    const logger = await this.get(key);
+  /** Delete a logger by id. */
+  async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/loggers/{id}", {
-        params: { path: { id: logger.id! } },
+        params: { path: { id } },
       });
       if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete logger '${key}'`);
+        await checkError(result.response, `Failed to delete logger '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -206,11 +204,10 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   /** Create an unsaved log group. Call `.save()` to persist. */
-  newGroup(key: string, options?: { name?: string; group?: string }): LogGroup {
+  newGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
     return new LogGroup(this, {
-      id: null,
-      key,
-      name: options?.name ?? keyToDisplayName(key),
+      id,
+      name: options?.name ?? keyToDisplayName(id),
       level: null,
       group: options?.group ?? null,
       environments: {},
@@ -223,14 +220,13 @@ export class LoggingClient {
   // Management: LogGroup CRUD
   // ------------------------------------------------------------------
 
-  /** Fetch a log group by key. */
-  async getGroup(key: string): Promise<LogGroup> {
-    // The logging API doesn't have a filter[key] on groups in the generated spec,
-    // so we list all and filter client-side.
+  /** Fetch a log group by id. */
+  async getGroup(id: string): Promise<LogGroup> {
+    // List all and filter client-side.
     const groups = await this.listGroups();
-    const match = groups.find((g) => g.key === key);
+    const match = groups.find((g) => g.id === id);
     if (!match) {
-      throw new SmplNotFoundError(`LogGroup with key '${key}' not found`);
+      throw new SmplNotFoundError(`LogGroup with id '${id}' not found`);
     }
     return match;
   }
@@ -250,15 +246,15 @@ export class LoggingClient {
     return data.data.map((r) => this._groupToModel(r));
   }
 
-  /** Delete a log group by key. */
-  async deleteGroup(key: string): Promise<void> {
-    const group = await this.getGroup(key);
+  /** Delete a log group by id. */
+  async deleteGroup(id: string): Promise<void> {
+    const group = await this.getGroup(id);
     try {
       const result = await this._http.DELETE("/api/v1/log_groups/{id}", {
         params: { path: { id: group.id! } },
       });
       if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete log group '${key}'`);
+        await checkError(result.response, `Failed to delete log group '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -272,9 +268,9 @@ export class LoggingClient {
   async _saveLogger(logger: Logger): Promise<Logger> {
     const body = {
       data: {
+        id: logger.id,
         type: "logger" as const,
         attributes: {
-          key: logger.key,
           name: logger.name,
           level: logger.level,
           group: logger.group,
@@ -284,7 +280,7 @@ export class LoggingClient {
       },
     };
 
-    if (logger.id === null) {
+    if (logger.createdAt === null) {
       // POST — create
       let data: components["schemas"]["LoggerResponse"] | undefined;
       try {
@@ -302,7 +298,7 @@ export class LoggingClient {
       let data: components["schemas"]["LoggerResponse"] | undefined;
       try {
         const result = await this._http.PUT("/api/v1/loggers/{id}", {
-          params: { path: { id: logger.id } },
+          params: { path: { id: logger.id! } },
           body,
         });
         if (result.error !== undefined)
@@ -321,9 +317,9 @@ export class LoggingClient {
   async _saveLogGroup(group: LogGroup): Promise<LogGroup> {
     const body = {
       data: {
+        id: group.id,
         type: "log_group" as const,
         attributes: {
-          key: group.key,
           name: group.name,
           level: group.level,
           group: group.group,
@@ -332,7 +328,7 @@ export class LoggingClient {
       },
     };
 
-    if (group.id === null) {
+    if (group.createdAt === null) {
       // POST — create
       let data: components["schemas"]["LogGroupResponse"] | undefined;
       try {
@@ -350,7 +346,7 @@ export class LoggingClient {
       let data: components["schemas"]["LogGroupResponse"] | undefined;
       try {
         const result = await this._http.PUT("/api/v1/log_groups/{id}", {
-          params: { path: { id: group.id } },
+          params: { path: { id: group.id! } },
           body,
         });
         if (result.error !== undefined)
@@ -450,23 +446,23 @@ export class LoggingClient {
    * Register a change listener.
    *
    * - `onChange(callback)` — fires for any logger change.
-   * - `onChange(key, callback)` — fires only for the specified logger key.
+   * - `onChange(id, callback)` — fires only for the specified logger id.
    */
   onChange(
-    callbackOrKey: string | ((event: LoggerChangeEvent) => void),
+    callbackOrId: string | ((event: LoggerChangeEvent) => void),
     callback?: (event: LoggerChangeEvent) => void,
   ): void {
-    if (typeof callbackOrKey === "function") {
-      this._globalListeners.push(callbackOrKey);
+    if (typeof callbackOrId === "function") {
+      this._globalListeners.push(callbackOrId);
     } else {
-      const key = callbackOrKey;
+      const id = callbackOrId;
       if (!callback) {
-        throw new SmplError("onChange(key, callback) requires a callback function.");
+        throw new SmplError("onChange(id, callback) requires a callback function.");
       }
-      if (!this._keyListeners.has(key)) {
-        this._keyListeners.set(key, []);
+      if (!this._keyListeners.has(id)) {
+        this._keyListeners.set(id, []);
       }
-      this._keyListeners.get(key)!.push(callback);
+      this._keyListeners.get(id)!.push(callback);
     }
   }
 
@@ -538,12 +534,12 @@ export class LoggingClient {
 
       const metrics = this._parent?._metrics;
       if (metrics) {
-        metrics.record("logging.level_changes", 1, "changes", { logger_id: logger.key });
+        metrics.record("logging.level_changes", 1, "changes", { logger_id: logger.id! });
       }
 
       for (const adapter of this._adapters) {
         try {
-          adapter.applyLevel(logger.key, effectiveLevel);
+          adapter.applyLevel(logger.id!, effectiveLevel);
         } catch {
           // ignore adapter errors
         }
@@ -567,11 +563,11 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   private _handleLoggerChanged = (data: Record<string, any>): void => {
-    const key = data.key as string | undefined;
-    if (key) {
+    const id = data.id as string | undefined;
+    if (id) {
       const level = data.level ?? null;
       const event: LoggerChangeEvent = {
-        key,
+        id,
         level,
         source: "websocket",
       };
@@ -583,10 +579,10 @@ export class LoggingClient {
           // ignore listener errors
         }
       }
-      // Key-scoped listeners
-      const keyCallbacks = this._keyListeners.get(key);
-      if (keyCallbacks) {
-        for (const cb of keyCallbacks) {
+      // Id-scoped listeners
+      const idCallbacks = this._keyListeners.get(id);
+      if (idCallbacks) {
+        for (const cb of idCallbacks) {
           try {
             cb(event);
           } catch {
@@ -605,7 +601,6 @@ export class LoggingClient {
     const attrs = resource.attributes;
     return new Logger(this, {
       id: resource.id ?? null,
-      key: attrs.key ?? "",
       name: attrs.name,
       level: attrs.level ?? null,
       group: attrs.group ?? null,
@@ -621,7 +616,6 @@ export class LoggingClient {
     const attrs = resource.attributes;
     return new LogGroup(this, {
       id: resource.id ?? null,
-      key: attrs.key ?? "",
       name: attrs.name,
       level: attrs.level ?? null,
       group: attrs.group ?? null,

@@ -30,7 +30,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "checkout-v2": {
-        key: "checkout-v2",
+        id: "checkout-v2",
         default: false,
         environments: {
           staging: {
@@ -56,7 +56,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "my-flag": {
-        key: "my-flag",
+        id: "my-flag",
         default: "red",
         environments: {
           staging: {
@@ -82,7 +82,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "banner-color": {
-        key: "banner-color",
+        id: "banner-color",
         default: "red",
         environments: {
           staging: {
@@ -110,7 +110,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "banner-color": {
-        key: "banner-color",
+        id: "banner-color",
         default: "red",
         environments: {
           staging: {
@@ -144,7 +144,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "my-flag": {
-        key: "my-flag",
+        id: "my-flag",
         default: 42,
         environments: {},
       },
@@ -166,7 +166,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "my-flag": {
-        key: "my-flag",
+        id: "my-flag",
         default: false,
         environments: {
           staging: {
@@ -194,7 +194,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "checkout-v2": {
-        key: "checkout-v2",
+        id: "checkout-v2",
         default: false,
         environments: {
           staging: {
@@ -229,7 +229,7 @@ describe("Local JSON Logic evaluation", () => {
     const client = makeFlagsClient();
     setFlagStore(client, {
       "my-flag": {
-        key: "my-flag",
+        id: "my-flag",
         default: "fallback",
         environments: {
           staging: {
@@ -261,7 +261,7 @@ describe("Local JSON Logic evaluation", () => {
 
     setFlagStore(client, {
       "svc-flag": {
-        key: "svc-flag",
+        id: "svc-flag",
         default: false,
         environments: {
           staging: {
@@ -287,7 +287,7 @@ describe("Local JSON Logic evaluation", () => {
 
     setFlagStore(client, {
       "svc-flag": {
-        key: "svc-flag",
+        id: "svc-flag",
         default: false,
         environments: {
           staging: {

@@ -90,13 +90,13 @@ async function main(): Promise<void> {
   const loggers = await client.logging.list();
   step(`Listed ${loggers.length} loggers (no start() needed)`);
   for (const l of loggers) {
-    step(`  ${l.key} — level=${l.level}, managed=${l.managed}`);
+    step(`  ${l.id} — level=${l.level}, managed=${l.managed}`);
   }
 
   const groups = await client.logging.listGroups();
   step(`Listed ${groups.length} groups (no start() needed)`);
   for (const g of groups) {
-    step(`  ${g.key} — level=${g.level}`);
+    step(`  ${g.id} — level=${g.level}`);
   }
 
   // Fetch a specific logger
@@ -118,27 +118,27 @@ async function main(): Promise<void> {
   section("3. Register Change Listeners (Before start)");
 
   // Global listener — fires for ANY logger change
-  const globalChanges: Array<{ key: string; level: unknown; source: string }> = [];
+  const globalChanges: Array<{ id: string; level: unknown; source: string }> = [];
   client.logging.onChange((event) => {
-    globalChanges.push({ key: event.key, level: event.level, source: event.source });
+    globalChanges.push({ id: event.id, level: event.level, source: event.source });
     console.log(
-      `    [GLOBAL] Logger '${event.key}' changed: level=${event.level} (via ${event.source})`,
+      `    [GLOBAL] Logger '${event.id}' changed: level=${event.level} (via ${event.source})`,
     );
   });
   step("Global change listener registered");
 
   // Scoped listener — fires only for sqlalchemy.engine
-  const sqlChanges: Array<{ key: string; level: unknown }> = [];
+  const sqlChanges: Array<{ id: string; level: unknown }> = [];
   client.logging.onChange("sqlalchemy.engine", (event) => {
-    sqlChanges.push({ key: event.key, level: event.level });
+    sqlChanges.push({ id: event.id, level: event.level });
     console.log(`    [SQL] sqlalchemy.engine changed: level=${event.level}`);
   });
   step("Scoped change listener registered for 'sqlalchemy.engine'");
 
   // Scoped listener for httpx — should NOT fire for sqlalchemy changes
-  const httpxChanges: Array<{ key: string; level: unknown }> = [];
+  const httpxChanges: Array<{ id: string; level: unknown }> = [];
   client.logging.onChange("httpx", (event) => {
-    httpxChanges.push({ key: event.key, level: event.level });
+    httpxChanges.push({ id: event.id, level: event.level });
     console.log(`    [HTTPX] httpx changed: level=${event.level}`);
   });
   step("Scoped change listener registered for 'httpx'");
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   step("Global listener should have received all changes");
   step(`  Global total: ${globalChanges.length}`);
   for (const c of globalChanges) {
-    step(`    ${c.key}: level=${c.level} (via ${c.source})`);
+    step(`    ${c.id}: level=${c.level} (via ${c.source})`);
   }
 
   step("SQL-scoped listener should only have sqlalchemy.engine changes");

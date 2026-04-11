@@ -71,10 +71,9 @@ function textResponse(body: string, status: number): Response {
 }
 
 const FLAG_RESOURCE = {
-  id: "flag-1",
+  id: "my-flag",
   type: "flag",
   attributes: {
-    key: "my-flag",
     name: "My Flag",
     type: "BOOLEAN",
     default: false,
@@ -95,13 +94,13 @@ const FLAG_RESOURCE = {
 
 describe("FlagsClient factory methods", () => {
   describe("newBooleanFlag", () => {
-    it("should return a BooleanFlag with id: null", () => {
+    it("should return a BooleanFlag with createdAt: null", () => {
       const client = makeFlagsClient();
       const flag = client.newBooleanFlag("checkout-v2", { default: false });
 
       expect(flag).toBeInstanceOf(BooleanFlag);
-      expect(flag.id).toBeNull();
-      expect(flag.key).toBe("checkout-v2");
+      expect(flag.id).toBe("checkout-v2");
+      expect(flag.createdAt).toBeNull();
       expect(flag.type).toBe("BOOLEAN");
       expect(flag.default).toBe(false);
     });
@@ -154,13 +153,13 @@ describe("FlagsClient factory methods", () => {
   });
 
   describe("newStringFlag", () => {
-    it("should return a StringFlag with id: null", () => {
+    it("should return a StringFlag with createdAt: null", () => {
       const client = makeFlagsClient();
       const flag = client.newStringFlag("banner-color", { default: "red" });
 
       expect(flag).toBeInstanceOf(StringFlag);
-      expect(flag.id).toBeNull();
-      expect(flag.key).toBe("banner-color");
+      expect(flag.id).toBe("banner-color");
+      expect(flag.createdAt).toBeNull();
       expect(flag.type).toBe("STRING");
       expect(flag.default).toBe("red");
     });
@@ -194,13 +193,13 @@ describe("FlagsClient factory methods", () => {
   });
 
   describe("newNumberFlag", () => {
-    it("should return a NumberFlag with id: null", () => {
+    it("should return a NumberFlag with createdAt: null", () => {
       const client = makeFlagsClient();
       const flag = client.newNumberFlag("max-retries", { default: 3 });
 
       expect(flag).toBeInstanceOf(NumberFlag);
-      expect(flag.id).toBeNull();
-      expect(flag.key).toBe("max-retries");
+      expect(flag.id).toBe("max-retries");
+      expect(flag.createdAt).toBeNull();
       expect(flag.type).toBe("NUMERIC");
       expect(flag.default).toBe(3);
     });
@@ -225,14 +224,14 @@ describe("FlagsClient factory methods", () => {
   });
 
   describe("newJsonFlag", () => {
-    it("should return a JsonFlag with id: null", () => {
+    it("should return a JsonFlag with createdAt: null", () => {
       const client = makeFlagsClient();
       const defaultVal = { mode: "dark", accent: "#fff" };
       const flag = client.newJsonFlag("theme-config", { default: defaultVal });
 
       expect(flag).toBeInstanceOf(JsonFlag);
-      expect(flag.id).toBeNull();
-      expect(flag.key).toBe("theme-config");
+      expect(flag.id).toBe("theme-config");
+      expect(flag.createdAt).toBeNull();
       expect(flag.type).toBe("JSON");
       expect(flag.default).toEqual(defaultVal);
     });
@@ -259,17 +258,16 @@ describe("FlagsClient factory methods", () => {
 // ---------------------------------------------------------------------------
 
 describe("Flag.save()", () => {
-  it("should POST when id is null (new flag)", async () => {
+  it("should POST when createdAt is null (new flag)", async () => {
     const client = makeFlagsClient();
     const flag = client.newBooleanFlag("checkout-v2", { default: false });
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
-          id: "new-uuid",
+          id: "checkout-v2",
           type: "flag",
           attributes: {
-            key: "checkout-v2",
             name: "Checkout V2",
             type: "BOOLEAN",
             default: false,
@@ -297,7 +295,7 @@ describe("Flag.save()", () => {
     // Verify body structure
     const body = JSON.parse(await mockFetch.mock.calls[0][0].clone().text());
     expect(body.data.type).toBe("flag");
-    expect(body.data.attributes.key).toBe("checkout-v2");
+    expect(body.data.id).toBe("checkout-v2");
     expect(body.data.attributes.name).toBe("Checkout V2");
     expect(body.data.attributes.type).toBe("BOOLEAN");
     expect(body.data.attributes.values).toEqual([
@@ -306,19 +304,18 @@ describe("Flag.save()", () => {
     ]);
   });
 
-  it("should PUT when id is set (existing flag)", async () => {
+  it("should PUT when createdAt is set (existing flag)", async () => {
     const client = makeFlagsClient();
     const flag = client.newBooleanFlag("checkout-v2", { default: false });
 
-    // Simulate a previously-saved flag by assigning an id
-    flag.id = "existing-uuid";
+    // Simulate a previously-saved flag by assigning createdAt
+    flag.createdAt = "2024-01-01T00:00:00Z";
 
     const updatedResource = {
-      id: "existing-uuid",
+      id: "checkout-v2",
       type: "flag",
       attributes: {
         ...FLAG_RESOURCE.attributes,
-        key: "checkout-v2",
         default: false,
       },
     };
@@ -328,22 +325,21 @@ describe("Flag.save()", () => {
 
     const request: Request = mockFetch.mock.calls[0][0];
     expect(request.method).toBe("PUT");
-    expect(request.url).toContain("/api/v1/flags/existing-uuid");
+    expect(request.url).toContain("/api/v1/flags/checkout-v2");
   });
 
   it("should update the instance in-place via _apply after POST", async () => {
     const client = makeFlagsClient();
     const flag = client.newBooleanFlag("new-flag", { default: true });
-    expect(flag.id).toBeNull();
+    expect(flag.id).toBe("new-flag");
     expect(flag.createdAt).toBeNull();
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
-          id: "server-uuid",
+          id: "new-flag",
           type: "flag",
           attributes: {
-            key: "new-flag",
             name: "New Flag",
             type: "BOOLEAN",
             default: true,
@@ -362,7 +358,7 @@ describe("Flag.save()", () => {
 
     await flag.save();
 
-    expect(flag.id).toBe("server-uuid");
+    expect(flag.id).toBe("new-flag");
     expect(flag.createdAt).toBe("2024-06-01T12:00:00Z");
     expect(flag.updatedAt).toBe("2024-06-01T12:00:00Z");
   });
@@ -370,16 +366,15 @@ describe("Flag.save()", () => {
   it("should update the instance in-place via _apply after PUT", async () => {
     const client = makeFlagsClient();
     const flag = client.newBooleanFlag("existing", { default: false });
-    flag.id = "uuid-1";
+    flag.createdAt = "2024-01-01T00:00:00Z"; // mark as existing
     flag.default = true; // local mutation
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
-          id: "uuid-1",
+          id: "existing",
           type: "flag",
           attributes: {
-            key: "existing",
             name: "Existing",
             type: "BOOLEAN",
             default: true,
@@ -410,10 +405,9 @@ describe("Flag.save()", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
-          id: "uuid-2",
+          id: "feat",
           type: "flag",
           attributes: {
-            key: "feat",
             name: "Feat",
             type: "BOOLEAN",
             default: false,
@@ -445,11 +439,10 @@ describe("Flag.save()", () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
-          id: "uuid-3",
+          id: "feat",
           type: "flag",
           attributes: {
             ...FLAG_RESOURCE.attributes,
-            key: "feat",
           },
         },
       }),
@@ -470,8 +463,7 @@ describe("Flag local mutations", () => {
   function makeFlag(overrides?: Partial<ConstructorParameters<typeof Flag>[1]>): Flag {
     const client = makeFlagsClient();
     return new Flag(client, {
-      id: "flag-1",
-      key: "my-flag",
+      id: "my-flag",
       name: "My Flag",
       type: "BOOLEAN",
       default: false,
@@ -708,7 +700,7 @@ describe("Flag local mutations", () => {
   describe("toString", () => {
     it("should produce a readable string", () => {
       const flag = makeFlag();
-      expect(flag.toString()).toBe("Flag(key=my-flag, type=BOOLEAN, default=false)");
+      expect(flag.toString()).toBe("Flag(id=my-flag, type=BOOLEAN, default=false)");
     });
   });
 
@@ -716,8 +708,7 @@ describe("Flag local mutations", () => {
     it("should copy all fields from another Flag instance", () => {
       const client = makeFlagsClient();
       const flag = new Flag(client, {
-        id: null,
-        key: "a",
+        id: "a",
         name: "A",
         type: "BOOLEAN",
         default: false,
@@ -729,8 +720,7 @@ describe("Flag local mutations", () => {
       });
 
       const other = new Flag(client, {
-        id: "uuid",
-        key: "a",
+        id: "a",
         name: "Updated A",
         type: "BOOLEAN",
         default: true,
@@ -743,7 +733,7 @@ describe("Flag local mutations", () => {
 
       flag._apply(other);
 
-      expect(flag.id).toBe("uuid");
+      expect(flag.id).toBe("a");
       expect(flag.name).toBe("Updated A");
       expect(flag.default).toBe(true);
       expect(flag.values).toHaveLength(1);
@@ -760,22 +750,21 @@ describe("Flag local mutations", () => {
 // ---------------------------------------------------------------------------
 
 describe("FlagsClient.get()", () => {
-  it("should fetch a flag by key using filter[key] query param", async () => {
+  it("should fetch a flag by id using GET /api/v1/flags/{id}", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
 
     const flag = await client.get("my-flag");
-    expect(flag.id).toBe("flag-1");
-    expect(flag.key).toBe("my-flag");
+    expect(flag.id).toBe("my-flag");
 
-    // Verify the query param
+    // Verify direct GET by id
     const request: Request = mockFetch.mock.calls[0][0];
-    expect(request.url).toContain("filter[key]=my-flag");
+    expect(request.url).toContain("/api/v1/flags/my-flag");
   });
 
   it("should return a Flag model from the response", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
 
     const flag = await client.get("my-flag");
     expect(flag).toBeInstanceOf(Flag);
@@ -785,23 +774,11 @@ describe("FlagsClient.get()", () => {
     expect(flag.description).toBe("A test flag");
   });
 
-  it("should throw SmplNotFoundError when no results", async () => {
-    const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
-
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    await expect(client.get("nonexistent")).rejects.toThrow(
-      "Flag with key 'nonexistent' not found",
-    );
-  });
-
   it("should throw SmplNotFoundError on 404", async () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
 
-    await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw SmplConnectionError on network error", async () => {
@@ -809,6 +786,13 @@ describe("FlagsClient.get()", () => {
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
     await expect(client.get("x")).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("should throw SmplNotFoundError when response has no data", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+
+    await expect(client.get("my-flag")).rejects.toThrow(SmplNotFoundError);
   });
 });
 
@@ -821,8 +805,8 @@ describe("FlagsClient.list()", () => {
     const client = makeFlagsClient();
     const secondResource = {
       ...FLAG_RESOURCE,
-      id: "flag-2",
-      attributes: { ...FLAG_RESOURCE.attributes, key: "other-flag", name: "Other Flag" },
+      id: "other-flag",
+      attributes: { ...FLAG_RESOURCE.attributes, name: "Other Flag" },
     };
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE, secondResource] }));
 
@@ -830,8 +814,8 @@ describe("FlagsClient.list()", () => {
     expect(flags).toHaveLength(2);
     expect(flags[0]).toBeInstanceOf(Flag);
     expect(flags[1]).toBeInstanceOf(Flag);
-    expect(flags[0].key).toBe("my-flag");
-    expect(flags[1].key).toBe("other-flag");
+    expect(flags[0].id).toBe("my-flag");
+    expect(flags[1].id).toBe("other-flag");
   });
 
   it("should return empty array when no flags exist", async () => {
@@ -862,33 +846,29 @@ describe("FlagsClient.list()", () => {
 // ---------------------------------------------------------------------------
 
 describe("FlagsClient.delete()", () => {
-  it("should resolve key then DELETE by UUID", async () => {
+  it("should DELETE by id directly", async () => {
     const client = makeFlagsClient();
 
-    // First call: GET /api/v1/flags?filter[key]=my-flag
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
-    // Second call: DELETE /api/v1/flags/flag-1
+    // DELETE /api/v1/flags/my-flag
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await client.delete("my-flag");
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    const deleteRequest: Request = mockFetch.mock.calls[1][0];
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const deleteRequest: Request = mockFetch.mock.calls[0][0];
     expect(deleteRequest.method).toBe("DELETE");
-    expect(deleteRequest.url).toContain("/api/v1/flags/flag-1");
+    expect(deleteRequest.url).toContain("/api/v1/flags/my-flag");
   });
 
-  it("should throw SmplNotFoundError when key does not exist", async () => {
+  it("should throw SmplNotFoundError on 404", async () => {
     const client = makeFlagsClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
 
     await expect(client.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw on DELETE error", async () => {
     const client = makeFlagsClient();
-    // GET succeeds
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE] }));
     // DELETE fails
     mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
 
@@ -922,7 +902,7 @@ describe("Error handling", () => {
   it("should throw SmplNotFoundError on 404", async () => {
     const client = makeFlagsClient();
     const flag = client.newBooleanFlag("missing", { default: false });
-    flag.id = "uuid-missing";
+    flag.createdAt = "2024-01-01T00:00:00Z"; // mark as existing for PUT path
 
     mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
 
@@ -990,10 +970,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "flag-1",
+            id: "my-flag",
             type: "flag",
             attributes: {
-              key: "my-flag",
               name: "My Flag",
               type: "BOOLEAN",
               default: false,
@@ -1046,10 +1025,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "color",
             type: "flag",
             attributes: {
-              key: "color",
               name: "Color",
               type: "STRING",
               default: "red",
@@ -1093,10 +1071,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "color",
             type: "flag",
             attributes: {
-              key: "color",
               name: "Color",
               type: "STRING",
               default: "red",
@@ -1132,10 +1109,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "flag-svc",
+            id: "svc-flag",
             type: "flag",
             attributes: {
-              key: "svc-flag",
               name: "Service Flag",
               type: "BOOLEAN",
               default: false,
@@ -1166,10 +1142,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "my-flag",
             type: "flag",
             attributes: {
-              key: "my-flag",
               name: "F",
               type: "BOOLEAN",
               default: false,
@@ -1183,16 +1158,15 @@ describe("FlagsClient runtime", () => {
     await client._connectInternal("staging");
 
     const changes: string[] = [];
-    client.onChange((e) => changes.push(e.key));
+    client.onChange((e) => changes.push(e.id));
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "my-flag",
             type: "flag",
             attributes: {
-              key: "my-flag",
               name: "F",
               type: "BOOLEAN",
               default: true,
@@ -1261,10 +1235,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "null-flag",
             type: "flag",
             attributes: {
-              key: "null-flag",
               name: "NF",
               type: "STRING",
               default: null,
@@ -1299,10 +1272,9 @@ describe("FlagsClient runtime", () => {
       jsonResponse({
         data: [
           {
-            id: "f1",
+            id: "my-flag",
             type: "flag",
             attributes: {
-              key: "my-flag",
               name: "F",
               type: "BOOLEAN",
               default: false,

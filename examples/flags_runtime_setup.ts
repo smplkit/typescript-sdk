@@ -24,10 +24,10 @@ import { SmplClient, Rule } from "@smplkit/sdk";
  * Create and configure demo flags for the runtime showcase.
  *
  * Creates four flags with environment configuration and targeting rules,
- * then returns their keys for cleanup.
+ * then returns their ids for cleanup.
  */
 export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
-  const flagKeys: string[] = [];
+  const flagIds: string[] = [];
 
   // --------------------------------------------------------------------------
   // 1. checkout-v2 — boolean flag
@@ -60,7 +60,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   checkoutFlag.setEnvironmentDefault("production", false);
 
   await checkoutFlag.save();
-  flagKeys.push(checkoutFlag.key);
+  flagIds.push(checkoutFlag.id);
 
   // --------------------------------------------------------------------------
   // 2. banner-color — string flag
@@ -97,7 +97,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   bannerFlag.setEnvironmentDefault("production", "blue");
 
   await bannerFlag.save();
-  flagKeys.push(bannerFlag.key);
+  flagIds.push(bannerFlag.id);
 
   // --------------------------------------------------------------------------
   // 3. max-retries — number flag
@@ -121,7 +121,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   retryFlag.setEnvironmentEnabled("production", true);
 
   await retryFlag.save();
-  flagKeys.push(retryFlag.key);
+  flagIds.push(retryFlag.id);
 
   // --------------------------------------------------------------------------
   // 4. ui-theme — JSON flag
@@ -150,20 +150,20 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   themeFlag.setEnvironmentEnabled("production", true);
 
   await themeFlag.save();
-  flagKeys.push(themeFlag.key);
+  flagIds.push(themeFlag.id);
 
-  return flagKeys;
+  return flagIds;
 }
 
 /**
  * Delete the demo flags created by setupDemoFlags.
  *
- * Accepts the array of flag keys returned by setupDemoFlags.
+ * Accepts the array of flag ids returned by setupDemoFlags.
  */
-export async function teardownDemoFlags(client: SmplClient, flagKeys: string[]): Promise<void> {
-  for (const key of flagKeys) {
+export async function teardownDemoFlags(client: SmplClient, flagIds: string[]): Promise<void> {
+  for (const id of flagIds) {
     try {
-      await client.flags.delete(key);
+      await client.flags.delete(id);
     } catch {
       // ignore — flag may already be deleted
     }

@@ -73,10 +73,10 @@ describe("SharedWebSocket", () => {
     mock._emit("message", JSON.stringify({ type: "connected" }));
 
     // Simulate flag_changed event
-    mock._emit("message", JSON.stringify({ event: "flag_changed", key: "my-flag" }));
+    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "my-flag" }));
 
     expect(events).toHaveLength(1);
-    expect(events[0].key).toBe("my-flag");
+    expect(events[0].id).toBe("my-flag");
 
     ws.stop();
   });
@@ -120,7 +120,7 @@ describe("SharedWebSocket", () => {
 
     const mock = getLastWsInstance();
     mock._emit("message", JSON.stringify({ type: "connected" }));
-    mock._emit("message", JSON.stringify({ event: "flag_changed", key: "x" }));
+    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "x" }));
 
     expect(events).toHaveLength(0);
     ws.stop();
@@ -313,7 +313,7 @@ describe("SharedWebSocket", () => {
     mock._emit("message", JSON.stringify({ type: "connected" }));
 
     // Should not throw when dispatching to a listener that throws
-    mock._emit("message", JSON.stringify({ event: "flag_changed", key: "x" }));
+    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "x" }));
 
     ws.stop();
   });
@@ -372,14 +372,13 @@ function jsonResponse(body: object, status = 200): Response {
   });
 }
 
-function makeFlagListResponse(flags: Array<{ key: string; default?: unknown }>) {
+function makeFlagListResponse(flags: Array<{ id: string; default?: unknown }>) {
   return jsonResponse({
-    data: flags.map((f, i) => ({
-      id: `f-${i}`,
+    data: flags.map((f) => ({
+      id: f.id,
       type: "flag",
       attributes: {
-        key: f.key,
-        name: f.key,
+        name: f.id,
         type: "BOOLEAN",
         default: f.default ?? false,
         values: [],
@@ -405,27 +404,27 @@ describe("FlagsClient change listeners", () => {
       client.onChange((e) => events.push(e));
 
       // Connect
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await client._connectInternal("staging");
 
       // Refresh fires change events
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag", default: true }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag", default: true }]));
       await client.refresh();
 
       expect(events).toHaveLength(1);
-      expect(events[0].key).toBe("my-flag");
+      expect(events[0].id).toBe("my-flag");
       expect(events[0].source).toBe("manual");
     });
 
     it("should fire for all flag changes on refresh", async () => {
       const client = makeFlagsClient();
       const keys: string[] = [];
-      client.onChange((e) => keys.push(e.key));
+      client.onChange((e) => keys.push(e.id));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-a" }, { key: "flag-b" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a" }, { id: "flag-b" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-a" }, { key: "flag-b" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a" }, { id: "flag-b" }]));
       await client.refresh();
 
       expect(keys).toContain("flag-a");
@@ -440,18 +439,18 @@ describe("FlagsClient change listeners", () => {
       client.onChange("my-flag", (e) => events.push(e));
 
       mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ key: "my-flag" }, { key: "other-flag" }]),
+        makeFlagListResponse([{ id: "my-flag" }, { id: "other-flag" }]),
       );
       await client._connectInternal("staging");
 
       mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ key: "my-flag" }, { key: "other-flag" }]),
+        makeFlagListResponse([{ id: "my-flag" }, { id: "other-flag" }]),
       );
       await client.refresh();
 
       // Should only have fired for "my-flag"
       expect(events).toHaveLength(1);
-      expect(events[0].key).toBe("my-flag");
+      expect(events[0].id).toBe("my-flag");
     });
 
     it("should not fire for other keys", async () => {
@@ -459,10 +458,10 @@ describe("FlagsClient change listeners", () => {
       const events: FlagChangeEvent[] = [];
       client.onChange("flag-a", (e) => events.push(e));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-b" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-b" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-b" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-b" }]));
       await client.refresh();
 
       expect(events).toHaveLength(0);
@@ -483,15 +482,15 @@ describe("FlagsClient change listeners", () => {
       const globalEvents: string[] = [];
       const keyEvents: string[] = [];
 
-      client.onChange((e) => globalEvents.push(e.key));
-      client.onChange("my-flag", (e) => keyEvents.push(e.key));
+      client.onChange((e) => globalEvents.push(e.id));
+      client.onChange("my-flag", (e) => keyEvents.push(e.id));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await client._connectInternal("staging");
 
       // Simulate WS event — handler re-fetches then fires listeners
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag", default: true }]));
-      lastMockWs._emit("flag_changed", { key: "my-flag" });
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag", default: true }]));
+      lastMockWs._emit("flag_changed", { id: "my-flag" });
 
       await vi.waitFor(() => {
         expect(globalEvents).toContain("my-flag");
@@ -504,11 +503,11 @@ describe("FlagsClient change listeners", () => {
       const sources: string[] = [];
       client.onChange((e) => sources.push(e.source));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
-      lastMockWs._emit("flag_changed", { key: "my-flag" });
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
+      lastMockWs._emit("flag_changed", { id: "my-flag" });
 
       await vi.waitFor(() => expect(sources).toContain("websocket"));
     });
@@ -518,14 +517,14 @@ describe("FlagsClient change listeners", () => {
     it("should fire listeners on flag_deleted", async () => {
       const client = makeFlagsClient();
       const events: string[] = [];
-      client.onChange((e) => events.push(e.key));
+      client.onChange((e) => events.push(e.id));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "del-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "del-flag" }]));
       await client._connectInternal("staging");
 
       // After deletion, re-fetch returns empty
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-      lastMockWs._emit("flag_deleted", { key: "del-flag" });
+      lastMockWs._emit("flag_deleted", { id: "del-flag" });
 
       await vi.waitFor(() => expect(events).toContain("del-flag"));
     });
@@ -538,10 +537,10 @@ describe("FlagsClient change listeners", () => {
         throw new Error("listener error");
       });
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await expect(client.refresh()).resolves.not.toThrow();
     });
 
@@ -551,10 +550,10 @@ describe("FlagsClient change listeners", () => {
         throw new Error("scoped listener error");
       });
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "my-flag" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
       await expect(client.refresh()).resolves.not.toThrow();
     });
 
@@ -565,12 +564,12 @@ describe("FlagsClient change listeners", () => {
       client.onChange(() => {
         throw new Error("first throws");
       });
-      client.onChange((e) => events.push(e.key));
+      client.onChange((e) => events.push(e.id));
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-1" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-1" }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ key: "flag-1" }]));
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-1" }]));
       await client.refresh();
 
       // The second listener should still fire
@@ -579,9 +578,9 @@ describe("FlagsClient change listeners", () => {
   });
 
   describe("FlagChangeEvent", () => {
-    it("should expose key and source", () => {
-      const event = new FlagChangeEvent("my-key", "websocket");
-      expect(event.key).toBe("my-key");
+    it("should expose id and source", () => {
+      const event = new FlagChangeEvent("my-flag", "websocket");
+      expect(event.id).toBe("my-flag");
       expect(event.source).toBe("websocket");
     });
   });

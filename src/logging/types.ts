@@ -15,8 +15,8 @@ export enum LogLevel {
 
 /** Describes a logger configuration change. */
 export interface LoggerChangeEvent {
-  /** The logger key that changed. */
-  key: string;
+  /** The logger id that changed. */
+  id: string;
   /** The new effective log level, or null if removed. */
   level: LogLevel | null;
   /** How the change was delivered. */

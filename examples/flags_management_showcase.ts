@@ -11,7 +11,7 @@
  * - Environment configuration: setEnvironmentEnabled, setEnvironmentDefault, clearRules
  * - Rule builder: fluent API for constructing JSON Logic rules
  * - Listing and inspecting flags
- * - Deleting flags by key
+ * - Deleting flags by id
  *
  * Most customers will create and configure flags via the Console UI.
  * This showcase demonstrates the programmatic equivalent — useful for
@@ -52,8 +52,8 @@ function step(description: string): void {
   console.log(`  → ${description}`);
 }
 
-// Track all flag keys we create, for cleanup on error.
-const createdFlagKeys: string[] = [];
+// Track all flag ids we create, for cleanup on error.
+const createdFlagIds: string[] = [];
 
 async function main(): Promise<void> {
   // ======================================================================
@@ -93,13 +93,13 @@ async function main(): Promise<void> {
       default: false,
       description: "Controls rollout of the new checkout experience.",
     });
-    step(`Unsaved: key=${checkoutFlag.key}, type=${checkoutFlag.type}, id=${checkoutFlag.id}`);
+    step(`Unsaved: id=${checkoutFlag.id}, type=${checkoutFlag.type}`);
     step(`  default=${checkoutFlag.default}`);
     step(`  values=${JSON.stringify(checkoutFlag.values)}`);
     // Boolean flags auto-generate values: [True, False]
 
     await checkoutFlag.save();
-    createdFlagKeys.push(checkoutFlag.key);
+    createdFlagIds.push(checkoutFlag.id);
     step(`Saved: id=${checkoutFlag.id}`);
 
     // ----------------------------------------------------------------
@@ -120,11 +120,11 @@ async function main(): Promise<void> {
       ],
     });
     step(
-      `Unsaved: key=${bannerFlag.key}, values=${JSON.stringify(bannerFlag.values.map((v) => v.name))}`,
+      `Unsaved: id=${bannerFlag.id}, values=${JSON.stringify(bannerFlag.values.map((v) => v.name))}`,
     );
 
     await bannerFlag.save();
-    createdFlagKeys.push(bannerFlag.key);
+    createdFlagIds.push(bannerFlag.id);
     step(`Saved: id=${bannerFlag.id}`);
 
     // ----------------------------------------------------------------
@@ -142,10 +142,10 @@ async function main(): Promise<void> {
       default: 3,
       description: "Maximum number of API retries before failing.",
     });
-    step(`Unsaved: key=${retryFlag.key}, default=${retryFlag.default}`);
+    step(`Unsaved: id=${retryFlag.id}, default=${retryFlag.default}`);
 
     await retryFlag.save();
-    createdFlagKeys.push(retryFlag.key);
+    createdFlagIds.push(retryFlag.id);
     step(`Saved: id=${retryFlag.id}`);
 
     // ----------------------------------------------------------------
@@ -164,23 +164,23 @@ async function main(): Promise<void> {
         { name: "High Contrast", value: { mode: "dark", accent: "#ffffff" } },
       ],
     });
-    step(`Unsaved: key=${themeFlag.key}, default=${JSON.stringify(themeFlag.default)}`);
+    step(`Unsaved: id=${themeFlag.id}, default=${JSON.stringify(themeFlag.default)}`);
 
     await themeFlag.save();
-    createdFlagKeys.push(themeFlag.key);
+    createdFlagIds.push(themeFlag.id);
     step(`Saved: id=${themeFlag.id}`);
 
     // ==================================================================
     // 3. RETRIEVE, MUTATE, AND SAVE
     // ==================================================================
     //
-    // Fetch an existing flag by key, mutate it locally, then save.
+    // Fetch an existing flag by id, mutate it locally, then save.
     // ==================================================================
 
     section("3. Retrieve, Mutate, and Save");
 
     const fetched = await client.flags.get("checkout-v2");
-    step(`Fetched: key=${fetched.key}, id=${fetched.id}`);
+    step(`Fetched: id=${fetched.id}`);
     step(`  description: ${fetched.description}`);
 
     // Mutate the description locally.
@@ -323,39 +323,39 @@ async function main(): Promise<void> {
     for (const f of flags) {
       const envKeys = f.environments ? Object.keys(f.environments) : [];
       step(
-        `  ${f.key} (${f.type}) — default=${JSON.stringify(f.default)}, environments=${JSON.stringify(envKeys)}`,
+        `  ${f.id} (${f.type}) — default=${JSON.stringify(f.default)}, environments=${JSON.stringify(envKeys)}`,
       );
     }
 
     // ==================================================================
-    // 7. DELETE A FLAG BY KEY
+    // 7. DELETE A FLAG BY ID
     // ==================================================================
 
-    section("7. Delete a Flag by Key");
+    section("7. Delete a Flag by ID");
 
     await client.flags.delete("ui-theme");
-    createdFlagKeys.splice(createdFlagKeys.indexOf("ui-theme"), 1);
+    createdFlagIds.splice(createdFlagIds.indexOf("ui-theme"), 1);
     step("Deleted: ui-theme");
 
     // Verify it's gone.
     const remaining = await client.flags.list();
-    const remainingKeys = remaining.map((f) => f.key);
-    step(`Remaining flags: ${JSON.stringify(remainingKeys)}`);
+    const remainingIds = remaining.map((f) => f.id);
+    step(`Remaining flags: ${JSON.stringify(remainingIds)}`);
 
     // ==================================================================
     // 8. CLEANUP
     // ==================================================================
     section("8. Cleanup");
 
-    for (const key of [...createdFlagKeys]) {
+    for (const id of [...createdFlagIds]) {
       try {
-        await client.flags.delete(key);
-        step(`Deleted: ${key}`);
+        await client.flags.delete(id);
+        step(`Deleted: ${id}`);
       } catch {
         // already deleted
       }
     }
-    createdFlagKeys.length = 0;
+    createdFlagIds.length = 0;
 
     client.close();
     step("SmplClient closed");
@@ -372,10 +372,10 @@ async function main(): Promise<void> {
     // ------------------------------------------------------------------
     console.error("\n  ERROR:", error);
     console.log("\n  Cleaning up flags created during this run...");
-    for (const key of createdFlagKeys) {
+    for (const id of createdFlagIds) {
       try {
-        await client.flags.delete(key);
-        step(`Deleted: ${key}`);
+        await client.flags.delete(id);
+        step(`Deleted: ${id}`);
       } catch {
         // ignore cleanup errors
       }

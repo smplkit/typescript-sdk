@@ -74,14 +74,13 @@ export interface components {
          *           "value": 10
          *         }
          *       },
-         *       "key": "database",
          *       "name": "Database",
          *       "updated_at": "2026-03-27T10:00:00Z"
          *     }
          */
         Config: {
-            /** Key */
-            key?: string | null;
+            /** Id */
+            id?: string | null;
             /** Name */
             name: string;
             /** Description */
@@ -148,11 +147,11 @@ export interface components {
          *             "value": "db.internal"
          *           }
          *         },
-         *         "key": "database",
          *         "name": "Database",
+         *         "parent": "common",
          *         "updated_at": "2026-03-27T10:00:00Z"
          *       },
-         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "id": "database",
          *       "type": "config"
          *     }
          */
@@ -221,7 +220,6 @@ export interface operations {
     list_configs: {
         parameters: {
             query?: {
-                "filter[key]"?: string | null;
                 "filter[parent]"?: string | null;
             };
             header?: never;

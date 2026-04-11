@@ -73,7 +73,6 @@ export interface components {
          *           "rules": []
          *         }
          *       },
-         *       "key": "dark_mode",
          *       "name": "Dark Mode",
          *       "type": "BOOLEAN",
          *       "updated_at": "2026-03-27T10:00:00Z",
@@ -90,11 +89,8 @@ export interface components {
          *     }
          */
         Flag: {
-            /**
-             * Key
-             * @description Unique key within account
-             */
-            key: string;
+            /** Id */
+            id?: string | null;
             /**
              * Name
              * @description Human-readable display name
@@ -170,7 +166,6 @@ export interface components {
          *             ]
          *           }
          *         },
-         *         "key": "dark_mode",
          *         "name": "Dark Mode",
          *         "type": "BOOLEAN",
          *         "updated_at": "2026-03-27T10:00:00Z",
@@ -185,7 +180,7 @@ export interface components {
          *           }
          *         ]
          *       },
-         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "id": "dark_mode",
          *       "type": "flag"
          *     }
          */
@@ -262,7 +257,6 @@ export interface operations {
     list_flags: {
         parameters: {
             query?: {
-                "filter[key]"?: string | null;
                 "filter[type]"?: string | null;
             };
             header?: never;

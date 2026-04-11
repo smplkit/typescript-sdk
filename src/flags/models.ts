@@ -13,10 +13,8 @@ import type { Context } from "./types.js";
  * Call `save()` to persist changes. Call `get()` to evaluate the flag.
  */
 export class Flag {
-  /** UUID of the flag, or `null` if unsaved. */
+  /** Unique identifier (slug) within the account. */
   id: string | null;
-  /** Unique key within the account. */
-  key: string;
   /** Human-readable display name. */
   name: string;
   /** Value type: BOOLEAN, STRING, NUMERIC, or JSON. */
@@ -42,7 +40,6 @@ export class Flag {
     client: FlagsClient,
     fields: {
       id: string | null;
-      key: string;
       name: string;
       type: string;
       default: unknown;
@@ -55,7 +52,6 @@ export class Flag {
   ) {
     this._client = client;
     this.id = fields.id;
-    this.key = fields.key;
     this.name = fields.name;
     this.type = fields.type;
     this.default = fields.default;
@@ -73,7 +69,7 @@ export class Flag {
    * Updates this instance in-place with the server response.
    */
   async save(): Promise<void> {
-    if (this.id === null) {
+    if (this.createdAt === null) {
       const created = await this._client._createFlag(this);
       this._apply(created);
     } else {
@@ -148,13 +144,12 @@ export class Flag {
    * Requires `initialize()` to have been called on the flags client.
    */
   get(options?: { context?: Context[] }): unknown {
-    return this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    return this._client._evaluateHandle(this.id!, this.default, options?.context ?? null);
   }
 
   /** @internal — copy all fields from another Flag instance. */
   _apply(other: Flag): void {
     this.id = other.id;
-    this.key = other.key;
     this.name = other.name;
     this.type = other.type;
     this.default = other.default;
@@ -166,14 +161,14 @@ export class Flag {
   }
 
   toString(): string {
-    return `Flag(key=${this.key}, type=${this.type}, default=${this.default})`;
+    return `Flag(id=${this.id}, type=${this.type}, default=${this.default})`;
   }
 }
 
 /** Typed flag that returns `boolean` from `get()`. */
 export class BooleanFlag extends Flag {
   get(options?: { context?: Context[] }): boolean {
-    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    const value = this._client._evaluateHandle(this.id!, this.default, options?.context ?? null);
     if (typeof value === "boolean") {
       return value;
     }
@@ -184,7 +179,7 @@ export class BooleanFlag extends Flag {
 /** Typed flag that returns `string` from `get()`. */
 export class StringFlag extends Flag {
   get(options?: { context?: Context[] }): string {
-    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    const value = this._client._evaluateHandle(this.id!, this.default, options?.context ?? null);
     if (typeof value === "string") {
       return value;
     }
@@ -195,7 +190,7 @@ export class StringFlag extends Flag {
 /** Typed flag that returns `number` from `get()`. */
 export class NumberFlag extends Flag {
   get(options?: { context?: Context[] }): number {
-    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    const value = this._client._evaluateHandle(this.id!, this.default, options?.context ?? null);
     if (typeof value === "number") {
       return value;
     }
@@ -206,7 +201,7 @@ export class NumberFlag extends Flag {
 /** Typed flag that returns `Record<string, any>` from `get()`. */
 export class JsonFlag extends Flag {
   get(options?: { context?: Context[] }): Record<string, any> {
-    const value = this._client._evaluateHandle(this.key, this.default, options?.context ?? null);
+    const value = this._client._evaluateHandle(this.id!, this.default, options?.context ?? null);
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       return value as Record<string, any>;
     }

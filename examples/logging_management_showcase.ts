@@ -6,7 +6,7 @@
  *
  * - Client initialization (`SmplClient`)
  * - Logger CRUD: new() → setLevel → setEnvironmentLevel → save()
- * - Fetch by key: `client.logging.get()`
+ * - Fetch by id: `client.logging.get()`
  * - Mutate and update existing loggers
  * - List and delete loggers
  * - Log Group CRUD: newGroup() → setLevel → save()
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   section("2a. Create Logger: sqlalchemy.engine");
 
   const sqlLogger = client.logging.new("sqlalchemy.engine", { managed: true });
-  step(`Created unsaved logger: key=${sqlLogger.key}, id=${sqlLogger.id}`);
+  step(`Created unsaved logger: id=${sqlLogger.id}`);
   step(`  managed=${sqlLogger.managed}`);
 
   // Sync local mutations — no network calls
@@ -129,9 +129,9 @@ async function main(): Promise<void> {
   // ======================================================================
   section("3. Fetch and Update a Logger");
 
-  // Fetch by key
+  // Fetch by id
   const fetched = await client.logging.get("sqlalchemy.engine");
-  step(`Fetched: key=${fetched.key}, level=${fetched.level}`);
+  step(`Fetched: id=${fetched.id}, level=${fetched.level}`);
   step(`  environments: ${JSON.stringify(fetched.environments)}`);
 
   // Mutate and save
@@ -176,7 +176,7 @@ async function main(): Promise<void> {
   step(`Total loggers: ${loggers.length}`);
   for (const l of loggers) {
     const groupInfo = l.group ? ` (group: ${l.group})` : "";
-    step(`  ${l.key} — level=${l.level}${groupInfo}`);
+    step(`  ${l.id} — level=${l.level}${groupInfo}`);
   }
 
   // ------------------------------------------------------------------
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
   section("6a. Create Log Group: sql");
 
   const sqlGroup = client.logging.newGroup("sql", { name: "SQL Loggers" });
-  step(`Created unsaved group: key=${sqlGroup.key}, id=${sqlGroup.id}`);
+  step(`Created unsaved group: id=${sqlGroup.id}`);
 
   sqlGroup.setLevel(LogLevel.WARN);
   step(`Set group base level: ${sqlGroup.level}`);
@@ -231,7 +231,7 @@ async function main(): Promise<void> {
   section("7. Fetch and Update a Log Group");
 
   const fetchedGroup = await client.logging.getGroup("sql");
-  step(`Fetched: key=${fetchedGroup.key}, level=${fetchedGroup.level}`);
+  step(`Fetched: id=${fetchedGroup.id}, level=${fetchedGroup.level}`);
 
   fetchedGroup.name = "SQL Loggers (Updated)";
   fetchedGroup.setLevel(LogLevel.INFO);
@@ -269,7 +269,7 @@ async function main(): Promise<void> {
   const groups = await client.logging.listGroups();
   step(`Total groups: ${groups.length}`);
   for (const g of groups) {
-    step(`  ${g.key} — level=${g.level}, name=${g.name}`);
+    step(`  ${g.id} — level=${g.level}, name=${g.name}`);
   }
 
   // ------------------------------------------------------------------

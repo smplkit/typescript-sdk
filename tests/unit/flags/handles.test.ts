@@ -42,17 +42,11 @@ describe("Typed flag handles", () => {
   });
 
   describe("handle properties", () => {
-    it("should expose key and default properties", () => {
+    it("should expose id and default properties", () => {
       const client = makeFlagsClient();
       const handle = client.booleanFlag("my-flag", true);
-      expect(handle.key).toBe("my-flag");
+      expect(handle.id).toBe("my-flag");
       expect(handle.default).toBe(true);
-    });
-
-    it("should have id: null on declaration", () => {
-      const client = makeFlagsClient();
-      const handle = client.stringFlag("color", "red");
-      expect(handle.id).toBeNull();
     });
   });
 
@@ -61,7 +55,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         "my-flag": {
-          key: "my-flag",
+          id: "my-flag",
           default: true,
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -75,7 +69,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         "my-flag": {
-          key: "my-flag",
+          id: "my-flag",
           default: "not a bool",
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -97,7 +91,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         color: {
-          key: "color",
+          id: "color",
           default: "blue",
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -111,7 +105,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         color: {
-          key: "color",
+          id: "color",
           default: 42,
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -133,7 +127,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         retries: {
-          key: "retries",
+          id: "retries",
           default: 5,
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -147,7 +141,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         retries: {
-          key: "retries",
+          id: "retries",
           default: "not a number",
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -169,7 +163,7 @@ describe("Typed flag handles", () => {
       const theme = { mode: "dark", accent: "#fff" };
       setFlagStore(client, {
         theme: {
-          key: "theme",
+          id: "theme",
           default: theme,
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -182,7 +176,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         theme: {
-          key: "theme",
+          id: "theme",
           default: "not an object",
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -196,7 +190,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         theme: {
-          key: "theme",
+          id: "theme",
           default: [1, 2, 3],
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -210,7 +204,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         theme: {
-          key: "theme",
+          id: "theme",
           default: null,
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -232,7 +226,7 @@ describe("Typed flag handles", () => {
       const client = makeFlagsClient();
       setFlagStore(client, {
         "my-flag": {
-          key: "my-flag",
+          id: "my-flag",
           default: "hello",
           environments: { staging: { enabled: true, rules: [] } },
         },
@@ -240,8 +234,7 @@ describe("Typed flag handles", () => {
 
       // Instantiate the base Flag class directly (as _resourceToModel does)
       const flag = new Flag(client, {
-        id: "f-1",
-        key: "my-flag",
+        id: "my-flag",
         name: "My Flag",
         type: "STRING",
         default: "fallback",
