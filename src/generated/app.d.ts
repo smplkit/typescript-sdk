@@ -597,7 +597,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/billing/subscriptions": {
+    "/api/v1/subscriptions": {
         parameters: {
             query?: never;
             header?: never;
@@ -605,43 +605,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Billing Subscriptions
+         * List Subscriptions
          * @description Return per-product subscription state for the authenticated account.
          */
-        get: operations["list_billing_subscriptions"];
+        get: operations["list_subscriptions"];
         put?: never;
         /**
-         * Create Billing Subscription
+         * Create Subscription
          * @description Create a new paid subscription for a product.
          */
-        post: operations["create_billing_subscription"];
+        post: operations["create_subscription"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/billing/setup_intent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Setup Intent
-         * @description Create a Stripe SetupIntent for saving a payment method.
-         */
-        post: operations["create_setup_intent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/billing/subscriptions/{product}": {
+    "/api/v1/subscriptions/{product}": {
         parameters: {
             query?: never;
             header?: never;
@@ -652,20 +632,20 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Cancel Billing Subscription
+         * Cancel Subscription
          * @description Cancel a subscription at end of the current billing period.
          */
-        delete: operations["cancel_billing_subscription"];
+        delete: operations["cancel_subscription"];
         options?: never;
         head?: never;
         /**
-         * Update Billing Subscription
+         * Update Subscription
          * @description Change the plan for an existing paid subscription (upgrade or downgrade).
          */
-        patch: operations["update_billing_subscription"];
+        patch: operations["update_subscription"];
         trace?: never;
     };
-    "/api/v1/billing/payment_methods": {
+    "/api/v1/payment_methods": {
         parameters: {
             query?: never;
             header?: never;
@@ -679,6 +659,30 @@ export interface paths {
         get: operations["list_payment_methods"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/functions/setup_intent/actions/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Setup Intent
+         * @description Create a Stripe SetupIntent for saving a payment method.
+         *
+         *     Returns a ``client_secret`` that the frontend passes to Stripe's
+         *     Payment Element so the customer can securely enter card details
+         *     without an immediate charge.
+         */
+        post: operations["execute_setup_intent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4563,7 +4567,7 @@ export interface operations {
             };
         };
     };
-    list_billing_subscriptions: {
+    list_subscriptions: {
         parameters: {
             query?: never;
             header?: never;
@@ -4619,7 +4623,7 @@ export interface operations {
             };
         };
     };
-    create_billing_subscription: {
+    create_subscription: {
         parameters: {
             query?: never;
             header?: never;
@@ -4679,63 +4683,7 @@ export interface operations {
             };
         };
     };
-    create_setup_intent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": unknown;
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    cancel_billing_subscription: {
+    cancel_subscription: {
         parameters: {
             query?: never;
             header?: never;
@@ -4791,7 +4739,7 @@ export interface operations {
             };
         };
     };
-    update_billing_subscription: {
+    update_subscription: {
         parameters: {
             query?: never;
             header?: never;
@@ -4854,6 +4802,62 @@ export interface operations {
         };
     };
     list_payment_methods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": unknown;
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    execute_setup_intent: {
         parameters: {
             query?: never;
             header?: never;
