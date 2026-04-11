@@ -137,15 +137,12 @@ export interface components {
          *           "level": "ERROR"
          *         }
          *       },
-         *       "id": "database-loggers",
          *       "level": "WARN",
          *       "name": "Database Loggers",
          *       "updated_at": "2026-04-01T10:00:00Z"
          *     }
          */
         LogGroup: {
-            /** Id */
-            id?: string | null;
             /** Name */
             name: string;
             /** Level */
@@ -211,7 +208,6 @@ export interface components {
          *         }
          *       },
          *       "group": "database-loggers",
-         *       "id": "com.example.sql",
          *       "level": "DEBUG",
          *       "managed": true,
          *       "name": "SQL Logger",
@@ -225,8 +221,6 @@ export interface components {
          *     }
          */
         Logger: {
-            /** Id */
-            id?: string | null;
             /** Name */
             name: string;
             /** Level */
