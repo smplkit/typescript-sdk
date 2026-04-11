@@ -416,8 +416,10 @@ export class LoggingClient {
         const logger = this.new(name, { managed: true });
         logger.setLevel(level as any);
         await logger.save();
-      } catch {
-        // Logger may already exist — ignore
+      } catch (err: unknown) {
+        console.warn(
+          `[smplkit] Failed to register logger "${name}": ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 

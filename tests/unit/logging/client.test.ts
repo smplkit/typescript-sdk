@@ -555,6 +555,36 @@ describe("LoggingClient — runtime", () => {
 
       expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
     });
+
+    it("should log console.warn when individual logger registration fails", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const client = makeClient();
+      client.registerAdapter({
+        name: "failing-adapter",
+        discover: () => [{ name: "bad.logger", level: "INFO" }],
+        applyLevel: () => {},
+        installHook: () => {},
+        uninstallHook: () => {},
+      });
+      // First calls succeed (list + listGroups), but save calls fail
+      let callCount = 0;
+      mockFetch.mockImplementation(() => {
+        callCount++;
+        // First two calls are list + listGroups from start(), remaining are save calls
+        if (callCount <= 2) {
+          return Promise.resolve(jsonResponse({ data: [] }));
+        }
+        // save() calls: return 400
+        return Promise.resolve(jsonResponse({ errors: [{ detail: "Invalid" }] }, 400));
+      });
+
+      await client.start();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[smplkit] Failed to register logger "bad.logger"')
+      );
+      warnSpy.mockRestore();
+    });
   });
 
   describe("onChange()", () => {
