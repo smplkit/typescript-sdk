@@ -11,10 +11,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Configs */
+        /**
+         * List Configs
+         * @description List all configurations for the authenticated account.
+         */
         get: operations["list_configs"];
         put?: never;
-        /** Create Config */
+        /**
+         * Create Config
+         * @description Create a new configuration. The caller provides the id (key) in the request body.
+         */
         post: operations["create_config"];
         delete?: never;
         options?: never;
@@ -29,12 +35,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Config */
+        /**
+         * Get Config
+         * @description Return a configuration by its key.
+         */
         get: operations["get_config"];
-        /** Update Config */
+        /**
+         * Update Config
+         * @description Replace a configuration entirely.
+         */
         put: operations["update_config"];
         post?: never;
-        /** Delete Config */
+        /**
+         * Delete Config
+         * @description Delete a configuration by its key.
+         */
         delete: operations["delete_config"];
         options?: never;
         head?: never;
@@ -197,34 +212,65 @@ export interface components {
                 [key: string]: components["schemas"]["ConfigItemOverride"];
             } | null;
         };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+        /** UsageAttributes */
+        UsageAttributes: {
+            /** Limit Key */
+            limit_key: string;
+            /** Period */
+            period: string;
+            /** Value */
+            value: number;
         };
-        /** Resource[Config] */
-        Resource_Config_: {
+        /**
+         * UsageListResponse
+         * @example {
+         *       "data": [
+         *         {
+         *           "attributes": {
+         *             "limit_key": "config.items",
+         *             "period": "current",
+         *             "value": 3
+         *           },
+         *           "id": "550e8400-e29b-41d4-a716-446655440000",
+         *           "type": "usage"
+         *         },
+         *         {
+         *           "attributes": {
+         *             "limit_key": "config.inheritance_depth",
+         *             "period": "current",
+         *             "value": 2
+         *           },
+         *           "id": "660e8400-e29b-41d4-a716-446655440001",
+         *           "type": "usage"
+         *         }
+         *       ]
+         *     }
+         */
+        UsageListResponse: {
+            /** Data */
+            data: components["schemas"]["UsageResource"][];
+        };
+        /**
+         * UsageResource
+         * @example {
+         *       "attributes": {
+         *         "limit_key": "config.items",
+         *         "period": "current",
+         *         "value": 3
+         *       },
+         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "type": "usage"
+         *     }
+         */
+        UsageResource: {
             /** Id */
-            id?: string | null;
+            id: string;
             /**
              * Type
-             * @default
+             * @constant
              */
-            type: string;
-            attributes: components["schemas"]["Config"];
-        };
-        /** Response[Config] */
-        Response_Config_: {
-            data: components["schemas"]["Resource_Config_"];
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
+            type: "usage";
+            attributes: components["schemas"]["UsageAttributes"];
         };
     };
     responses: never;
@@ -255,15 +301,6 @@ export interface operations {
                     "application/vnd.api+json": components["schemas"]["ConfigListResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     create_config: {
@@ -275,7 +312,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Response_Config_"];
+                "application/vnd.api+json": components["schemas"]["ConfigResponse"];
             };
         };
         responses: {
@@ -286,15 +323,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["ConfigResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -319,15 +347,6 @@ export interface operations {
                     "application/vnd.api+json": components["schemas"]["ConfigResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     update_config: {
@@ -341,7 +360,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Response_Config_"];
+                "application/vnd.api+json": components["schemas"]["ConfigResponse"];
             };
         };
         responses: {
@@ -352,15 +371,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["ConfigResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -383,15 +393,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     list_config_usage: {
@@ -411,7 +412,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["UsageListResponse"];
                 };
             };
             /** @description Missing or invalid filter[period] parameter */
@@ -420,15 +421,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
             };
         };
     };

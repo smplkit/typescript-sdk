@@ -190,7 +190,7 @@ function buildRequestBody(options: {
   parent?: string | null;
   items?: Record<string, unknown> | null;
   environments?: Record<string, unknown> | null;
-}): operations["create_config"]["requestBody"]["content"]["application/json"] {
+}): operations["create_config"]["requestBody"]["content"]["application/vnd.api+json"] {
   const attrs: components["schemas"]["Config"] = {
     name: options.name,
   };
@@ -322,7 +322,7 @@ export class ConfigClient {
     let data: components["schemas"]["ConfigListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/configs", {});
-      if (result.error !== undefined) await checkError(result.response, "Failed to list configs");
+      if (!result.response.ok) await checkError(result.response, "Failed to list configs");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -337,8 +337,7 @@ export class ConfigClient {
       const result = await this._http.DELETE("/api/v1/configs/{id}", {
         params: { path: { id } },
       });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete config '${id}'`);
+      if (!result.response.ok) await checkError(result.response, `Failed to delete config '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -362,7 +361,7 @@ export class ConfigClient {
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/configs", { body });
-      if (result.error !== undefined) await checkError(result.response, "Failed to create config");
+      if (!result.response.ok) await checkError(result.response, "Failed to create config");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -388,7 +387,7 @@ export class ConfigClient {
         params: { path: { id: config.id! } },
         body,
       });
-      if (result.error !== undefined)
+      if (!result.response.ok)
         await checkError(result.response, `Failed to update config ${config.id}`);
       data = result.data;
     } catch (err) {
@@ -405,7 +404,7 @@ export class ConfigClient {
       const result = await this._http.GET("/api/v1/configs/{id}", {
         params: { path: { id } },
       });
-      if (result.error !== undefined)
+      if (!result.response.ok)
         await checkError(result.response, `Config with id '${id}' not found`);
       data = result.data;
     } catch (err) {
