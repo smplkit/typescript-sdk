@@ -87,20 +87,20 @@ async function main(): Promise<void> {
   console.log("  Demo loggers ready.\n");
 
   // Management queries work without start()
-  const loggers = await client.logging.list();
+  const loggers = await client.logging.management.list();
   step(`Listed ${loggers.length} loggers (no start() needed)`);
   for (const l of loggers) {
     step(`  ${l.id} — level=${l.level}, managed=${l.managed}`);
   }
 
-  const groups = await client.logging.listGroups();
+  const groups = await client.logging.management.listGroups();
   step(`Listed ${groups.length} groups (no start() needed)`);
   for (const g of groups) {
     step(`  ${g.id} — level=${g.level}`);
   }
 
   // Fetch a specific logger (use server-assigned id from demo setup)
-  const sqlLogger = await client.logging.get(demo.loggers[0].id);
+  const sqlLogger = await client.logging.management.get(demo.loggers[0].id);
   step(`Fetched ${sqlLogger.id}: level=${sqlLogger.level}, group=${sqlLogger.group}`);
 
   // ======================================================================
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
   section("5. Simulate Live Updates");
 
   // Modify sqlalchemy.engine via management API (use server-assigned id)
-  const sqlRefresh = await client.logging.get(demo.loggers[0].id);
+  const sqlRefresh = await client.logging.management.get(demo.loggers[0].id);
   sqlRefresh.setLevel(LogLevel.DEBUG);
   await sqlRefresh.save();
   step(`Updated ${demo.loggers[0].id} level to DEBUG via management API`);
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
   step(`HTTPX-scoped changes received: ${httpxChanges.length}`);
 
   // Modify httpx via management API (use server-assigned id)
-  const httpxRefresh = await client.logging.get(demo.loggers[1].id);
+  const httpxRefresh = await client.logging.management.get(demo.loggers[1].id);
   httpxRefresh.setLevel(LogLevel.ERROR);
   await httpxRefresh.save();
   step(`Updated ${demo.loggers[1].id} level to ERROR via management API`);

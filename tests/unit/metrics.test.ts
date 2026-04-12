@@ -635,7 +635,7 @@ describe("ConfigClient — metrics instrumentation", () => {
       ),
     );
 
-    const result = await client.resolve("my-config");
+    const result = await client.get("my-config");
     expect(result).toEqual({ host: "localhost" });
     expect(recordSpy).toHaveBeenCalledWith("config.resolutions", 1, "resolutions", {
       config: "my-config",
@@ -850,7 +850,7 @@ describe("ConfigClient — config.changes instrumentation", () => {
       ),
     );
 
-    await client.resolve("my-config");
+    await client.get("my-config");
     recordSpy.mockClear();
 
     // Now refresh with a changed value

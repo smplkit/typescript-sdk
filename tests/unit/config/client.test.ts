@@ -88,63 +88,63 @@ describe("ConfigClient", () => {
   describe("new", () => {
     it("should return a Config with the given id", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.id).toBe("user-service");
     });
 
     it("should auto-generate name from key", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.name).toBe("User Service");
     });
 
     it("should auto-generate name from underscore key", () => {
       const client = makeClient();
-      const config = client.new("payment_gateway");
+      const config = client.management.new("payment_gateway");
 
       expect(config.name).toBe("Payment Gateway");
     });
 
     it("should use provided name when given", () => {
       const client = makeClient();
-      const config = client.new("user-service", { name: "Custom Name" });
+      const config = client.management.new("user-service", { name: "Custom Name" });
 
       expect(config.name).toBe("Custom Name");
     });
 
     it("should set description when provided", () => {
       const client = makeClient();
-      const config = client.new("user-service", { description: "A config" });
+      const config = client.management.new("user-service", { description: "A config" });
 
       expect(config.description).toBe("A config");
     });
 
     it("should default description to null", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.description).toBeNull();
     });
 
     it("should set parent when provided", () => {
       const client = makeClient();
-      const config = client.new("child-service", { parent: "parent-uuid" });
+      const config = client.management.new("child-service", { parent: "parent-uuid" });
 
       expect(config.parent).toBe("parent-uuid");
     });
 
     it("should default parent to null", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.parent).toBeNull();
     });
 
     it("should initialize items and environments as empty objects", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.items).toEqual({});
       expect(config.environments).toEqual({});
@@ -152,7 +152,7 @@ describe("ConfigClient", () => {
 
     it("should set timestamps to null", () => {
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.createdAt).toBeNull();
       expect(config.updatedAt).toBeNull();
@@ -168,7 +168,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("user-service", { name: "User Service" });
+      const config = client.management.new("user-service", { name: "User Service" });
       config.items = { timeout: 30, retries: 3 };
 
       await config.save();
@@ -181,7 +181,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("user-service", {
+      const config = client.management.new("user-service", {
         name: "User Service",
         description: "User service configuration",
       });
@@ -206,7 +206,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       await config.save();
 
       expect(calledAuthHeader()).toBe("Bearer sk_api_test");
@@ -216,7 +216,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       expect(config.createdAt).toBeNull();
       await config.save();
@@ -232,7 +232,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       config.environments = { production: { values: { timeout: 60 } } };
 
       await config.save();
@@ -248,7 +248,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({}, 201));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
 
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
@@ -267,7 +267,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       // Simulate a previously-saved config with createdAt set
       config.createdAt = "2024-01-15T10:30:00Z";
       config.name = "Updated Service";
@@ -282,7 +282,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       config.createdAt = "2024-01-15T10:30:00Z";
       config.items = { timeout: 30 };
 
@@ -306,7 +306,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: updatedResource }));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       config.createdAt = "2024-01-15T10:30:00Z";
 
       await config.save();
@@ -319,7 +319,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
       const client = makeClient();
-      const config = client.new("user-service");
+      const config = client.management.new("user-service");
       config.createdAt = "2024-01-15T10:30:00Z";
 
       await expect(config.save()).rejects.toThrow(SmplValidationError);
@@ -335,7 +335,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(config.id).toBe("user-service");
       expect(config.name).toBe("User Service");
@@ -354,28 +354,28 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
       const client = makeClient();
-      await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplNotFoundError on 404 response", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
       const client = makeClient();
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      await expect(client.get("test")).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.get("test")).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw SmplNotFoundError for JSON 404", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Not Found" }] }, 404));
 
       const client = makeClient();
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
   });
 
@@ -388,7 +388,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
       const client = makeClient();
-      const result = await client.delete("user-service");
+      const result = await client.management.delete("user-service");
 
       expect(result).toBeUndefined();
 
@@ -400,21 +400,21 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
 
       const client = makeClient();
-      await expect(client.delete("user-service")).rejects.toThrow(SmplConflictError);
+      await expect(client.management.delete("user-service")).rejects.toThrow(SmplConflictError);
     });
 
     it("should throw SmplConflictError on JSON 409 from DELETE", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Conflict" }] }, 409));
 
       const client = makeClient();
-      await expect(client.delete("user-service")).rejects.toThrow(SmplConflictError);
+      await expect(client.management.delete("user-service")).rejects.toThrow(SmplConflictError);
     });
 
     it("should throw SmplConnectionError on network failure during DELETE", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      await expect(client.delete("user-service")).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.delete("user-service")).rejects.toThrow(SmplConnectionError);
     });
   });
 
@@ -435,7 +435,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_RESOURCE, secondResource] }));
 
       const client = makeClient();
-      const configs = await client.list();
+      const configs = await client.management.list();
 
       expect(configs).toHaveLength(2);
       expect(configs[0].name).toBe("User Service");
@@ -448,7 +448,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
       const client = makeClient();
-      const configs = await client.list();
+      const configs = await client.management.list();
 
       expect(configs).toEqual([]);
     });
@@ -457,7 +457,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
 
       const client = makeClient();
-      const configs = await client.list();
+      const configs = await client.management.list();
 
       expect(configs).toEqual([]);
     });
@@ -466,21 +466,21 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Internal Error", 500));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplError);
+      await expect(client.management.list()).rejects.toThrow(SmplError);
     });
 
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw on JSON error response for list", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "Server Error" }] }, 500));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplError);
+      await expect(client.management.list()).rejects.toThrow(SmplError);
     });
   });
 
@@ -493,7 +493,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
 
@@ -501,49 +501,49 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
       const client = makeClient();
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw SmplTimeoutError on abort", async () => {
       mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplTimeoutError);
+      await expect(client.management.list()).rejects.toThrow(SmplTimeoutError);
     });
 
     it("should throw SmplError on unknown status code", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
 
       const client = makeClient();
-      await expect(client.get("test")).rejects.toThrow("HTTP 500");
+      await expect(client.management.get("test")).rejects.toThrow("HTTP 500");
     });
 
     it("should throw SmplConnectionError on generic error", async () => {
       mockFetch.mockRejectedValueOnce(new Error("some other error"));
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw SmplConnectionError for non-Error objects", async () => {
       mockFetch.mockRejectedValueOnce("string error");
 
       const client = makeClient();
-      await expect(client.list()).rejects.toThrow(SmplConnectionError);
+      await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should re-throw SmplError subclasses through wrapFetchError", async () => {
       mockFetch.mockResolvedValueOnce(textResponse("Not Found", 404));
 
       const client = makeClient();
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplValidationError for JSON 422 on save", async () => {
@@ -552,7 +552,7 @@ describe("ConfigClient", () => {
       );
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
 
@@ -560,7 +560,7 @@ describe("ConfigClient", () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       await expect(config.save()).rejects.toThrow(SmplConnectionError);
     });
 
@@ -568,7 +568,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.createdAt = "2024-01-15T10:30:00Z";
       await expect(config.save()).rejects.toThrow(SmplValidationError);
     });
@@ -577,7 +577,7 @@ describe("ConfigClient", () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.createdAt = "2024-01-15T10:30:00Z";
       await expect(config.save()).rejects.toThrow(SmplConnectionError);
     });
@@ -586,14 +586,14 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
 
       const client = makeClient();
-      await expect(client.delete("user-service")).rejects.toThrow("HTTP 500");
+      await expect(client.management.delete("user-service")).rejects.toThrow("HTTP 500");
     });
 
     it("should throw SmplTimeoutError on abort for get", async () => {
       mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
       const client = makeClient();
-      await expect(client.get("test")).rejects.toThrow(SmplTimeoutError);
+      await expect(client.management.get("test")).rejects.toThrow(SmplTimeoutError);
     });
   });
 
@@ -614,7 +614,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(config.description).toBeNull();
       expect(config.parent).toBeNull();
@@ -632,7 +632,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(config.items).toEqual({});
       expect(config.environments).toEqual({});
@@ -652,7 +652,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(config.environments).toEqual({
         staging: { description: "no values key" },
@@ -664,7 +664,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(typeof config.createdAt).toBe("string");
       expect(config.createdAt).toBe("2024-01-15T10:30:00Z");
@@ -684,7 +684,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       expect(config.createdAt).toBeNull();
       expect(config.updatedAt).toBeNull();
@@ -699,7 +699,7 @@ describe("ConfigClient", () => {
 
       const client = makeClient();
       // Force it through list which doesn't throw for null id
-      const configs = await client.list();
+      const configs = await client.management.list();
 
       expect(configs[0].id).toBeNull();
     });
@@ -708,7 +708,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       // Items should be unwrapped: {timeout: {value: 30}} -> {timeout: 30}
       expect(config.items).toEqual({ timeout: 30, retries: 3 });
@@ -718,7 +718,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = await client.get("user-service");
+      const config = await client.management.get("user-service");
 
       // Environments should be unwrapped
       expect(config.environments).toEqual({
@@ -774,7 +774,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.items = { host: "localhost", port: 5432, ssl: true };
 
       await config.save();
@@ -792,7 +792,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = {
         production: { values: { timeout: 60 } },
@@ -811,7 +811,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = {
         staging: null as unknown,
@@ -829,7 +829,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.createdAt = "2024-01-15T10:30:00Z";
       config.environments = { staging: { description: "no values here" } };
 
@@ -846,7 +846,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.items = null as unknown as Record<string, unknown>;
 
       await config.save();
@@ -860,7 +860,7 @@ describe("ConfigClient", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_RESOURCE }, 201));
 
       const client = makeClient();
-      const config = client.new("test");
+      const config = client.management.new("test");
       config.environments = null as unknown as Record<string, unknown>;
 
       await config.save();

@@ -96,7 +96,7 @@ describe("FlagsClient factory methods", () => {
   describe("newBooleanFlag", () => {
     it("should return a BooleanFlag with createdAt: null", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("checkout-v2", { default: false });
+      const flag = client.management.newBooleanFlag("checkout-v2", { default: false });
 
       expect(flag).toBeInstanceOf(BooleanFlag);
       expect(flag.id).toBe("checkout-v2");
@@ -107,19 +107,19 @@ describe("FlagsClient factory methods", () => {
 
     it("should auto-generate name from key", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("checkout-v2", { default: true });
+      const flag = client.management.newBooleanFlag("checkout-v2", { default: true });
       expect(flag.name).toBe("Checkout V2");
     });
 
     it("should use custom name when provided", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("checkout-v2", { default: true, name: "Custom Name" });
+      const flag = client.management.newBooleanFlag("checkout-v2", { default: true, name: "Custom Name" });
       expect(flag.name).toBe("Custom Name");
     });
 
     it("should auto-generate boolean values", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("feat", { default: false });
+      const flag = client.management.newBooleanFlag("feat", { default: false });
       expect(flag.values).toEqual([
         { name: "True", value: true },
         { name: "False", value: false },
@@ -128,25 +128,25 @@ describe("FlagsClient factory methods", () => {
 
     it("should set description when provided", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("feat", { default: false, description: "A feature" });
+      const flag = client.management.newBooleanFlag("feat", { default: false, description: "A feature" });
       expect(flag.description).toBe("A feature");
     });
 
     it("should default description to null", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("feat", { default: false });
+      const flag = client.management.newBooleanFlag("feat", { default: false });
       expect(flag.description).toBeNull();
     });
 
     it("should have empty environments", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("feat", { default: false });
+      const flag = client.management.newBooleanFlag("feat", { default: false });
       expect(flag.environments).toEqual({});
     });
 
     it("should have null timestamps", () => {
       const client = makeFlagsClient();
-      const flag = client.newBooleanFlag("feat", { default: false });
+      const flag = client.management.newBooleanFlag("feat", { default: false });
       expect(flag.createdAt).toBeNull();
       expect(flag.updatedAt).toBeNull();
     });
@@ -155,7 +155,7 @@ describe("FlagsClient factory methods", () => {
   describe("newStringFlag", () => {
     it("should return a StringFlag with createdAt: null", () => {
       const client = makeFlagsClient();
-      const flag = client.newStringFlag("banner-color", { default: "red" });
+      const flag = client.management.newStringFlag("banner-color", { default: "red" });
 
       expect(flag).toBeInstanceOf(StringFlag);
       expect(flag.id).toBe("banner-color");
@@ -166,13 +166,13 @@ describe("FlagsClient factory methods", () => {
 
     it("should auto-generate name from key", () => {
       const client = makeFlagsClient();
-      const flag = client.newStringFlag("banner-color", { default: "red" });
+      const flag = client.management.newStringFlag("banner-color", { default: "red" });
       expect(flag.name).toBe("Banner Color");
     });
 
     it("should accept custom values", () => {
       const client = makeFlagsClient();
-      const flag = client.newStringFlag("color", {
+      const flag = client.management.newStringFlag("color", {
         default: "red",
         values: [
           { name: "Red", value: "red" },
@@ -187,7 +187,7 @@ describe("FlagsClient factory methods", () => {
 
     it("should default to null values (unconstrained)", () => {
       const client = makeFlagsClient();
-      const flag = client.newStringFlag("color", { default: "red" });
+      const flag = client.management.newStringFlag("color", { default: "red" });
       expect(flag.values).toBeNull();
     });
   });
@@ -195,7 +195,7 @@ describe("FlagsClient factory methods", () => {
   describe("newNumberFlag", () => {
     it("should return a NumberFlag with createdAt: null", () => {
       const client = makeFlagsClient();
-      const flag = client.newNumberFlag("max-retries", { default: 3 });
+      const flag = client.management.newNumberFlag("max-retries", { default: 3 });
 
       expect(flag).toBeInstanceOf(NumberFlag);
       expect(flag.id).toBe("max-retries");
@@ -206,13 +206,13 @@ describe("FlagsClient factory methods", () => {
 
     it("should auto-generate name from key with underscores", () => {
       const client = makeFlagsClient();
-      const flag = client.newNumberFlag("max_retries", { default: 5 });
+      const flag = client.management.newNumberFlag("max_retries", { default: 5 });
       expect(flag.name).toBe("Max Retries");
     });
 
     it("should accept custom values", () => {
       const client = makeFlagsClient();
-      const flag = client.newNumberFlag("retries", {
+      const flag = client.management.newNumberFlag("retries", {
         default: 3,
         values: [
           { name: "Low", value: 1 },
@@ -227,7 +227,7 @@ describe("FlagsClient factory methods", () => {
     it("should return a JsonFlag with createdAt: null", () => {
       const client = makeFlagsClient();
       const defaultVal = { mode: "dark", accent: "#fff" };
-      const flag = client.newJsonFlag("theme-config", { default: defaultVal });
+      const flag = client.management.newJsonFlag("theme-config", { default: defaultVal });
 
       expect(flag).toBeInstanceOf(JsonFlag);
       expect(flag.id).toBe("theme-config");
@@ -238,13 +238,13 @@ describe("FlagsClient factory methods", () => {
 
     it("should auto-generate name from key", () => {
       const client = makeFlagsClient();
-      const flag = client.newJsonFlag("theme-config", { default: {} });
+      const flag = client.management.newJsonFlag("theme-config", { default: {} });
       expect(flag.name).toBe("Theme Config");
     });
 
     it("should accept custom values", () => {
       const client = makeFlagsClient();
-      const flag = client.newJsonFlag("theme", {
+      const flag = client.management.newJsonFlag("theme", {
         default: {},
         values: [{ name: "Dark", value: { mode: "dark" } }],
       });
@@ -260,7 +260,7 @@ describe("FlagsClient factory methods", () => {
 describe("Flag.save()", () => {
   it("should POST when createdAt is null (new flag)", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("checkout-v2", { default: false });
+    const flag = client.management.newBooleanFlag("checkout-v2", { default: false });
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -306,7 +306,7 @@ describe("Flag.save()", () => {
 
   it("should PUT when createdAt is set (existing flag)", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("checkout-v2", { default: false });
+    const flag = client.management.newBooleanFlag("checkout-v2", { default: false });
 
     // Simulate a previously-saved flag by assigning createdAt
     flag.createdAt = "2024-01-01T00:00:00Z";
@@ -330,7 +330,7 @@ describe("Flag.save()", () => {
 
   it("should update the instance in-place via _apply after POST", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("new-flag", { default: true });
+    const flag = client.management.newBooleanFlag("new-flag", { default: true });
     expect(flag.id).toBe("new-flag");
     expect(flag.createdAt).toBeNull();
 
@@ -365,7 +365,7 @@ describe("Flag.save()", () => {
 
   it("should update the instance in-place via _apply after PUT", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("existing", { default: false });
+    const flag = client.management.newBooleanFlag("existing", { default: false });
     flag.createdAt = "2024-01-01T00:00:00Z"; // mark as existing
     flag.default = true; // local mutation
 
@@ -399,7 +399,7 @@ describe("Flag.save()", () => {
 
   it("should include environments in POST body when present", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("feat", { default: false });
+    const flag = client.management.newBooleanFlag("feat", { default: false });
     flag.setEnvironmentEnabled("staging", true);
 
     mockFetch.mockResolvedValueOnce(
@@ -434,7 +434,7 @@ describe("Flag.save()", () => {
 
   it("should omit environments from body when empty", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("feat", { default: false });
+    const flag = client.management.newBooleanFlag("feat", { default: false });
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -754,7 +754,7 @@ describe("FlagsClient.get()", () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
 
-    const flag = await client.get("my-flag");
+    const flag = await client.management.get("my-flag");
     expect(flag.id).toBe("my-flag");
 
     // Verify direct GET by id
@@ -766,7 +766,7 @@ describe("FlagsClient.get()", () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: FLAG_RESOURCE }));
 
-    const flag = await client.get("my-flag");
+    const flag = await client.management.get("my-flag");
     expect(flag).toBeInstanceOf(Flag);
     expect(flag.name).toBe("My Flag");
     expect(flag.type).toBe("BOOLEAN");
@@ -778,21 +778,21 @@ describe("FlagsClient.get()", () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
 
-    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.management.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw SmplConnectionError on network error", async () => {
     const client = makeFlagsClient();
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client.get("x")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.get("x")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplNotFoundError when response has no data", async () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
-    await expect(client.get("my-flag")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.management.get("my-flag")).rejects.toThrow(SmplNotFoundError);
   });
 });
 
@@ -810,7 +810,7 @@ describe("FlagsClient.list()", () => {
     };
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [FLAG_RESOURCE, secondResource] }));
 
-    const flags = await client.list();
+    const flags = await client.management.list();
     expect(flags).toHaveLength(2);
     expect(flags[0]).toBeInstanceOf(Flag);
     expect(flags[1]).toBeInstanceOf(Flag);
@@ -822,7 +822,7 @@ describe("FlagsClient.list()", () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-    const flags = await client.list();
+    const flags = await client.management.list();
     expect(flags).toEqual([]);
   });
 
@@ -830,14 +830,14 @@ describe("FlagsClient.list()", () => {
     const client = makeFlagsClient();
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client.list()).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplError on server error", async () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
 
-    await expect(client.list()).rejects.toThrow(SmplError);
+    await expect(client.management.list()).rejects.toThrow(SmplError);
   });
 });
 
@@ -852,7 +852,7 @@ describe("FlagsClient.delete()", () => {
     // DELETE /api/v1/flags/my-flag
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-    await client.delete("my-flag");
+    await client.management.delete("my-flag");
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const deleteRequest: Request = mockFetch.mock.calls[0][0];
@@ -864,7 +864,7 @@ describe("FlagsClient.delete()", () => {
     const client = makeFlagsClient();
     mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
 
-    await expect(client.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.management.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw on DELETE error", async () => {
@@ -872,7 +872,7 @@ describe("FlagsClient.delete()", () => {
     // DELETE fails
     mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
 
-    await expect(client.delete("my-flag")).rejects.toThrow(SmplError);
+    await expect(client.management.delete("my-flag")).rejects.toThrow(SmplError);
   });
 });
 
@@ -883,7 +883,7 @@ describe("FlagsClient.delete()", () => {
 describe("Error handling", () => {
   it("should throw SmplValidationError on 422", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("bad", { default: false });
+    const flag = client.management.newBooleanFlag("bad", { default: false });
 
     mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
@@ -892,7 +892,7 @@ describe("Error handling", () => {
 
   it("should throw SmplConflictError on 409", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("dup", { default: false });
+    const flag = client.management.newBooleanFlag("dup", { default: false });
 
     mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
 
@@ -901,7 +901,7 @@ describe("Error handling", () => {
 
   it("should throw SmplNotFoundError on 404", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("missing", { default: false });
+    const flag = client.management.newBooleanFlag("missing", { default: false });
     flag.createdAt = "2024-01-01T00:00:00Z"; // mark as existing for PUT path
 
     mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
@@ -911,7 +911,7 @@ describe("Error handling", () => {
 
   it("should throw SmplConnectionError on network error (TypeError)", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("x", { default: false });
+    const flag = client.management.newBooleanFlag("x", { default: false });
 
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
@@ -920,7 +920,7 @@ describe("Error handling", () => {
 
   it("should throw SmplError on 500 server error", async () => {
     const client = makeFlagsClient();
-    const flag = client.newBooleanFlag("x", { default: false });
+    const flag = client.management.newBooleanFlag("x", { default: false });
 
     mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
 
@@ -946,7 +946,7 @@ describe("Error handling", () => {
         }),
     );
 
-    await expect(client.list()).rejects.toThrow(SmplTimeoutError);
+    await expect(client.management.list()).rejects.toThrow(SmplTimeoutError);
   });
 
   it("should re-throw SDK errors without wrapping", async () => {
@@ -954,7 +954,7 @@ describe("Error handling", () => {
     // A 422 response creates SmplValidationError via checkError, which passes through wrapFetchError
     mockFetch.mockResolvedValueOnce(textResponse("Validation failed", 422));
 
-    await expect(client.list()).rejects.toThrow(SmplValidationError);
+    await expect(client.management.list()).rejects.toThrow(SmplValidationError);
   });
 });
 
@@ -1308,6 +1308,6 @@ describe("FlagsClient runtime", () => {
       throw new Error("unexpected fetch error");
     });
 
-    await expect(client.list()).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.list()).rejects.toThrow(SmplConnectionError);
   });
 });

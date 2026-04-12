@@ -24,34 +24,34 @@ export async function setupDemoLoggers(
 ): Promise<{ loggers: Logger[]; groups: LogGroup[] }> {
   // Pre-cleanup: delete any loggers and groups from previous runs.
   // Server assigns IDs from the logger name, not the client-provided key.
-  for (const id of ["Sqlalchemy.Engine", "HTTPX Client", "Celery Worker"]) {
-    try { await client.logging.delete(id); } catch { /* not present — ignore */ }
+  for (const id of ["sqlalchemy.engine", "httpx", "celery.worker"]) {
+    try { await client.logging.management.delete(id); } catch { /* not present — ignore */ }
   }
   try {
-    const existingGroups = await client.logging.listGroups();
+    const existingGroups = await client.logging.management.listGroups();
     for (const g of existingGroups) {
       if (g.name === "SQL Loggers") {
-        try { await client.logging.deleteGroup(g.id); } catch { /* ignore */ }
+        try { await client.logging.management.deleteGroup(g.id); } catch { /* ignore */ }
       }
     }
   } catch { /* ignore */ }
 
   // 1. Create log group: sql
-  const sqlGroup = client.logging.newGroup("sql", { name: "SQL Loggers" });
+  const sqlGroup = client.logging.management.newGroup("sql", { name: "SQL Loggers" });
   sqlGroup.setLevel(LogLevel.WARN);
   sqlGroup.setEnvironmentLevel("production", LogLevel.ERROR);
   sqlGroup.setEnvironmentLevel("staging", LogLevel.DEBUG);
   await sqlGroup.save();
 
   // 2. Create logger: sqlalchemy.engine (assigned to sql group)
-  const sqlLogger = client.logging.new("sqlalchemy.engine", { managed: true });
+  const sqlLogger = client.logging.management.new("sqlalchemy.engine", { managed: true });
   sqlLogger.setLevel(LogLevel.WARN);
   sqlLogger.setEnvironmentLevel("production", LogLevel.ERROR);
   sqlLogger.group = sqlGroup.id;
   await sqlLogger.save();
 
   // 3. Create logger: httpx
-  const httpxLogger = client.logging.new("httpx", {
+  const httpxLogger = client.logging.management.new("httpx", {
     name: "HTTPX Client",
     managed: true,
   });
@@ -60,7 +60,7 @@ export async function setupDemoLoggers(
   await httpxLogger.save();
 
   // 4. Create logger: celery.worker
-  const celeryLogger = client.logging.new("celery.worker", {
+  const celeryLogger = client.logging.management.new("celery.worker", {
     name: "Celery Worker",
     managed: true,
   });
@@ -89,7 +89,7 @@ export async function teardownDemoLoggers(
         logger.group = null;
         await logger.save();
       }
-      await client.logging.delete(logger.id);
+      await client.logging.management.delete(logger.id);
     } catch {
       // ignore
     }
@@ -98,7 +98,7 @@ export async function teardownDemoLoggers(
   // Delete groups
   for (const group of demo.groups) {
     try {
-      await client.logging.deleteGroup(group.id);
+      await client.logging.management.deleteGroup(group.id);
     } catch {
       // ignore
     }

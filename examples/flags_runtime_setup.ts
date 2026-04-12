@@ -32,7 +32,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   // --------------------------------------------------------------------------
   // 1. checkout-v2 — boolean flag
   // --------------------------------------------------------------------------
-  const checkoutFlag = client.flags.newBooleanFlag("checkout-v2", {
+  const checkoutFlag = client.flags.management.newBooleanFlag("checkout-v2", {
     default: false,
     description: "Controls rollout of the new checkout experience.",
   });
@@ -65,7 +65,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   // --------------------------------------------------------------------------
   // 2. banner-color — string flag
   // --------------------------------------------------------------------------
-  const bannerFlag = client.flags.newStringFlag("banner-color", {
+  const bannerFlag = client.flags.management.newStringFlag("banner-color", {
     default: "red",
     description: "Controls the banner color shown to users.",
     values: [
@@ -102,7 +102,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   // --------------------------------------------------------------------------
   // 3. max-retries — number flag
   // --------------------------------------------------------------------------
-  const retryFlag = client.flags.newNumberFlag("max-retries", {
+  const retryFlag = client.flags.management.newNumberFlag("max-retries", {
     default: 3,
     description: "Maximum number of API retries before failing.",
   });
@@ -126,7 +126,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
   // --------------------------------------------------------------------------
   // 4. ui-theme — JSON flag
   // --------------------------------------------------------------------------
-  const themeFlag = client.flags.newJsonFlag("ui-theme", {
+  const themeFlag = client.flags.management.newJsonFlag("ui-theme", {
     default: { mode: "light", accent: "#0066cc" },
     description: "Controls the UI theme configuration.",
     values: [
@@ -163,7 +163,7 @@ export async function setupDemoFlags(client: SmplClient): Promise<string[]> {
 export async function teardownDemoFlags(client: SmplClient, flagIds: string[]): Promise<void> {
   for (const id of flagIds) {
     try {
-      await client.flags.delete(id);
+      await client.flags.management.delete(id);
     } catch {
       // ignore — flag may already be deleted
     }

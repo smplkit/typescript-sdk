@@ -52,6 +52,55 @@ function wrapFetchError(err: unknown): never {
 }
 
 /**
+ * Management API for smplkit Logging — CRUD operations on Logger and LogGroup models.
+ *
+ * Access via `SmplClient.logging.management`.
+ */
+export class LoggingManagement {
+  constructor(private readonly _client: LoggingClient) {}
+
+  /** Create an unsaved logger. Call `.save()` to persist. */
+  new(id: string, options?: { name?: string; managed?: boolean }): Logger {
+    return this._client._mgNew(id, options);
+  }
+
+  /** Fetch a logger by id. */
+  async get(id: string): Promise<Logger> {
+    return this._client._mgGet(id);
+  }
+
+  /** List all loggers. */
+  async list(): Promise<Logger[]> {
+    return this._client._mgList();
+  }
+
+  /** Delete a logger by id. */
+  async delete(id: string): Promise<void> {
+    return this._client._mgDelete(id);
+  }
+
+  /** Create an unsaved log group. Call `.save()` to persist. */
+  newGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
+    return this._client._mgNewGroup(id, options);
+  }
+
+  /** Fetch a log group by id. */
+  async getGroup(id: string): Promise<LogGroup> {
+    return this._client._mgGetGroup(id);
+  }
+
+  /** List all log groups. */
+  async listGroups(): Promise<LogGroup[]> {
+    return this._client._mgListGroups();
+  }
+
+  /** Delete a log group by id. */
+  async deleteGroup(id: string): Promise<void> {
+    return this._client._mgDeleteGroup(id);
+  }
+}
+
+/**
  * Client for the smplkit Logging API.
  *
  * Obtained via `SmplClient.logging`.
@@ -73,6 +122,9 @@ export class LoggingClient {
     readonly _service: string | null;
     readonly _metrics: MetricsReporter | null;
   } | null = null;
+
+  /** Management API — CRUD operations on Logger and LogGroup models. */
+  readonly management: LoggingManagement;
 
   private readonly _ensureWs: () => SharedWebSocket;
   private _wsManager: SharedWebSocket | null = null;
@@ -110,6 +162,7 @@ export class LoggingClient {
         }
       },
     });
+    this.management = new LoggingManagement(this);
   }
 
   // ------------------------------------------------------------------
@@ -131,11 +184,11 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Management: Logger factory
+  // Management: internal implementations (delegated from LoggingManagement)
   // ------------------------------------------------------------------
 
-  /** Create an unsaved logger. Call `.save()` to persist. */
-  new(id: string, options?: { name?: string; managed?: boolean }): Logger {
+  /** @internal */
+  _mgNew(id: string, options?: { name?: string; managed?: boolean }): Logger {
     return new Logger(this, {
       id,
       name: options?.name ?? keyToDisplayName(id),
@@ -149,12 +202,8 @@ export class LoggingClient {
     });
   }
 
-  // ------------------------------------------------------------------
-  // Management: Logger CRUD
-  // ------------------------------------------------------------------
-
-  /** Fetch a logger by id. */
-  async get(id: string): Promise<Logger> {
+  /** @internal */
+  async _mgGet(id: string): Promise<Logger> {
     let data: components["schemas"]["LoggerResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/loggers/{id}", {
@@ -172,8 +221,8 @@ export class LoggingClient {
     return this._loggerToModel(data.data);
   }
 
-  /** List all loggers. */
-  async list(): Promise<Logger[]> {
+  /** @internal */
+  async _mgList(): Promise<Logger[]> {
     let data: components["schemas"]["LoggerListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/loggers", {});
@@ -186,8 +235,8 @@ export class LoggingClient {
     return data.data.map((r) => this._loggerToModel(r));
   }
 
-  /** Delete a logger by id. */
-  async delete(id: string): Promise<void> {
+  /** @internal */
+  async _mgDelete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/loggers/{id}", {
         params: { path: { id } },
@@ -199,12 +248,8 @@ export class LoggingClient {
     }
   }
 
-  // ------------------------------------------------------------------
-  // Management: LogGroup factory
-  // ------------------------------------------------------------------
-
-  /** Create an unsaved log group. Call `.save()` to persist. */
-  newGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
+  /** @internal */
+  _mgNewGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
     return new LogGroup(this, {
       id,
       name: options?.name ?? keyToDisplayName(id),
@@ -216,14 +261,9 @@ export class LoggingClient {
     });
   }
 
-  // ------------------------------------------------------------------
-  // Management: LogGroup CRUD
-  // ------------------------------------------------------------------
-
-  /** Fetch a log group by id. */
-  async getGroup(id: string): Promise<LogGroup> {
-    // List all and filter client-side.
-    const groups = await this.listGroups();
+  /** @internal */
+  async _mgGetGroup(id: string): Promise<LogGroup> {
+    const groups = await this.management.listGroups();
     const match = groups.find((g) => g.id === id);
     if (!match) {
       throw new SmplNotFoundError(`LogGroup with id '${id}' not found`);
@@ -231,8 +271,8 @@ export class LoggingClient {
     return match;
   }
 
-  /** List all log groups. */
-  async listGroups(): Promise<LogGroup[]> {
+  /** @internal */
+  async _mgListGroups(): Promise<LogGroup[]> {
     let data: components["schemas"]["LogGroupListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/log_groups", {});
@@ -246,9 +286,9 @@ export class LoggingClient {
     return data.data.map((r) => this._groupToModel(r));
   }
 
-  /** Delete a log group by id. */
-  async deleteGroup(id: string): Promise<void> {
-    const group = await this.getGroup(id);
+  /** @internal */
+  async _mgDeleteGroup(id: string): Promise<void> {
+    const group = await this.management.getGroup(id);
     try {
       const result = await this._http.DELETE("/api/v1/log_groups/{id}", {
         params: { path: { id: group.id! } },
@@ -413,7 +453,7 @@ export class LoggingClient {
     // 5. Bulk-register discovered loggers with the server
     for (const { name, level } of discovered) {
       try {
-        const logger = this.new(name, { managed: true });
+        const logger = this.management.new(name, { managed: true });
         logger.setLevel(level as any);
         await logger.save();
       } catch (err: unknown) {
@@ -425,7 +465,7 @@ export class LoggingClient {
 
     // 5. Fetch all loggers and groups from the server, resolve levels
     try {
-      const [serverLoggers] = await Promise.all([this.list(), this.listGroups()]);
+      const [serverLoggers] = await Promise.all([this.management.list(), this.management.listGroups()]);
 
       // 6. Apply levels from server to adapters
       this._applyLevels(serverLoggers);
@@ -553,7 +593,7 @@ export class LoggingClient {
   private _onAdapterNewLogger(_name: string, _level: string): void {
     // Register with server asynchronously — fire-and-forget.
     // Errors are swallowed to avoid breaking the framework's logger creation.
-    const logger = this.new(_name, { managed: true });
+    const logger = this.management.new(_name, { managed: true });
     logger.setLevel(_level as any);
     logger.save().catch(() => {
       // ignore — logger may already exist

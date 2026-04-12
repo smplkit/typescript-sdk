@@ -64,10 +64,10 @@ function configResource(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// resolve()
+// get()
 // ---------------------------------------------------------------------------
 
-describe("resolve", () => {
+describe("get", () => {
   it("should return resolved flat dict", async () => {
     const client = makeClient();
 
@@ -86,7 +86,7 @@ describe("resolve", () => {
       }),
     );
 
-    const result = await client.resolve("app");
+    const result = await client.get("app");
 
     expect(result).toEqual({ retries: 3, timeout: 2000 });
   });
@@ -127,7 +127,7 @@ describe("resolve", () => {
       }),
     );
 
-    const result = await client.resolve("child-service");
+    const result = await client.get("child-service");
 
     // Child overrides parent: retries=5, parent's timeout=2000 (env override for staging)
     expect(result).toEqual({ retries: 5, timeout: 2000 });
@@ -156,7 +156,7 @@ describe("resolve", () => {
       }
     }
 
-    const result = await client.resolve("app", AppConfig);
+    const result = await client.get("app", AppConfig);
 
     expect(result).toBeInstanceOf(AppConfig);
     expect(result.retries).toBe(3);
@@ -177,7 +177,7 @@ describe("resolve", () => {
       }),
     );
 
-    await expect(client.resolve("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should not re-fetch on second resolve call (lazy init only once)", async () => {
@@ -194,8 +194,8 @@ describe("resolve", () => {
       }),
     );
 
-    await client.resolve("app");
-    await client.resolve("app");
+    await client.get("app");
+    await client.get("app");
 
     // Only one fetch call for the initial list()
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -205,7 +205,7 @@ describe("resolve", () => {
     const client = new ConfigClient(API_KEY);
     // _parent is null — no environment
 
-    await expect(client.resolve("app")).rejects.toThrow(SmplError);
+    await expect(client.get("app")).rejects.toThrow(SmplError);
   });
 });
 
@@ -427,7 +427,7 @@ describe("onChange", () => {
     );
 
     // Initialize via resolve
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -472,7 +472,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const appEvents: ConfigChangeEvent[] = [];
     const dbEvents: ConfigChangeEvent[] = [];
@@ -518,7 +518,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const retriesEvents: ConfigChangeEvent[] = [];
     client.onChange("app", "retries", (e) => retriesEvents.push(e));
@@ -556,7 +556,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -592,7 +592,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -630,7 +630,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -668,7 +668,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -714,7 +714,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -754,7 +754,7 @@ describe("onChange", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange(() => {
@@ -799,7 +799,7 @@ describe("refresh", () => {
       }),
     );
 
-    const original = await client.resolve("app");
+    const original = await client.get("app");
     expect((original as Record<string, unknown>).retries).toBe(3);
 
     // Refresh with updated value
@@ -817,7 +817,7 @@ describe("refresh", () => {
     await client.refresh();
 
     // Re-resolve should return updated value
-    const refreshed = await client.resolve("app");
+    const refreshed = await client.get("app");
     expect((refreshed as Record<string, unknown>).retries).toBe(7);
   });
 
@@ -834,7 +834,7 @@ describe("refresh", () => {
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
     await expect(client.refresh()).rejects.toThrow(
-      "Config not initialized. Call resolve() or subscribe() first.",
+      "Config not initialized. Call get() or subscribe() first.",
     );
   });
 
@@ -852,7 +852,7 @@ describe("refresh", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
     client._parent = null;
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
@@ -873,7 +873,7 @@ describe("refresh", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
     client._parent = { _environment: "", _service: null };
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
@@ -913,7 +913,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     expect(mockWs.on).toHaveBeenCalledWith("config_changed", expect.any(Function));
   });
@@ -941,7 +941,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
@@ -991,7 +991,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
       }),
     );
 
-    await client.resolve("app");
+    await client.get("app");
 
     // Simulate WebSocket event where refresh fails
     mockFetch.mockRejectedValueOnce(new Error("network"));

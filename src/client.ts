@@ -81,7 +81,7 @@ export interface SmplClientOptions {
  * console.log(flag.get());
  *
  * // Config runtime
- * const values = await client.config.resolve("user-service");
+ * const values = await client.config.get("user-service");
  * ```
  */
 export class SmplClient {

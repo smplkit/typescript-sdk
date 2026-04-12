@@ -5,8 +5,8 @@
  * Demonstrates the smplkit TypeScript SDK's runtime experience for Smpl Config:
  *
  * - Client initialization (`SmplClient`)
- * - Value resolution: `client.config.resolve()` for flat dict
- * - Typed resolution: `client.config.resolve()` with a model class
+ * - Value resolution: `client.config.get()` for flat dict
+ * - Typed resolution: `client.config.get()` with a model class
  * - Live proxy: `client.config.subscribe()` for auto-updating access
  * - Change listeners at three levels: global, config-scoped, item-scoped
  * - Manual refresh: `client.config.refresh()`
@@ -51,12 +51,12 @@ function step(description: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Typed model for resolve() demonstration
+// Typed model for get() demonstration
 // ---------------------------------------------------------------------------
 
 /**
  * A simple model class that maps resolved config values to typed
- * properties. Pass this to resolve() or subscribe() to get a typed
+ * properties. Pass this to get() or subscribe() to get a typed
  * object instead of a plain dict.
  */
 class UserServiceConfig {
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
   section("2. Resolve — Flat Dict");
 
-  const values = await client.config.resolve("user_service");
+  const values = await client.config.get("user_service");
   step(`Resolved user-service: ${JSON.stringify(values)}`);
   step(`  database_host = ${values.database_host}`);
   step(`  pool_size = ${values.pool_size}`);
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
 
   section("3. Resolve — Typed Model");
 
-  const typed = await client.config.resolve("user_service", UserServiceConfig);
+  const typed = await client.config.get("user_service", UserServiceConfig);
   step(`Typed resolve: database_host=${typed.database_host}`);
   step(`  pool_size=${typed.pool_size} (type: ${typeof typed.pool_size})`);
   step(`  cache_ttl_seconds=${typed.cache_ttl_seconds} (type: ${typeof typed.cache_ttl_seconds})`);

@@ -20,11 +20,11 @@ export async function setupDemoConfigs(
   // Pre-cleanup: delete any configs left over from a previous run.
   // Children must be deleted before parents.
   for (const id of ["auth_module", "user_service"]) {
-    try { await client.config.delete(id); } catch { /* not present — ignore */ }
+    try { await client.config.management.delete(id); } catch { /* not present — ignore */ }
   }
 
   // 1. Update the common config with base values + environment overrides
-  const common = await client.config.get("common");
+  const common = await client.config.management.get("common");
   common.description = "Organization-wide shared configuration";
   common.items = {
     app_name: "Acme SaaS Platform",
@@ -40,7 +40,7 @@ export async function setupDemoConfigs(
   await common.save();
 
   // 2. Create user-service config
-  const userService = client.config.new("user_service", {
+  const userService = client.config.management.new("user_service", {
     name: "User Service",
     description: "Configuration for the user microservice.",
   });
@@ -65,7 +65,7 @@ export async function setupDemoConfigs(
   await userService.save();
 
   // 3. Create auth-module config as child of user-service
-  const authModule = client.config.new("auth_module", {
+  const authModule = client.config.management.new("auth_module", {
     name: "Auth Module",
     description: "Authentication module within the user service.",
   });
@@ -89,7 +89,7 @@ export async function teardownDemoConfigs(
   // Delete child configs (order matters — children before parents)
   for (const cfg of demo.configs.reverse()) {
     try {
-      await client.config.delete(cfg.id);
+      await client.config.management.delete(cfg.id);
     } catch {
       // ignore
     }

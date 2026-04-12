@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     // ----------------------------------------------------------------
     section("2a. Create a Boolean Flag");
 
-    const checkoutFlag = client.flags.newBooleanFlag("checkout-v2", {
+    const checkoutFlag = client.flags.management.newBooleanFlag("checkout-v2", {
       default: false,
       description: "Controls rollout of the new checkout experience.",
     });
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
     // The values parameter defines a closed set — this flag can only
     // serve "red", "green", or "blue". This makes it a constrained
     // flag. The Console UI shows dropdowns for value selection.
-    const bannerFlag = client.flags.newStringFlag("banner-color", {
+    const bannerFlag = client.flags.management.newStringFlag("banner-color", {
       default: "red",
       description: "Controls the banner color shown to users.",
       values: [
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     // where the value space is open-ended.
     //
     // Omitting the values parameter creates an unconstrained flag.
-    const retryFlag = client.flags.newNumberFlag("max-retries", {
+    const retryFlag = client.flags.management.newNumberFlag("max-retries", {
       default: 3,
       description: "Maximum number of API retries before failing.",
     });
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
 
     // Like banner-color, this JSON flag is constrained — only the
     // three declared theme objects can be served.
-    const themeFlag = client.flags.newJsonFlag("ui-theme", {
+    const themeFlag = client.flags.management.newJsonFlag("ui-theme", {
       default: { mode: "light", accent: "#0066cc" },
       description: "Controls the UI theme configuration.",
       values: [
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
 
     section("3. Retrieve, Mutate, and Save");
 
-    const fetched = await client.flags.get("checkout-v2");
+    const fetched = await client.flags.management.get("checkout-v2");
     step(`Fetched: id=${fetched.id}`);
     step(`  description: ${fetched.description}`);
 
@@ -318,7 +318,7 @@ async function main(): Promise<void> {
 
     section("6. List All Flags");
 
-    const flags = await client.flags.list();
+    const flags = await client.flags.management.list();
     step(`Total flags: ${flags.length}`);
     for (const f of flags) {
       const envKeys = f.environments ? Object.keys(f.environments) : [];
@@ -333,12 +333,12 @@ async function main(): Promise<void> {
 
     section("7. Delete a Flag by ID");
 
-    await client.flags.delete("ui-theme");
+    await client.flags.management.delete("ui-theme");
     createdFlagIds.splice(createdFlagIds.indexOf("ui-theme"), 1);
     step("Deleted: ui-theme");
 
     // Verify it's gone.
-    const remaining = await client.flags.list();
+    const remaining = await client.flags.management.list();
     const remainingIds = remaining.map((f) => f.id);
     step(`Remaining flags: ${JSON.stringify(remainingIds)}`);
 
@@ -349,7 +349,7 @@ async function main(): Promise<void> {
 
     for (const id of [...createdFlagIds]) {
       try {
-        await client.flags.delete(id);
+        await client.flags.management.delete(id);
         step(`Deleted: ${id}`);
       } catch {
         // already deleted
@@ -374,7 +374,7 @@ async function main(): Promise<void> {
     console.log("\n  Cleaning up flags created during this run...");
     for (const id of createdFlagIds) {
       try {
-        await client.flags.delete(id);
+        await client.flags.management.delete(id);
         step(`Deleted: ${id}`);
       } catch {
         // ignore cleanup errors

@@ -211,6 +211,35 @@ function buildRequestBody(options: {
 }
 
 /**
+ * Management API for smplkit Config — CRUD operations on Config models.
+ *
+ * Access via `SmplClient.config.management`.
+ */
+export class ConfigManagement {
+  constructor(private readonly _client: ConfigClient) {}
+
+  /** Create an unsaved config. Call `.save()` to persist. */
+  new(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
+    return this._client._mgNew(id, options);
+  }
+
+  /** Fetch a config by id. */
+  async get(id: string): Promise<Config> {
+    return this._client._getById(id);
+  }
+
+  /** List all configs. */
+  async list(): Promise<Config[]> {
+    return this._client._mgList();
+  }
+
+  /** Delete a config by id. */
+  async delete(id: string): Promise<void> {
+    return this._client._mgDelete(id);
+  }
+}
+
+/**
  * Client for the smplkit Config API.
  *
  * Obtained via `SmplClient.config`.
@@ -234,6 +263,9 @@ export class ConfigClient {
     readonly _service: string | null;
     readonly _metrics: MetricsReporter | null;
   } | null = null;
+
+  /** Management API — CRUD operations on Config models. */
+  readonly management: ConfigManagement;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
   private _initialized = false;
@@ -264,14 +296,15 @@ export class ConfigClient {
         }
       },
     });
+    this.management = new ConfigManagement(this);
   }
 
   // ------------------------------------------------------------------
-  // Management: factory method
+  // Management: internal implementations (delegated from ConfigManagement)
   // ------------------------------------------------------------------
 
-  /** Create an unsaved config. Call `.save()` to persist. */
-  new(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
+  /** @internal */
+  _mgNew(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
     return new Config(this, {
       id,
       name: options?.name ?? keyToDisplayName(id),
@@ -284,17 +317,8 @@ export class ConfigClient {
     });
   }
 
-  // ------------------------------------------------------------------
-  // Management: CRUD
-  // ------------------------------------------------------------------
-
-  /** Fetch a config by id. */
-  async get(id: string): Promise<Config> {
-    return this._getById(id);
-  }
-
-  /** List all configs. */
-  async list(): Promise<Config[]> {
+  /** @internal */
+  async _mgList(): Promise<Config[]> {
     let data: components["schemas"]["ConfigListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/configs", {});
@@ -307,8 +331,8 @@ export class ConfigClient {
     return data.data.map((r) => resourceToConfig(r, this));
   }
 
-  /** Delete a config by id. */
-  async delete(id: string): Promise<void> {
+  /** @internal */
+  async _mgDelete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/configs/{id}", {
         params: { path: { id } },
@@ -396,12 +420,12 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /**
-   * Resolve a config's values for the current environment.
+   * Get a config's resolved values for the current environment.
    *
    * Returns the resolved key-value pairs for the given config.
    * Optionally pass a model class to map the resolved values.
    */
-  async resolve<T = Record<string, unknown>>(id: string, model?: new (data: any) => T): Promise<T> {
+  async get<T = Record<string, unknown>>(id: string, model?: new (data: any) => T): Promise<T> {
     await this._ensureInitialized();
     const values = this._configCache[id];
     if (values === undefined) {
@@ -484,13 +508,13 @@ export class ConfigClient {
    */
   async refresh(): Promise<void> {
     if (!this._initialized) {
-      throw new SmplError("Config not initialized. Call resolve() or subscribe() first.");
+      throw new SmplError("Config not initialized. Call get() or subscribe() first.");
     }
     const environment = this._parent?._environment;
     if (!environment) {
       throw new SmplError("No environment set.");
     }
-    const configs = await this.list();
+    const configs = await this.management.list();
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
@@ -512,7 +536,7 @@ export class ConfigClient {
     if (!environment) {
       throw new SmplError("No environment set. Ensure SmplClient is configured.");
     }
-    const configs = await this.list();
+    const configs = await this.management.list();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
@@ -531,7 +555,7 @@ export class ConfigClient {
   /** @internal — called by SmplClient for backward compat. */
   async _connectInternal(environment: string): Promise<void> {
     if (this._initialized) return;
-    const configs = await this.list();
+    const configs = await this.management.list();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);

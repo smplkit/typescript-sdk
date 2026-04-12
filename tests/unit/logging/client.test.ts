@@ -117,38 +117,38 @@ describe("LoggingClient — logger management", () => {
   describe("new()", () => {
     it("should return a Logger with createdAt: null", () => {
       const client = makeClient();
-      const logger = client.new("sqlalchemy.engine");
+      const logger = client.management.new("sqlalchemy.engine");
       expect(logger).toBeInstanceOf(Logger);
       expect(logger.createdAt).toBeNull();
     });
 
     it("should auto-generate a display name from the id", () => {
       const client = makeClient();
-      const logger = client.new("payment-service");
+      const logger = client.management.new("payment-service");
       expect(logger.name).toBe("Payment Service");
     });
 
     it("should accept an explicit name", () => {
       const client = makeClient();
-      const logger = client.new("sqlalchemy.engine", { name: "Custom Name" });
+      const logger = client.management.new("sqlalchemy.engine", { name: "Custom Name" });
       expect(logger.name).toBe("Custom Name");
     });
 
     it("should default managed to false", () => {
       const client = makeClient();
-      const logger = client.new("test");
+      const logger = client.management.new("test");
       expect(logger.managed).toBe(false);
     });
 
     it("should accept managed option", () => {
       const client = makeClient();
-      const logger = client.new("test", { managed: true });
+      const logger = client.management.new("test", { managed: true });
       expect(logger.managed).toBe(true);
     });
 
     it("should initialize with empty sources and environments", () => {
       const client = makeClient();
-      const logger = client.new("test");
+      const logger = client.management.new("test");
       expect(logger.sources).toEqual([]);
       expect(logger.environments).toEqual({});
     });
@@ -161,7 +161,7 @@ describe("LoggingClient — logger management", () => {
   describe("Logger.save() — POST", () => {
     it("should POST when createdAt is null", async () => {
       const client = makeClient();
-      const logger = client.new("sqlalchemy.engine", { name: "SQLAlchemy Engine", managed: true });
+      const logger = client.management.new("sqlalchemy.engine", { name: "SQLAlchemy Engine", managed: true });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
@@ -176,7 +176,7 @@ describe("LoggingClient — logger management", () => {
 
     it("should send JSON:API body with correct attributes", async () => {
       const client = makeClient();
-      const logger = client.new("my-logger", { name: "My Logger", managed: false });
+      const logger = client.management.new("my-logger", { name: "My Logger", managed: false });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
@@ -199,7 +199,7 @@ describe("LoggingClient — logger management", () => {
     it("should PUT when createdAt is set", async () => {
       const client = makeClient();
       // Simulate a logger that was previously fetched (has createdAt set)
-      const logger = client.new("sqlalchemy.engine");
+      const logger = client.management.new("sqlalchemy.engine");
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
       await logger.save(); // POST sets createdAt
 
@@ -228,7 +228,7 @@ describe("LoggingClient — logger management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
-      const logger = await client.get("sqlalchemy.engine");
+      const logger = await client.management.get("sqlalchemy.engine");
 
       expect(logger).toBeInstanceOf(Logger);
       expect(logger.id).toBe("sqlalchemy.engine");
@@ -250,7 +250,7 @@ describe("LoggingClient — logger management", () => {
         ),
       );
 
-      await expect(client.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
   });
 
@@ -268,7 +268,7 @@ describe("LoggingClient — logger management", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_LOGGER, secondLogger] }));
 
-      const loggers = await client.list();
+      const loggers = await client.management.list();
 
       expect(loggers).toHaveLength(2);
       expect(loggers[0]).toBeInstanceOf(Logger);
@@ -281,7 +281,7 @@ describe("LoggingClient — logger management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      const loggers = await client.list();
+      const loggers = await client.management.list();
       expect(loggers).toEqual([]);
     });
   });
@@ -295,7 +295,7 @@ describe("LoggingClient — logger management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-      await client.delete("sqlalchemy.engine");
+      await client.management.delete("sqlalchemy.engine");
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const deleteRequest: Request = mockFetch.mock.calls[0][0];
@@ -314,7 +314,7 @@ describe("LoggingClient — logger management", () => {
         ),
       );
 
-      await expect(client.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.delete("nonexistent")).rejects.toThrow(SmplNotFoundError);
     });
   });
 });
@@ -331,32 +331,32 @@ describe("LoggingClient — log group management", () => {
   describe("newGroup()", () => {
     it("should return a LogGroup with createdAt: null", () => {
       const client = makeClient();
-      const group = client.newGroup("database-loggers");
+      const group = client.management.newGroup("database-loggers");
       expect(group).toBeInstanceOf(LogGroup);
       expect(group.createdAt).toBeNull();
     });
 
     it("should auto-generate a display name from the id", () => {
       const client = makeClient();
-      const group = client.newGroup("database-loggers");
+      const group = client.management.newGroup("database-loggers");
       expect(group.name).toBe("Database Loggers");
     });
 
     it("should accept an explicit name", () => {
       const client = makeClient();
-      const group = client.newGroup("db", { name: "Custom Group" });
+      const group = client.management.newGroup("db", { name: "Custom Group" });
       expect(group.name).toBe("Custom Group");
     });
 
     it("should accept a parent group option", () => {
       const client = makeClient();
-      const group = client.newGroup("child", { group: "parent-group" });
+      const group = client.management.newGroup("child", { group: "parent-group" });
       expect(group.group).toBe("parent-group");
     });
 
     it("should default group to null", () => {
       const client = makeClient();
-      const group = client.newGroup("top-level");
+      const group = client.management.newGroup("top-level");
       expect(group.group).toBeNull();
     });
   });
@@ -368,7 +368,7 @@ describe("LoggingClient — log group management", () => {
   describe("LogGroup.save()", () => {
     it("should POST when createdAt is null", async () => {
       const client = makeClient();
-      const group = client.newGroup("database-loggers", { name: "Database Loggers" });
+      const group = client.management.newGroup("database-loggers", { name: "Database Loggers" });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));
 
@@ -383,7 +383,7 @@ describe("LoggingClient — log group management", () => {
 
     it("should PUT when createdAt is set", async () => {
       const client = makeClient();
-      const group = client.newGroup("database-loggers");
+      const group = client.management.newGroup("database-loggers");
 
       // POST to create
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));
@@ -408,7 +408,7 @@ describe("LoggingClient — log group management", () => {
 
     it("should send JSON:API body with correct attributes", async () => {
       const client = makeClient();
-      const group = client.newGroup("my-group", { name: "My Group" });
+      const group = client.management.newGroup("my-group", { name: "My Group" });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));
 
@@ -431,7 +431,7 @@ describe("LoggingClient — log group management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_GROUP] }));
 
-      const group = await client.getGroup("database-loggers");
+      const group = await client.management.getGroup("database-loggers");
 
       expect(group).toBeInstanceOf(LogGroup);
       expect(group.id).toBe("database-loggers");
@@ -441,14 +441,14 @@ describe("LoggingClient — log group management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_GROUP] }));
 
-      await expect(client.getGroup("nonexistent")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.getGroup("nonexistent")).rejects.toThrow(SmplNotFoundError);
     });
 
     it("should throw SmplNotFoundError when no groups exist", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      await expect(client.getGroup("anything")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.getGroup("anything")).rejects.toThrow(SmplNotFoundError);
     });
   });
 
@@ -466,7 +466,7 @@ describe("LoggingClient — log group management", () => {
       };
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_GROUP, secondGroup] }));
 
-      const groups = await client.listGroups();
+      const groups = await client.management.listGroups();
 
       expect(groups).toHaveLength(2);
       expect(groups[0]).toBeInstanceOf(LogGroup);
@@ -479,7 +479,7 @@ describe("LoggingClient — log group management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      const groups = await client.listGroups();
+      const groups = await client.management.listGroups();
       expect(groups).toEqual([]);
     });
   });
@@ -496,7 +496,7 @@ describe("LoggingClient — log group management", () => {
       // Second call: DELETE by id
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-      await client.deleteGroup("database-loggers");
+      await client.management.deleteGroup("database-loggers");
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       const deleteRequest: Request = mockFetch.mock.calls[1][0];
@@ -508,7 +508,7 @@ describe("LoggingClient — log group management", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-      await expect(client.deleteGroup("nonexistent")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.management.deleteGroup("nonexistent")).rejects.toThrow(SmplNotFoundError);
     });
   });
 });
@@ -675,7 +675,7 @@ describe("LoggingClient — error handling", () => {
       ),
     );
 
-    const logger = client.new("bad-logger");
+    const logger = client.management.new("bad-logger");
     await expect(logger.save()).rejects.toThrow(SmplValidationError);
   });
 
@@ -690,30 +690,30 @@ describe("LoggingClient — error handling", () => {
       ),
     );
 
-    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.management.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw SmplConnectionError on network TypeError", async () => {
     const client = makeClient();
     mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    await expect(client.get("anything")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.get("anything")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplConnectionError on generic Error via wrapFetchError", async () => {
     const client = makeClient();
     mockFetch.mockRejectedValueOnce(new Error("Something unexpected"));
 
-    await expect(client.get("anything")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.get("anything")).rejects.toThrow(SmplConnectionError);
     mockFetch.mockRejectedValueOnce(new Error("Something unexpected"));
-    await expect(client.get("anything")).rejects.toThrow("Request failed: Something unexpected");
+    await expect(client.management.get("anything")).rejects.toThrow("Request failed: Something unexpected");
   });
 
   it("should throw SmplNotFoundError when get() response has no data", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
-    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.management.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should throw SmplConnectionError on deleteGroup() network error", async () => {
@@ -723,14 +723,14 @@ describe("LoggingClient — error handling", () => {
     // Second call is the actual DELETE — fails
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplError on unexpected HTTP status", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(textResponse("Internal Server Error", 500));
 
-    await expect(client.list()).rejects.toThrow(SmplError);
+    await expect(client.management.list()).rejects.toThrow(SmplError);
   });
 
   it("should throw SmplTimeoutError when request times out", async () => {
@@ -741,7 +741,7 @@ describe("LoggingClient — error handling", () => {
     const abortErr = new DOMException("The operation was aborted.", "AbortError");
     mockFetch.mockRejectedValueOnce(abortErr);
 
-    await expect(client.list()).rejects.toThrow(SmplTimeoutError);
+    await expect(client.management.list()).rejects.toThrow(SmplTimeoutError);
   });
 
   it("should throw SmplConnectionError on delete() network error", async () => {
@@ -749,14 +749,14 @@ describe("LoggingClient — error handling", () => {
     // DELETE fails with network error
     mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
 
-    await expect(client.delete("sqlalchemy.engine")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.delete("sqlalchemy.engine")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplConnectionError on listGroups() network error", async () => {
     const client = makeClient();
     mockFetch.mockRejectedValueOnce(new TypeError("network down"));
 
-    await expect(client.listGroups()).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.listGroups()).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplConnectionError on deleteGroup() network error", async () => {
@@ -764,12 +764,12 @@ describe("LoggingClient — error handling", () => {
     // listGroups fails with network error
     mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
 
-    await expect(client.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
   });
 
   it("should throw SmplConnectionError on Logger.save() POST network error", async () => {
     const client = makeClient();
-    const logger = client.new("test-logger");
+    const logger = client.management.new("test-logger");
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
     await expect(logger.save()).rejects.toThrow(SmplConnectionError);
@@ -777,7 +777,7 @@ describe("LoggingClient — error handling", () => {
 
   it("should throw SmplConnectionError on Logger.save() PUT network error", async () => {
     const client = makeClient();
-    const logger = client.new("test-logger");
+    const logger = client.management.new("test-logger");
 
     // POST succeeds
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
@@ -791,7 +791,7 @@ describe("LoggingClient — error handling", () => {
 
   it("should throw SmplConnectionError on LogGroup.save() POST network error", async () => {
     const client = makeClient();
-    const group = client.newGroup("test-group");
+    const group = client.management.newGroup("test-group");
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
     await expect(group.save()).rejects.toThrow(SmplConnectionError);
@@ -799,7 +799,7 @@ describe("LoggingClient — error handling", () => {
 
   it("should throw SmplConnectionError on LogGroup.save() PUT network error", async () => {
     const client = makeClient();
-    const group = client.newGroup("test-group");
+    const group = client.management.newGroup("test-group");
 
     // POST succeeds
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));

@@ -37,8 +37,8 @@ npx tsx examples/config_management_showcase.ts
 
 Demonstrates the runtime experience for Smpl Config:
 
-- Value resolution: `client.config.resolve()` for flat dict
-- Typed resolution: `resolve()` with a model class
+- Value resolution: `client.config.get()` for flat dict
+- Typed resolution: `get()` with a model class
 - Live proxy: `client.config.subscribe()` for auto-updating access
 - Change listeners at three levels: global, config-scoped, item-scoped
 - Manual refresh: `client.config.refresh()`

@@ -262,6 +262,77 @@ class ContextRegistrationBuffer {
 // ---------------------------------------------------------------------------
 
 /**
+ * Management API for smplkit Flags — CRUD operations on Flag models.
+ *
+ * Access via `SmplClient.flags.management`.
+ */
+export class FlagsManagement {
+  constructor(private readonly _client: FlagsClient) {}
+
+  /** Create an unsaved boolean flag. Call `.save()` to persist. */
+  newBooleanFlag(
+    id: string,
+    options: { default: boolean; name?: string; description?: string },
+  ): BooleanFlag {
+    return this._client._mgNewBooleanFlag(id, options);
+  }
+
+  /** Create an unsaved string flag. Call `.save()` to persist. */
+  newStringFlag(
+    id: string,
+    options: {
+      default: string;
+      name?: string;
+      description?: string;
+      values?: Array<{ name: string; value: unknown }>;
+    },
+  ): StringFlag {
+    return this._client._mgNewStringFlag(id, options);
+  }
+
+  /** Create an unsaved number flag. Call `.save()` to persist. */
+  newNumberFlag(
+    id: string,
+    options: {
+      default: number;
+      name?: string;
+      description?: string;
+      values?: Array<{ name: string; value: unknown }>;
+    },
+  ): NumberFlag {
+    return this._client._mgNewNumberFlag(id, options);
+  }
+
+  /** Create an unsaved JSON flag. Call `.save()` to persist. */
+  newJsonFlag(
+    id: string,
+    options: {
+      default: Record<string, any>;
+      name?: string;
+      description?: string;
+      values?: Array<{ name: string; value: unknown }>;
+    },
+  ): JsonFlag {
+    return this._client._mgNewJsonFlag(id, options);
+  }
+
+  /** Fetch a flag by id. */
+  async get(id: string): Promise<Flag> {
+    return this._client._mgGet(id);
+  }
+
+  /** List all flags. */
+  async list(): Promise<Flag[]> {
+    return this._client._mgList();
+  }
+
+  /** Delete a flag by id. */
+  async delete(id: string): Promise<void> {
+    return this._client._mgDelete(id);
+  }
+}
+
+/**
  * Client for the smplkit Flags API.
  *
  * Obtained via `SmplClient.flags`.
@@ -298,6 +369,9 @@ export class FlagsClient {
     readonly _service: string | null;
     readonly _metrics: MetricsReporter | null;
   } | null = null;
+
+  /** Management API — CRUD operations on Flag models. */
+  readonly management: FlagsManagement;
 
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
@@ -337,14 +411,15 @@ export class FlagsClient {
       },
       fetch: fetchWithTimeout,
     });
+    this.management = new FlagsManagement(this);
   }
 
   // ------------------------------------------------------------------
-  // Management: factory methods (return unsaved flags)
+  // Management: internal implementations (delegated from FlagsManagement)
   // ------------------------------------------------------------------
 
-  /** Create an unsaved boolean flag. Call `.save()` to persist. */
-  newBooleanFlag(
+  /** @internal */
+  _mgNewBooleanFlag(
     id: string,
     options: { default: boolean; name?: string; description?: string },
   ): BooleanFlag {
@@ -364,8 +439,8 @@ export class FlagsClient {
     });
   }
 
-  /** Create an unsaved string flag. Call `.save()` to persist. */
-  newStringFlag(
+  /** @internal */
+  _mgNewStringFlag(
     id: string,
     options: {
       default: string;
@@ -387,8 +462,8 @@ export class FlagsClient {
     });
   }
 
-  /** Create an unsaved number flag. Call `.save()` to persist. */
-  newNumberFlag(
+  /** @internal */
+  _mgNewNumberFlag(
     id: string,
     options: {
       default: number;
@@ -410,8 +485,8 @@ export class FlagsClient {
     });
   }
 
-  /** Create an unsaved JSON flag. Call `.save()` to persist. */
-  newJsonFlag(
+  /** @internal */
+  _mgNewJsonFlag(
     id: string,
     options: {
       default: Record<string, any>;
@@ -433,12 +508,8 @@ export class FlagsClient {
     });
   }
 
-  // ------------------------------------------------------------------
-  // Management: CRUD
-  // ------------------------------------------------------------------
-
-  /** Fetch a flag by id. */
-  async get(id: string): Promise<Flag> {
+  /** @internal */
+  async _mgGet(id: string): Promise<Flag> {
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/flags/{id}", {
@@ -456,8 +527,8 @@ export class FlagsClient {
     return this._resourceToModel(data.data);
   }
 
-  /** List all flags. */
-  async list(): Promise<Flag[]> {
+  /** @internal */
+  async _mgList(): Promise<Flag[]> {
     let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/flags", {});
@@ -470,8 +541,8 @@ export class FlagsClient {
     return data.data.map((r) => this._resourceToModel(r));
   }
 
-  /** Delete a flag by id. */
-  async delete(id: string): Promise<void> {
+  /** @internal */
+  async _mgDelete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
         params: { path: { id } },
