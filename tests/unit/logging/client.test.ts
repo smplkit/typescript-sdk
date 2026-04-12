@@ -161,7 +161,10 @@ describe("LoggingClient — logger management", () => {
   describe("Logger.save() — POST", () => {
     it("should POST when createdAt is null", async () => {
       const client = makeClient();
-      const logger = client.management.new("sqlalchemy.engine", { name: "SQLAlchemy Engine", managed: true });
+      const logger = client.management.new("sqlalchemy.engine", {
+        name: "SQLAlchemy Engine",
+        managed: true,
+      });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
@@ -581,7 +584,7 @@ describe("LoggingClient — runtime", () => {
       await client.start();
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[smplkit] Failed to register logger "bad.logger"')
+        expect.stringContaining('[smplkit] Failed to register logger "bad.logger"'),
       );
       warnSpy.mockRestore();
     });
@@ -706,7 +709,9 @@ describe("LoggingClient — error handling", () => {
 
     await expect(client.management.get("anything")).rejects.toThrow(SmplConnectionError);
     mockFetch.mockRejectedValueOnce(new Error("Something unexpected"));
-    await expect(client.management.get("anything")).rejects.toThrow("Request failed: Something unexpected");
+    await expect(client.management.get("anything")).rejects.toThrow(
+      "Request failed: Something unexpected",
+    );
   });
 
   it("should throw SmplNotFoundError when get() response has no data", async () => {
@@ -723,7 +728,9 @@ describe("LoggingClient — error handling", () => {
     // Second call is the actual DELETE — fails
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(
+      SmplConnectionError,
+    );
   });
 
   it("should throw SmplError on unexpected HTTP status", async () => {
@@ -749,7 +756,9 @@ describe("LoggingClient — error handling", () => {
     // DELETE fails with network error
     mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
 
-    await expect(client.management.delete("sqlalchemy.engine")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.delete("sqlalchemy.engine")).rejects.toThrow(
+      SmplConnectionError,
+    );
   });
 
   it("should throw SmplConnectionError on listGroups() network error", async () => {
@@ -764,7 +773,9 @@ describe("LoggingClient — error handling", () => {
     // listGroups fails with network error
     mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
 
-    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(SmplConnectionError);
+    await expect(client.management.deleteGroup("database-loggers")).rejects.toThrow(
+      SmplConnectionError,
+    );
   });
 
   it("should throw SmplConnectionError on Logger.save() POST network error", async () => {

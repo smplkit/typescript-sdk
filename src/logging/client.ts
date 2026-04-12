@@ -458,14 +458,17 @@ export class LoggingClient {
         await logger.save();
       } catch (err: unknown) {
         console.warn(
-          `[smplkit] Failed to register logger "${name}": ${err instanceof Error ? err.message : String(err)}`
+          `[smplkit] Failed to register logger "${name}": ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
 
     // 5. Fetch all loggers and groups from the server, resolve levels
     try {
-      const [serverLoggers] = await Promise.all([this.management.list(), this.management.listGroups()]);
+      const [serverLoggers] = await Promise.all([
+        this.management.list(),
+        this.management.listGroups(),
+      ]);
 
       // 6. Apply levels from server to adapters
       this._applyLevels(serverLoggers);

@@ -113,7 +113,10 @@ describe("FlagsClient factory methods", () => {
 
     it("should use custom name when provided", () => {
       const client = makeFlagsClient();
-      const flag = client.management.newBooleanFlag("checkout-v2", { default: true, name: "Custom Name" });
+      const flag = client.management.newBooleanFlag("checkout-v2", {
+        default: true,
+        name: "Custom Name",
+      });
       expect(flag.name).toBe("Custom Name");
     });
 
@@ -128,7 +131,10 @@ describe("FlagsClient factory methods", () => {
 
     it("should set description when provided", () => {
       const client = makeFlagsClient();
-      const flag = client.management.newBooleanFlag("feat", { default: false, description: "A feature" });
+      const flag = client.management.newBooleanFlag("feat", {
+        default: false,
+        description: "A feature",
+      });
       expect(flag.description).toBe("A feature");
     });
 
