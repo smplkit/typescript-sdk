@@ -11,10 +11,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Flags */
+        /**
+         * List Flags
+         * @description List all feature flags for the authenticated account.
+         */
         get: operations["list_flags"];
         put?: never;
-        /** Create Flag */
+        /**
+         * Create Flag
+         * @description Create a new feature flag. The caller provides the id (key) in the request body.
+         */
         post: operations["create_flag"];
         delete?: never;
         options?: never;
@@ -29,13 +35,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Flag */
+        /**
+         * Get Flag
+         * @description Return a feature flag by its key.
+         */
         get: operations["get_flag"];
-        /** Update Flag */
+        /**
+         * Update Flag
+         * @description Replace a feature flag entirely.
+         */
         put: operations["update_flag"];
         post?: never;
-        /** Delete Flag */
+        /**
+         * Delete Flag
+         * @description Delete a feature flag by its key.
+         */
         delete: operations["delete_flag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Flags Usage
+         * @description Return current resource usage counts for the authenticated account.
+         */
+        get: operations["list_flags_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -94,11 +129,8 @@ export interface components {
              * @description Human-readable display name
              */
             name: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
+            /** Description */
+            description?: string | null;
             /**
              * Type
              * @description Value type: STRING, BOOLEAN, NUMERIC, or JSON
@@ -178,7 +210,7 @@ export interface components {
          *           }
          *         ]
          *       },
-         *       "id": "dark_mode",
+         *       "id": "dark-mode",
          *       "type": "flag"
          *     }
          */
@@ -214,34 +246,56 @@ export interface components {
             /** Value */
             value: unknown;
         };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+        /** UsageAttributes */
+        UsageAttributes: {
+            /** Limit Key */
+            limit_key: string;
+            /** Period */
+            period: string;
+            /** Value */
+            value: number;
         };
-        /** Resource[Flag] */
-        Resource_Flag_: {
+        /**
+         * UsageListResponse
+         * @example {
+         *       "data": [
+         *         {
+         *           "attributes": {
+         *             "limit_key": "flags.items",
+         *             "period": "current",
+         *             "value": 5
+         *           },
+         *           "id": "550e8400-e29b-41d4-a716-446655440000",
+         *           "type": "usage"
+         *         }
+         *       ]
+         *     }
+         */
+        UsageListResponse: {
+            /** Data */
+            data: components["schemas"]["UsageResource"][];
+        };
+        /**
+         * UsageResource
+         * @example {
+         *       "attributes": {
+         *         "limit_key": "flags.items",
+         *         "period": "current",
+         *         "value": 5
+         *       },
+         *       "id": "550e8400-e29b-41d4-a716-446655440000",
+         *       "type": "usage"
+         *     }
+         */
+        UsageResource: {
             /** Id */
-            id?: string | null;
+            id: string;
             /**
              * Type
-             * @default
+             * @constant
              */
-            type: string;
-            attributes: components["schemas"]["Flag"];
-        };
-        /** Response[Flag] */
-        Response_Flag_: {
-            data: components["schemas"]["Resource_Flag_"];
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
+            type: "usage";
+            attributes: components["schemas"]["UsageAttributes"];
         };
     };
     responses: never;
@@ -272,15 +326,6 @@ export interface operations {
                     "application/vnd.api+json": components["schemas"]["FlagListResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     create_flag: {
@@ -292,7 +337,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Response_Flag_"];
+                "application/vnd.api+json": components["schemas"]["FlagResponse"];
             };
         };
         responses: {
@@ -303,15 +348,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["FlagResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -336,15 +372,6 @@ export interface operations {
                     "application/vnd.api+json": components["schemas"]["FlagResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     update_flag: {
@@ -358,7 +385,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Response_Flag_"];
+                "application/vnd.api+json": components["schemas"]["FlagResponse"];
             };
         };
         responses: {
@@ -369,15 +396,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["FlagResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -400,14 +418,34 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
-            422: {
+        };
+    };
+    list_flags_usage: {
+        parameters: {
+            query?: {
+                "filter[period]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current usage for the authenticated account */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": components["schemas"]["HTTPValidationError"];
+                    "application/vnd.api+json": components["schemas"]["UsageListResponse"];
                 };
+            };
+            /** @description Missing or invalid filter[period] parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
