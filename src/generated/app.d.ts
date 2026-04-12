@@ -131,9 +131,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Current User */
+        /**
+         * Get Current User
+         * @description Return the currently authenticated user.
+         */
         get: operations["get_current_user"];
-        /** Update Current User */
+        /**
+         * Update Current User
+         * @description Update the currently authenticated user's profile.
+         */
         put: operations["update_current_user"];
         post?: never;
         delete?: never;
@@ -149,12 +155,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Current Account */
+        /**
+         * Get Current Account
+         * @description Return the account for the currently authenticated user.
+         */
         get: operations["get_account"];
-        /** Update Current Account */
+        /**
+         * Update Current Account
+         * @description Update the current account's settings.
+         */
         put: operations["update_account"];
         post?: never;
-        /** Delete Current Account */
+        /**
+         * Delete Current Account
+         * @description Permanently delete the current account and all associated data.
+         */
         delete: operations["delete_account"];
         options?: never;
         head?: never;
@@ -168,10 +183,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Environments */
+        /**
+         * List Environments
+         * @description List all environments for the authenticated account.
+         */
         get: operations["list_environments"];
         put?: never;
-        /** Create Environment */
+        /**
+         * Create Environment
+         * @description Create a new environment. The caller provides the id (key) in the request body.
+         */
         post: operations["create_environment"];
         delete?: never;
         options?: never;
@@ -186,12 +207,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Environment */
+        /**
+         * Get Environment
+         * @description Return an environment by id.
+         */
         get: operations["get_environment"];
-        /** Update Environment */
+        /**
+         * Update Environment
+         * @description Update an environment by id.
+         */
         put: operations["update_environment"];
         post?: never;
-        /** Delete Environment */
+        /**
+         * Delete Environment
+         * @description Delete an environment by id.
+         */
         delete: operations["delete_environment"];
         options?: never;
         head?: never;
@@ -205,10 +235,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List API Keys */
+        /**
+         * List API Keys
+         * @description List all API keys for the authenticated account.
+         */
         get: operations["list_api_keys"];
         put?: never;
-        /** Create API Key */
+        /**
+         * Create API Key
+         * @description Create a new API key. The id and key value are server-generated.
+         */
         post: operations["create_api_key"];
         delete?: never;
         options?: never;
@@ -223,12 +259,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get API Key */
+        /**
+         * Get API Key
+         * @description Return an API key by id.
+         */
         get: operations["get_api_key"];
-        /** Update API Key */
+        /**
+         * Update API Key
+         * @description Update an API key by id.
+         */
         put: operations["update_api_key"];
         post?: never;
-        /** Delete API Key */
+        /**
+         * Delete API Key
+         * @description Delete an API key by id.
+         */
         delete: operations["delete_api_key"];
         options?: never;
         head?: never;
@@ -244,7 +289,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Revoke API Key */
+        /**
+         * Revoke API Key
+         * @description Permanently revoke an API key.
+         */
         post: operations["revoke_api_key"];
         delete?: never;
         options?: never;
@@ -259,10 +307,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Context Types */
+        /**
+         * List Context Types
+         * @description List all context types for the authenticated account.
+         */
         get: operations["list_context_types"];
         put?: never;
-        /** Create Context Type */
+        /**
+         * Create Context Type
+         * @description Create a new context type. The caller provides the id (key) in the request body.
+         */
         post: operations["create_context_type"];
         delete?: never;
         options?: never;
@@ -277,12 +331,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Context Type */
+        /**
+         * Get Context Type
+         * @description Return a context type by id.
+         */
         get: operations["get_context_type"];
-        /** Update Context Type */
+        /**
+         * Update Context Type
+         * @description Update a context type by id.
+         */
         put: operations["update_context_type"];
         post?: never;
-        /** Delete Context Type */
+        /**
+         * Delete Context Type
+         * @description Delete a context type and all its associated context instances by id.
+         */
         delete: operations["delete_context_type"];
         options?: never;
         head?: never;
@@ -298,7 +361,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Bulk Register Contexts */
+        /**
+         * Bulk Register Contexts
+         * @description Register context instances in bulk. Creates context types automatically if they don't exist.
+         */
         post: operations["bulk_register_contexts"];
         delete?: never;
         options?: never;
@@ -313,7 +379,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Contexts */
+        /**
+         * List Contexts
+         * @description List all context instances for the authenticated account.
+         */
         get: operations["list_contexts"];
         put?: never;
         post?: never;
@@ -330,11 +399,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Context */
+        /**
+         * Get Context
+         * @description Return a context instance by composite id (type:key).
+         */
         get: operations["get_context"];
         put?: never;
         post?: never;
-        /** Delete Context */
+        /**
+         * Delete Context
+         * @description Delete a context instance by composite id (type:key).
+         */
         delete: operations["delete_context"];
         options?: never;
         head?: never;
@@ -348,10 +423,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Services */
+        /**
+         * List Services
+         * @description List all services for the authenticated account.
+         */
         get: operations["list_services"];
         put?: never;
-        /** Create Service */
+        /**
+         * Create Service
+         * @description Create a new service. The caller provides the id (key) in the request body.
+         */
         post: operations["create_service"];
         delete?: never;
         options?: never;
@@ -366,12 +447,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Service */
+        /**
+         * Get Service
+         * @description Return a service by id.
+         */
         get: operations["get_service"];
-        /** Update Service */
+        /**
+         * Update Service
+         * @description Update a service by id.
+         */
         put: operations["update_service"];
         post?: never;
-        /** Delete Service */
+        /**
+         * Delete Service
+         * @description Delete a service by id.
+         */
         delete: operations["delete_service"];
         options?: never;
         head?: never;
@@ -385,10 +475,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Invitations */
+        /**
+         * List Invitations
+         * @description List all invitations for the authenticated account.
+         */
         get: operations["list_invitations"];
         put?: never;
-        /** Bulk Create Invitations */
+        /**
+         * Bulk Create Invitations
+         * @description Send one or more invitations to join the account.
+         */
         post: operations["create_invitations"];
         delete?: never;
         options?: never;
@@ -405,7 +501,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Revoke Invitation */
+        /**
+         * Revoke Invitation
+         * @description Revoke a pending invitation by id.
+         */
         post: operations["revoke_invitation"];
         delete?: never;
         options?: never;
@@ -422,7 +521,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resend Invitation */
+        /**
+         * Resend Invitation
+         * @description Resend a pending invitation email by id.
+         */
         post: operations["resend_invitation"];
         delete?: never;
         options?: never;
@@ -439,7 +541,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Accept Invitation */
+        /**
+         * Accept Invitation
+         * @description Accept an invitation using a token from the invitation email.
+         */
         post: operations["accept_invitation"];
         delete?: never;
         options?: never;
@@ -479,7 +584,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Bulk Ingest Metrics */
+        /**
+         * Bulk Ingest Metrics
+         * @description Ingest pre-aggregated metric data points. Returns 202 Accepted with no response body.
+         */
         post: operations["bulk_ingest_metrics"];
         delete?: never;
         options?: never;
@@ -494,7 +602,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Metrics */
+        /**
+         * List Metrics
+         * @description Query raw metric rows with filtering by name, time range, and dimensions.
+         */
         get: operations["list_metrics"];
         put?: never;
         post?: never;
@@ -511,7 +622,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Metric Rollups */
+        /**
+         * List Metric Rollups
+         * @description Query aggregated metric rollups. Requires filter[rollup] for the aggregation interval.
+         */
         get: operations["list_metric_rollups"];
         put?: never;
         post?: never;
@@ -528,7 +642,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Users */
+        /**
+         * List Users
+         * @description List users in the authenticated account.
+         */
         get: operations["list_users"];
         put?: never;
         post?: never;
@@ -545,12 +662,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get User */
+        /**
+         * Get User
+         * @description Return a user by id.
+         */
         get: operations["get_user"];
-        /** Update User Role */
+        /**
+         * Update User Role
+         * @description Update a user's role in the account.
+         */
         put: operations["update_user_role"];
         post?: never;
-        /** Remove User */
+        /**
+         * Remove User
+         * @description Remove a user from the account.
+         */
         delete: operations["remove_user"];
         options?: never;
         head?: never;
@@ -796,25 +922,16 @@ export interface components {
         ApiKey: {
             /** Name */
             name: string;
-            /**
-             * Status
-             * @default
-             */
-            readonly status: string;
-            /**
-             * Key
-             * @default
-             */
-            readonly key: string;
+            /** Status */
+            readonly status?: string | null;
+            /** Key */
+            readonly key?: string | null;
             /** Scopes */
             scopes?: {
                 [key: string]: unknown;
             };
-            /**
-             * Created By
-             * @default
-             */
-            readonly created_by: string;
+            /** Created By */
+            readonly created_by?: string | null;
             /**
              * Expires At
              * Format: date-time
@@ -901,9 +1018,8 @@ export interface components {
             /**
              * Name
              * @description Human-readable display name
-             * @default
              */
-            name: string;
+            name?: string | null;
             /**
              * Context Type
              * @description Context type key (e.g., 'user', 'account')
@@ -932,7 +1048,17 @@ export interface components {
             /** Registered */
             registered: number;
         };
-        /** ContextBulkItem */
+        /**
+         * ContextBulkItem
+         * @example {
+         *       "attributes": {
+         *         "first_name": "Alice",
+         *         "plan": "enterprise"
+         *       },
+         *       "key": "user-123",
+         *       "type": "user"
+         *     }
+         */
         ContextBulkItem: {
             /**
              * Type
@@ -959,7 +1085,23 @@ export interface components {
             /** Data */
             data: components["schemas"]["ContextResource"][];
         };
-        /** ContextResource */
+        /**
+         * ContextResource
+         * @example {
+         *       "attributes": {
+         *         "attributes": {
+         *           "first_name": "Alice",
+         *           "plan": "enterprise"
+         *         },
+         *         "context_type": "user",
+         *         "created_at": "2026-03-31T10:00:00Z",
+         *         "name": "Alice Smith",
+         *         "updated_at": "2026-03-31T10:00:00Z"
+         *       },
+         *       "id": "user:alice-123",
+         *       "type": "context"
+         *     }
+         */
         ContextResource: {
             /** Id */
             id?: string | null;
@@ -1018,7 +1160,23 @@ export interface components {
             /** Data */
             data: components["schemas"]["ContextTypeResource"][];
         };
-        /** ContextTypeResource */
+        /**
+         * ContextTypeResource
+         * @example {
+         *       "attributes": {
+         *         "attributes": {
+         *           "beta_tester": {},
+         *           "first_name": {},
+         *           "plan": {}
+         *         },
+         *         "created_at": "2026-03-31T10:00:00Z",
+         *         "name": "User",
+         *         "updated_at": "2026-03-31T10:00:00Z"
+         *       },
+         *       "id": "user",
+         *       "type": "context_type"
+         *     }
+         */
         ContextTypeResource: {
             /** Id */
             id?: string | null;
@@ -1033,7 +1191,14 @@ export interface components {
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
         };
-        /** CreateSubscriptionAttributes */
+        /**
+         * CreateSubscriptionAttributes
+         * @example {
+         *       "payment_method_id": "pm_1234567890abcdef",
+         *       "plan": "pro",
+         *       "product": "flags"
+         *     }
+         */
         CreateSubscriptionAttributes: {
             /** Product */
             product: string;
@@ -1042,11 +1207,33 @@ export interface components {
             /** Payment Method Id */
             payment_method_id: string;
         };
-        /** CreateSubscriptionBody */
+        /**
+         * CreateSubscriptionBody
+         * @example {
+         *       "data": {
+         *         "attributes": {
+         *           "payment_method_id": "pm_1234567890abcdef",
+         *           "plan": "pro",
+         *           "product": "flags"
+         *         },
+         *         "type": "subscription"
+         *       }
+         *     }
+         */
         CreateSubscriptionBody: {
             data: components["schemas"]["CreateSubscriptionData"];
         };
-        /** CreateSubscriptionData */
+        /**
+         * CreateSubscriptionData
+         * @example {
+         *       "attributes": {
+         *         "payment_method_id": "pm_1234567890abcdef",
+         *         "plan": "pro",
+         *         "product": "flags"
+         *       },
+         *       "type": "subscription"
+         *     }
+         */
         CreateSubscriptionData: {
             /** Type */
             type: string;
@@ -1150,26 +1337,14 @@ export interface components {
          *     }
          */
         Invitation: {
-            /**
-             * Email
-             * @default
-             */
-            readonly email: string;
-            /**
-             * Role
-             * @default
-             */
-            readonly role: string;
-            /**
-             * Status
-             * @default
-             */
-            readonly status: string;
-            /**
-             * Invited By
-             * @default
-             */
-            readonly invited_by: string;
+            /** Email */
+            readonly email?: string | null;
+            /** Role */
+            readonly role?: string | null;
+            /** Status */
+            readonly status?: string | null;
+            /** Invited By */
+            readonly invited_by?: string | null;
             /**
              * Expires At
              * Format: date-time
@@ -1186,17 +1361,42 @@ export interface components {
              */
             readonly updated_at?: string | null;
         };
-        /** InvitationAcceptRequest */
+        /**
+         * InvitationAcceptRequest
+         * @example {
+         *       "token": "eyJhbGciOiJIUzI1NiJ9..."
+         *     }
+         */
         InvitationAcceptRequest: {
             /** Token */
             token: string;
         };
-        /** InvitationBulkCreateRequest */
+        /**
+         * InvitationBulkCreateRequest
+         * @example {
+         *       "invitations": [
+         *         {
+         *           "email": "alice@example.com",
+         *           "role": "MEMBER"
+         *         },
+         *         {
+         *           "email": "bob@example.com",
+         *           "role": "MEMBER"
+         *         }
+         *       ]
+         *     }
+         */
         InvitationBulkCreateRequest: {
             /** Invitations */
             invitations: components["schemas"]["InvitationCreateItem"][];
         };
-        /** InvitationCreateItem */
+        /**
+         * InvitationCreateItem
+         * @example {
+         *       "email": "alice@example.com",
+         *       "role": "MEMBER"
+         *     }
+         */
         InvitationCreateItem: {
             /**
              * Email
@@ -1276,7 +1476,27 @@ export interface components {
             /** Data */
             data: components["schemas"]["InvoiceResource"][];
         };
-        /** InvoiceResource */
+        /**
+         * InvoiceResource
+         * @example {
+         *       "attributes": {
+         *         "amount_due": 2900,
+         *         "amount_paid": 2900,
+         *         "created_at": "2026-03-01T00:00:00Z",
+         *         "currency": "usd",
+         *         "description": "Smpl Flags - Pro",
+         *         "hosted_invoice_url": "https://invoice.stripe.com/i/acct_xxx/inv_xxx",
+         *         "invoice_pdf": "https://pay.stripe.com/invoice/acct_xxx/inv_xxx/pdf",
+         *         "number": "INV-0001",
+         *         "paid_at": "2026-03-01T12:00:00Z",
+         *         "period_end": "2026-04-01T00:00:00Z",
+         *         "period_start": "2026-03-01T00:00:00Z",
+         *         "status": "paid"
+         *       },
+         *       "id": "in_1234567890abcdef",
+         *       "type": "invoice"
+         *     }
+         */
         InvoiceResource: {
             /** Id */
             id?: string | null;
@@ -1298,7 +1518,13 @@ export interface components {
             /** Display Format */
             display_format?: string | null;
         };
-        /** LoginRequest */
+        /**
+         * LoginRequest
+         * @example {
+         *       "email": "jane@example.com",
+         *       "password": "correct-horse-battery-staple"
+         *     }
+         */
         LoginRequest: {
             /**
              * Email
@@ -1333,7 +1559,26 @@ export interface components {
              */
             readonly created_at?: string | null;
         };
-        /** MetricBulkRequest */
+        /**
+         * MetricBulkRequest
+         * @example {
+         *       "data": [
+         *         {
+         *           "attributes": {
+         *             "dimensions": {
+         *               "environment": "production"
+         *             },
+         *             "name": "flags.evaluations",
+         *             "period_seconds": 60,
+         *             "recorded_at": "2026-04-10T18:00:00Z",
+         *             "unit": "evaluations",
+         *             "value": 1482
+         *           },
+         *           "type": "metric"
+         *         }
+         *       ]
+         *     }
+         */
         MetricBulkRequest: {
             /** Data */
             data: components["schemas"]["MetricResource"][];
@@ -1355,7 +1600,25 @@ export interface components {
             /** Data */
             data: components["schemas"]["MetricNameItem"][];
         };
-        /** MetricResource */
+        /**
+         * MetricResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-10T18:00:01Z",
+         *         "dimensions": {
+         *           "environment": "production",
+         *           "service": "user-service"
+         *         },
+         *         "name": "flags.evaluations",
+         *         "period_seconds": 60,
+         *         "recorded_at": "2026-04-10T18:00:00Z",
+         *         "unit": "evaluations",
+         *         "value": 1482
+         *       },
+         *       "id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+         *       "type": "metric"
+         *     }
+         */
         MetricResource: {
             /** Id */
             id?: string | null;
@@ -1387,7 +1650,19 @@ export interface components {
             /** Data */
             data: components["schemas"]["MetricRollupResource"][];
         };
-        /** MetricRollupResource */
+        /**
+         * MetricRollupResource
+         * @example {
+         *       "attributes": {
+         *         "bucket": "2026-04-10T15:00:00Z",
+         *         "name": "flags.evaluations",
+         *         "rollup": "1h",
+         *         "unit": "evaluations",
+         *         "value": 87420
+         *       },
+         *       "type": "metric_rollup"
+         *     }
+         */
         MetricRollupResource: {
             /**
              * Type
@@ -1401,6 +1676,48 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
+        /** PaymentMethodAttributes */
+        PaymentMethodAttributes: {
+            /** Brand */
+            brand: string;
+            /** Last4 */
+            last4: string;
+            /** Exp Month */
+            exp_month: number;
+            /** Exp Year */
+            exp_year: number;
+            /** Is Default */
+            is_default: boolean;
+        };
+        /** PaymentMethodListResponse */
+        PaymentMethodListResponse: {
+            /** Data */
+            data: components["schemas"]["PaymentMethodResource"][];
+        };
+        /**
+         * PaymentMethodResource
+         * @example {
+         *       "attributes": {
+         *         "brand": "visa",
+         *         "exp_month": 12,
+         *         "exp_year": 2028,
+         *         "is_default": true,
+         *         "last4": "4242"
+         *       },
+         *       "id": "pm_1234567890abcdef",
+         *       "type": "payment_method"
+         *     }
+         */
+        PaymentMethodResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "payment_method";
+            attributes: components["schemas"]["PaymentMethodAttributes"];
+        };
         /** Plan */
         Plan: {
             /** Display Name */
@@ -1424,7 +1741,18 @@ export interface components {
             /** Data */
             data: components["schemas"]["PlanResource"][];
         };
-        /** PlanResource */
+        /**
+         * PlanResource
+         * @example {
+         *       "attributes": {
+         *         "description": "Get started with essential features at no cost",
+         *         "display_name": "Free",
+         *         "sort_order": 0
+         *       },
+         *       "id": "free",
+         *       "type": "plan"
+         *     }
+         */
         PlanResource: {
             /** Id */
             id?: string | null;
@@ -1460,7 +1788,39 @@ export interface components {
             /** Data */
             data: components["schemas"]["ProductResource"][];
         };
-        /** ProductResource */
+        /**
+         * ProductResource
+         * @example {
+         *       "attributes": {
+         *         "coming_soon": false,
+         *         "description": "Feature flags with targeting rules and real-time updates",
+         *         "display_name": "Smpl Flags",
+         *         "limits": {
+         *           "flags": {
+         *             "description": "Maximum number of feature flags",
+         *             "display_name": "Feature Flags",
+         *             "unit": "flags"
+         *           }
+         *         },
+         *         "plans": {
+         *           "free": {
+         *             "limits": {
+         *               "flags": 10
+         *             },
+         *             "price_monthly_cents": 0
+         *           },
+         *           "pro": {
+         *             "limits": {
+         *               "flags": -1
+         *             },
+         *             "price_monthly_cents": 2900
+         *           }
+         *         }
+         *       },
+         *       "id": "flags",
+         *       "type": "product"
+         *     }
+         */
         ProductResource: {
             /** Id */
             id?: string | null;
@@ -1471,7 +1831,13 @@ export interface components {
             type: "product";
             attributes: components["schemas"]["Product"];
         };
-        /** RegisterRequest */
+        /**
+         * RegisterRequest
+         * @example {
+         *       "email": "jane@example.com",
+         *       "password": "correct-horse-battery-staple"
+         *     }
+         */
         RegisterRequest: {
             /**
              * Email
@@ -1565,16 +1931,113 @@ export interface components {
             /** Data */
             data: components["schemas"]["ServiceResource"][];
         };
-        /** UpdateSubscriptionAttributes */
+        /** SetupIntentAttributes */
+        SetupIntentAttributes: {
+            /** Client Secret */
+            client_secret: string;
+        };
+        /**
+         * SetupIntentResource
+         * @example {
+         *       "attributes": {
+         *         "client_secret": "seti_1234567890abcdef_secret_xyz"
+         *       },
+         *       "type": "setup_intent"
+         *     }
+         */
+        SetupIntentResource: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "setup_intent";
+            attributes: components["schemas"]["SetupIntentAttributes"];
+        };
+        /** SetupIntentResponse */
+        SetupIntentResponse: {
+            data: components["schemas"]["SetupIntentResource"];
+        };
+        /** SubscriptionAttributes */
+        SubscriptionAttributes: {
+            /** Product */
+            product: string;
+            /** Plan */
+            plan: string;
+            /** Status */
+            status: string;
+            /** Stripe Managed */
+            stripe_managed: boolean;
+            /** Current Period End */
+            current_period_end?: string | null;
+            /** Client Secret */
+            client_secret?: string | null;
+        };
+        /** SubscriptionListResponse */
+        SubscriptionListResponse: {
+            /** Data */
+            data: components["schemas"]["SubscriptionResource"][];
+        };
+        /**
+         * SubscriptionResource
+         * @example {
+         *       "attributes": {
+         *         "current_period_end": "2026-05-01T00:00:00Z",
+         *         "plan": "pro",
+         *         "product": "flags",
+         *         "status": "active",
+         *         "stripe_managed": true
+         *       },
+         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+         *       "type": "subscription"
+         *     }
+         */
+        SubscriptionResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "subscription";
+            attributes: components["schemas"]["SubscriptionAttributes"];
+        };
+        /** SubscriptionResponse */
+        SubscriptionResponse: {
+            data: components["schemas"]["SubscriptionResource"];
+        };
+        /**
+         * UpdateSubscriptionAttributes
+         * @example {
+         *       "plan": "pro"
+         *     }
+         */
         UpdateSubscriptionAttributes: {
             /** Plan */
             plan: string;
         };
-        /** UpdateSubscriptionBody */
+        /**
+         * UpdateSubscriptionBody
+         * @example {
+         *       "data": {
+         *         "attributes": {
+         *           "plan": "pro"
+         *         },
+         *         "type": "subscription"
+         *       }
+         *     }
+         */
         UpdateSubscriptionBody: {
             data: components["schemas"]["UpdateSubscriptionData"];
         };
-        /** UpdateSubscriptionData */
+        /**
+         * UpdateSubscriptionData
+         * @example {
+         *       "attributes": {
+         *         "plan": "pro"
+         *       },
+         *       "type": "subscription"
+         *     }
+         */
         UpdateSubscriptionData: {
             /** Type */
             type: string;
@@ -1604,11 +2067,8 @@ export interface components {
             display_name: string;
             /** Profile Pic */
             profile_pic?: string | null;
-            /**
-             * Auth Provider
-             * @default
-             */
-            readonly auth_provider: string;
+            /** Auth Provider */
+            readonly auth_provider?: string | null;
             /**
              * Email Verified
              * @default false
@@ -1622,9 +2082,8 @@ export interface components {
             /**
              * Account
              * @description Account UUID
-             * @default
              */
-            readonly account: string;
+            readonly account?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1636,7 +2095,12 @@ export interface components {
             /** Data */
             data: components["schemas"]["UserResource"][];
         };
-        /** VerifyEmailRequest */
+        /**
+         * VerifyEmailRequest
+         * @example {
+         *       "token": "eyJhbGciOiJIUzI1NiJ9..."
+         *     }
+         */
         VerifyEmailRequest: {
             /** Token */
             token: string;
@@ -1654,7 +2118,7 @@ export interface operations {
         parameters: {
             query?: {
                 mode?: string;
-                source?: string;
+                source?: string | null;
             };
             header?: never;
             path: {
@@ -1664,14 +2128,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Redirect to OAuth provider login page */
+            302: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
@@ -1727,14 +2189,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Redirect to frontend with auth token in fragment */
+            302: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
@@ -4117,14 +4577,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/vnd.api+json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
@@ -4645,7 +5103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["SubscriptionListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -4705,7 +5163,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -4823,7 +5281,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -4879,7 +5337,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["PaymentMethodListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -4991,7 +5449,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": unknown;
+                    "application/vnd.api+json": components["schemas"]["SetupIntentResponse"];
                 };
             };
             /** @description Validation error or malformed request */
