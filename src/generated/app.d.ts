@@ -807,6 +807,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bundles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Bundle Subscription
+         * @description Create a bundle subscription covering all three products at a shared plan tier.
+         */
+        post: operations["create_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payment_methods": {
         parameters: {
             query?: never;
@@ -1037,6 +1057,52 @@ export interface components {
             /** Expires In */
             expires_in: number;
         };
+        /** BundleAttributes */
+        BundleAttributes: {
+            /** Bundle */
+            bundle: string;
+            /** Plan */
+            plan: string;
+            /** Products */
+            products: string[];
+            /** Subscriptions */
+            subscriptions: string[];
+        };
+        /**
+         * BundleResource
+         * @example {
+         *       "attributes": {
+         *         "bundle": "standard",
+         *         "plan": "standard",
+         *         "products": [
+         *           "config",
+         *           "flags",
+         *           "logging"
+         *         ],
+         *         "subscriptions": [
+         *           "sub-uuid-config",
+         *           "sub-uuid-flags",
+         *           "sub-uuid-logging"
+         *         ]
+         *       },
+         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+         *       "type": "bundle"
+         *     }
+         */
+        BundleResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "bundle";
+            attributes: components["schemas"]["BundleAttributes"];
+        };
+        /** BundleResponse */
+        BundleResponse: {
+            data: components["schemas"]["BundleResource"];
+        };
         /**
          * Context
          * @example {
@@ -1226,6 +1292,32 @@ export interface components {
         /** ContextTypeResponse */
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
+        };
+        /**
+         * CreateBundleAttributes
+         * @example {
+         *       "bundle": "standard",
+         *       "payment_method": "pm_1234567890abcdef"
+         *     }
+         */
+        CreateBundleAttributes: {
+            /** Bundle */
+            bundle: string;
+            /** Payment Method */
+            payment_method: string;
+        };
+        /** CreateBundleBody */
+        CreateBundleBody: {
+            data: components["schemas"]["CreateBundleData"];
+        };
+        /** CreateBundleData */
+        CreateBundleData: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "bundle";
+            attributes: components["schemas"]["CreateBundleAttributes"];
         };
         /**
          * CreateSubscriptionAttributes
@@ -2010,6 +2102,8 @@ export interface components {
             comped: boolean;
             /** Stripe Managed */
             stripe_managed: boolean;
+            /** Bundle */
+            bundle?: string | null;
             /** Current Period End */
             current_period_end?: string | null;
             /** Client Secret */
@@ -5352,6 +5446,66 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["CreateBundleBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["BundleResponse"];
                 };
             };
             /** @description Validation error or malformed request */
