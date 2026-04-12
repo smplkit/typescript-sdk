@@ -85,7 +85,6 @@ const SAMPLE_LOGGER = {
     level: "DEBUG",
     group: null,
     managed: true,
-    sources: [{ service: "api-gateway", first_observed: "2026-04-01T10:00:00Z" }],
     environments: { production: { level: "WARN" } },
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-04-01T10:00:00Z",
