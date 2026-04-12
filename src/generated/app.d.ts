@@ -814,7 +814,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Bundles
+         * @description Return all bundle definitions as JSON:API resources. Public, unauthenticated.
+         */
+        get: operations["list_bundles"];
         put?: never;
         /**
          * Create Bundle Subscription
@@ -1075,6 +1079,11 @@ export interface components {
             /** Subscriptions */
             subscriptions: string[];
         };
+        /** BundleListResponse */
+        BundleListResponse: {
+            /** Data */
+            data: components["schemas"]["CatalogBundleResource"][];
+        };
         /**
          * BundleResource
          * @example {
@@ -1109,6 +1118,44 @@ export interface components {
         /** BundleResponse */
         BundleResponse: {
             data: components["schemas"]["BundleResource"];
+        };
+        /** CatalogBundleAttributes */
+        CatalogBundleAttributes: {
+            /** Display Name */
+            display_name: string;
+            /** Plan */
+            plan: string;
+            /** Products */
+            products: string[];
+            /** Price Monthly Cents */
+            price_monthly_cents: number;
+        };
+        /**
+         * CatalogBundleResource
+         * @example {
+         *       "attributes": {
+         *         "display_name": "Standard Bundle",
+         *         "plan": "standard",
+         *         "price_monthly_cents": 14900,
+         *         "products": [
+         *           "config",
+         *           "flags",
+         *           "logging"
+         *         ]
+         *       },
+         *       "id": "standard",
+         *       "type": "bundle"
+         *     }
+         */
+        CatalogBundleResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "bundle";
+            attributes: components["schemas"]["CatalogBundleAttributes"];
         };
         /**
          * Context
@@ -5471,6 +5518,62 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_bundles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["BundleListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
