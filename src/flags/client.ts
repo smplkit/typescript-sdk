@@ -515,8 +515,7 @@ export class FlagsClient {
       const result = await this._http.GET("/api/v1/flags/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok)
-        await checkError(result.response, `Flag with id '${id}' not found`);
+      if (!result.response.ok) await checkError(result.response, `Flag with id '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -547,8 +546,7 @@ export class FlagsClient {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok)
-        await checkError(result.response, `Failed to delete flag '${id}'`);
+      if (!result.response.ok) await checkError(result.response, `Failed to delete flag '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
