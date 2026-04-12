@@ -337,8 +337,7 @@ export class ConfigClient {
       const result = await this._http.DELETE("/api/v1/configs/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok)
-        await checkError(result.response, `Failed to delete config '${id}'`);
+      if (!result.response.ok) await checkError(result.response, `Failed to delete config '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
