@@ -732,7 +732,7 @@ export interface paths {
         };
         /**
          * List Subscriptions
-         * @description Return per-product subscription state for the authenticated account.
+         * @description Return subscription rows for the authenticated account.
          */
         get: operations["list_subscriptions"];
         put?: never;
@@ -747,7 +747,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/subscriptions/{product}": {
+    "/api/v1/subscriptions/{id}/actions/upgrade": {
         parameters: {
             query?: never;
             header?: never;
@@ -756,19 +756,55 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Upgrade Subscription
+         * @description Upgrade an existing paid subscription to a higher plan.
+         */
+        post: operations["upgrade_subscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/subscriptions/{id}/actions/downgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Downgrade Subscription
+         * @description Downgrade an existing paid subscription to a lower plan.
+         */
+        post: operations["downgrade_subscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/subscriptions/{id}/actions/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /**
          * Cancel Subscription
          * @description Cancel a subscription at end of the current billing period.
          */
-        delete: operations["cancel_subscription"];
+        post: operations["cancel_subscription"];
+        delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Update Subscription
-         * @description Change the plan for an existing paid subscription (upgrade or downgrade).
-         */
-        patch: operations["update_subscription"];
+        patch?: never;
         trace?: never;
     };
     "/api/v1/payment_methods": {
@@ -1727,6 +1763,11 @@ export interface components {
             /** Sort Order */
             sort_order: number;
         };
+        /** PlanChangeRequest */
+        PlanChangeRequest: {
+            /** Plan */
+            plan: string;
+        };
         /** PlanDefinition */
         PlanDefinition: {
             /** Price Monthly Cents */
@@ -1964,7 +2005,9 @@ export interface components {
             /** Plan */
             plan: string;
             /** Status */
-            status: string;
+            status?: string | null;
+            /** Comped */
+            comped: boolean;
             /** Stripe Managed */
             stripe_managed: boolean;
             /** Current Period End */
@@ -1981,6 +2024,7 @@ export interface components {
          * SubscriptionResource
          * @example {
          *       "attributes": {
+         *         "comped": false,
          *         "current_period_end": "2026-05-01T00:00:00Z",
          *         "plan": "pro",
          *         "product": "flags",
@@ -2004,44 +2048,6 @@ export interface components {
         /** SubscriptionResponse */
         SubscriptionResponse: {
             data: components["schemas"]["SubscriptionResource"];
-        };
-        /**
-         * UpdateSubscriptionAttributes
-         * @example {
-         *       "plan": "pro"
-         *     }
-         */
-        UpdateSubscriptionAttributes: {
-            /** Plan */
-            plan: string;
-        };
-        /**
-         * UpdateSubscriptionBody
-         * @example {
-         *       "data": {
-         *         "attributes": {
-         *           "plan": "pro"
-         *         },
-         *         "type": "subscription"
-         *       }
-         *     }
-         */
-        UpdateSubscriptionBody: {
-            data: components["schemas"]["UpdateSubscriptionData"];
-        };
-        /**
-         * UpdateSubscriptionData
-         * @example {
-         *       "attributes": {
-         *         "plan": "pro"
-         *       },
-         *       "type": "subscription"
-         *     }
-         */
-        UpdateSubscriptionData: {
-            /** Type */
-            type: string;
-            attributes: components["schemas"]["UpdateSubscriptionAttributes"];
         };
         /**
          * User
@@ -5204,23 +5210,29 @@ export interface operations {
             };
         };
     };
-    cancel_subscription: {
+    upgrade_subscription: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                product: string;
+                id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["PlanChangeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
@@ -5260,20 +5272,78 @@ export interface operations {
             };
         };
     };
-    update_subscription: {
+    downgrade_subscription: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                product: string;
+                id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["UpdateSubscriptionBody"];
+                "application/vnd.api+json": components["schemas"]["PlanChangeRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_subscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
