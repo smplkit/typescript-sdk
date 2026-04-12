@@ -515,8 +515,7 @@ export class FlagsClient {
       const result = await this._http.GET("/api/v1/flags/{id}", {
         params: { path: { id } },
       });
-      if (result.error !== undefined)
-        await checkError(result.response, `Flag with id '${id}' not found`);
+      if (!result.response.ok) await checkError(result.response, `Flag with id '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -532,7 +531,7 @@ export class FlagsClient {
     let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/flags", {});
-      if (result.error !== undefined) await checkError(result.response, "Failed to list flags");
+      if (!result.response.ok) await checkError(result.response, "Failed to list flags");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -547,8 +546,7 @@ export class FlagsClient {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
         params: { path: { id } },
       });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete flag '${id}'`);
+      if (!result.response.ok) await checkError(result.response, `Failed to delete flag '${id}'`);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -578,7 +576,7 @@ export class FlagsClient {
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/flags", { body });
-      if (result.error !== undefined) await checkError(result.response, "Failed to create flag");
+      if (!result.response.ok) await checkError(result.response, "Failed to create flag");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -609,7 +607,7 @@ export class FlagsClient {
         params: { path: { id: flag.id! } },
         body,
       });
-      if (result.error !== undefined)
+      if (!result.response.ok)
         await checkError(result.response, `Failed to update flag ${flag.id}`);
       data = result.data;
     } catch (err) {
@@ -978,7 +976,7 @@ export class FlagsClient {
     let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/flags", {});
-      if (result.error !== undefined) await checkError(result.response, "Failed to list flags");
+      if (!result.response.ok) await checkError(result.response, "Failed to list flags");
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
