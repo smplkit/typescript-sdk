@@ -665,6 +665,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Invoices
+         * @description Return invoice history for the account from Stripe.
+         */
+        get: operations["list_invoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/functions/setup_intent/actions/execute": {
         parameters: {
             query?: never;
@@ -1223,6 +1243,49 @@ export interface components {
         /** InvitationResponse */
         InvitationResponse: {
             data: components["schemas"]["InvitationResource"];
+        };
+        /** Invoice */
+        Invoice: {
+            /** Number */
+            number: string | null;
+            /** Status */
+            status: string;
+            /** Amount Due */
+            amount_due: number;
+            /** Amount Paid */
+            amount_paid: number;
+            /** Currency */
+            currency: string;
+            /** Description */
+            description: string | null;
+            /** Period Start */
+            period_start: string | null;
+            /** Period End */
+            period_end: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Paid At */
+            paid_at: string | null;
+            /** Hosted Invoice Url */
+            hosted_invoice_url: string | null;
+            /** Invoice Pdf */
+            invoice_pdf: string | null;
+        };
+        /** InvoiceListResponse */
+        InvoiceListResponse: {
+            /** Data */
+            data: components["schemas"]["InvoiceResource"][];
+        };
+        /** InvoiceResource */
+        InvoiceResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "invoice";
+            attributes: components["schemas"]["Invoice"];
         };
         /** LimitDefinition */
         LimitDefinition: {
@@ -4817,6 +4880,62 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": unknown;
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_invoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["InvoiceListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
