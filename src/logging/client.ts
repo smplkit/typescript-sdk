@@ -650,7 +650,7 @@ export class LoggingClient {
       level: attrs.level ?? null,
       group: attrs.group ?? null,
       managed: attrs.managed ?? false,
-      sources: (attrs.sources ?? []) as Array<Record<string, any>>,
+      sources: [],
       environments: (attrs.environments ?? {}) as Record<string, any>,
       createdAt: attrs.created_at ?? null,
       updatedAt: attrs.updated_at ?? null,

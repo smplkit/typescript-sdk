@@ -311,10 +311,6 @@ export interface components {
             group?: string | null;
             /** Managed */
             managed?: boolean | null;
-            /** Sources */
-            readonly sources?: {
-                [key: string]: unknown;
-            }[] | null;
             /** Environments */
             environments?: {
                 [key: string]: unknown;

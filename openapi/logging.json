@@ -1376,22 +1376,6 @@
             ],
             "title": "Managed"
           },
-          "sources": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sources",
-            "readOnly": true
-          },
           "environments": {
             "anyOf": [
               {
