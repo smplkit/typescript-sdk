@@ -13,15 +13,12 @@ export interface paths {
         };
         /**
          * List Loggers
-         * @description List all loggers for the authenticated account. Optionally filter by managed status.
+         * @description List all loggers for the authenticated account. Optionally filter by managed status,
+         *     service, or last-seen time window.
          */
         get: operations["list_loggers"];
         put?: never;
-        /**
-         * Create Logger
-         * @description Create a new logger. The caller provides the id (key) in the request body.
-         */
-        post: operations["create_logger"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -42,7 +39,7 @@ export interface paths {
         get: operations["get_logger"];
         /**
          * Update Logger
-         * @description Replace a logger entirely.
+         * @description Update a logger. Fields absent from the body are preserved; explicit null clears them.
          */
         put: operations["update_logger"];
         post?: never;
@@ -91,7 +88,7 @@ export interface paths {
         put?: never;
         /**
          * Create Log Group
-         * @description Create a new log group. The caller provides the id (key) in the request body.
+         * @description Create a new log group. The caller provides the key in data.id or attributes.key.
          */
         post: operations["create_log_group"];
         delete?: never;
@@ -168,6 +165,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/logger_sources/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Logger Source Services
+         * @description Return the distinct service names observed across all logger sources for the account.
+         */
+        get: operations["list_logger_source_services"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -225,6 +242,7 @@ export interface components {
          *           "level": "ERROR"
          *         }
          *       },
+         *       "key": "database-loggers",
          *       "level": "WARN",
          *       "name": "Database Loggers",
          *       "updated_at": "2026-04-01T10:00:00Z"
@@ -233,10 +251,12 @@ export interface components {
         LogGroup: {
             /** Name */
             name: string;
+            /** Key */
+            key?: string | null;
             /** Level */
             level?: string | null;
-            /** Group */
-            group?: string | null;
+            /** Parent Id */
+            parent_id?: string | null;
             /** Environments */
             environments?: {
                 [key: string]: unknown;
@@ -261,6 +281,7 @@ export interface components {
          *             "level": "ERROR"
          *           }
          *         },
+         *         "key": "database-loggers",
          *         "level": "WARN",
          *         "name": "Database Loggers",
          *         "updated_at": "2026-04-01T10:00:00Z"
@@ -311,8 +332,16 @@ export interface components {
             group?: string | null;
             /** Managed */
             managed?: boolean | null;
+            /** Sources */
+            readonly sources?: {
+                [key: string]: unknown;
+            }[] | null;
             /** Environments */
             environments?: {
+                [key: string]: unknown;
+            } | null;
+            /** Effective Levels */
+            readonly effective_levels?: {
                 [key: string]: unknown;
             } | null;
             /** Created At */
@@ -326,6 +355,7 @@ export interface components {
          *       "environment": "production",
          *       "id": "sqlalchemy.engine",
          *       "level": "WARN",
+         *       "resolved_level": "WARN",
          *       "service": "api-gateway"
          *     }
          */
@@ -337,9 +367,14 @@ export interface components {
             id: string;
             /**
              * Level
-             * @description Observed log level in smplkit canonical format
+             * @description The explicitly-set level on this logger. Null if inherited.
              */
-            level: string;
+            level?: string | null;
+            /**
+             * Resolved Level
+             * @description The effective level after framework inheritance. Never null in compliant SDKs.
+             */
+            resolved_level?: string | null;
             /**
              * Service
              * @description Service name that discovered this logger
@@ -487,6 +522,11 @@ export interface components {
             type: "logger_source";
             attributes: components["schemas"]["LoggerSource"];
         };
+        /** LoggerSourceServicesResponse */
+        LoggerSourceServicesResponse: {
+            /** Services */
+            services: string[];
+        };
         /** UsageAttributes */
         UsageAttributes: {
             /** Limit Key */
@@ -569,6 +609,8 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[managed]"?: boolean | null;
+                "filter[service]"?: string | null;
+                "filter[last_seen]"?: string | null;
             };
             header?: never;
             path?: never;
@@ -583,66 +625,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["LoggerListResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_logger: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/vnd.api+json": components["schemas"]["LoggerResponse"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["LoggerResponse"];
                 };
             };
             /** @description Validation error or malformed request */
@@ -1288,6 +1270,62 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["LoggerSourceListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_logger_source_services: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["LoggerSourceServicesResponse"];
                 };
             };
             /** @description Validation error or malformed request */
