@@ -468,7 +468,8 @@ export class LoggingClient {
         const result = await this._http.POST("/api/v1/loggers/bulk", {
           body: { loggers },
         });
-        if (result.error !== undefined) await checkError(result.response, "Failed to bulk-register loggers");
+        if (result.error !== undefined)
+          await checkError(result.response, "Failed to bulk-register loggers");
       } catch (err: unknown) {
         console.warn(
           `[smplkit] Failed to bulk-register loggers: ${err instanceof Error ? err.message : String(err)}`,
