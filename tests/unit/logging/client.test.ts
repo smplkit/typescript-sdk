@@ -559,7 +559,7 @@ describe("LoggingClient — runtime", () => {
       expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
     });
 
-    it("should log console.warn when individual logger registration fails", async () => {
+    it("should log console.warn when bulk logger registration fails", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const client = makeClient();
       client.registerAdapter({
@@ -569,24 +569,114 @@ describe("LoggingClient — runtime", () => {
         installHook: () => {},
         uninstallHook: () => {},
       });
-      // First calls succeed (list + listGroups), but save calls fail
+      // bulk call returns 400; list + listGroups return empty arrays
       let callCount = 0;
       mockFetch.mockImplementation(() => {
         callCount++;
-        // First two calls are list + listGroups from start(), remaining are save calls
-        if (callCount <= 2) {
-          return Promise.resolve(jsonResponse({ data: [] }));
+        // First call: bulk register (fails)
+        if (callCount === 1) {
+          return Promise.resolve(jsonResponse({ errors: [{ detail: "Invalid" }] }, 400));
         }
-        // save() calls: return 400
-        return Promise.resolve(jsonResponse({ errors: [{ detail: "Invalid" }] }, 400));
+        // Remaining calls: list + listGroups
+        return Promise.resolve(jsonResponse({ data: [] }));
       });
 
       await client.start();
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[smplkit] Failed to register logger "bad.logger"'),
+        expect.stringContaining("[smplkit] Failed to bulk-register loggers"),
       );
       warnSpy.mockRestore();
+    });
+
+    it("should send bulk payload with level and resolved_level for each discovered logger", async () => {
+      const client = makeClient();
+      client.registerAdapter({
+        name: "test-adapter",
+        discover: () => [
+          { name: "app.server", level: "INFO" },
+          { name: "app.db", level: "WARN" },
+        ],
+        applyLevel: () => {},
+        installHook: () => {},
+        uninstallHook: () => {},
+      });
+
+      // First call: bulk register (succeeds); remaining: list + listGroups
+      let callCount = 0;
+      mockFetch.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve(jsonResponse({ registered: 2 }));
+        }
+        return Promise.resolve(jsonResponse({ data: [] }));
+      });
+
+      await client.start();
+
+      const bulkRequest: Request = mockFetch.mock.calls[0][0];
+      expect(bulkRequest.method).toBe("POST");
+      expect(bulkRequest.url).toContain("/api/v1/loggers/bulk");
+
+      const body = JSON.parse(await bulkRequest.text());
+      expect(body.loggers).toHaveLength(2);
+
+      const serverLogger = body.loggers.find((l: { id: string }) => l.id === "app.server");
+      expect(serverLogger).toBeDefined();
+      expect(serverLogger.level).toBe("INFO");
+      expect(serverLogger.resolved_level).toBe("INFO");
+
+      const dbLogger = body.loggers.find((l: { id: string }) => l.id === "app.db");
+      expect(dbLogger).toBeDefined();
+      expect(dbLogger.level).toBe("WARN");
+      expect(dbLogger.resolved_level).toBe("WARN");
+    });
+
+    it("should include service and environment in bulk payload when parent is set", async () => {
+      const ws = createMockSharedWs();
+      const client = new LoggingClient(API_KEY, () => ws as never, 30000);
+      (client as any)._parent = {
+        _environment: "production",
+        _service: "api-gateway",
+        _metrics: null,
+      };
+      client.registerAdapter({
+        name: "test-adapter",
+        discover: () => [{ name: "my.logger", level: "DEBUG" }],
+        applyLevel: () => {},
+        installHook: () => {},
+        uninstallHook: () => {},
+      });
+
+      let callCount = 0;
+      mockFetch.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve(jsonResponse({ registered: 1 }));
+        }
+        return Promise.resolve(jsonResponse({ data: [] }));
+      });
+
+      await client.start();
+
+      const bulkRequest: Request = mockFetch.mock.calls[0][0];
+      const body = JSON.parse(await bulkRequest.text());
+      expect(body.loggers[0].service).toBe("api-gateway");
+      expect(body.loggers[0].environment).toBe("production");
+    });
+
+    it("should skip bulk call when no loggers are discovered", async () => {
+      const client = makeClient();
+      prepareForStart(client); // registers noop adapter with empty discover()
+      // Only list + listGroups calls should happen
+      mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+
+      await client.start();
+
+      // No bulk call — only list and listGroups
+      const calls = mockFetch.mock.calls as Array<[Request]>;
+      const bulkCalls = calls.filter(([req]) => req.url?.includes("/api/v1/loggers/bulk"));
+      expect(bulkCalls).toHaveLength(0);
     });
   });
 

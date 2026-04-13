@@ -451,14 +451,27 @@ export class LoggingClient {
     }
 
     // 5. Bulk-register discovered loggers with the server
-    for (const { name, level } of discovered) {
+    if (discovered.length > 0) {
+      const service = this._parent?._service ?? null;
+      const environment = this._parent?._environment ?? null;
+      const loggers: components["schemas"]["LoggerBulkItem"][] = discovered.map(
+        ({ name, level }) => ({
+          id: name,
+          // For Winston/Pino there is no inherited-null distinction — both fields carry the same value.
+          level: level,
+          resolved_level: level,
+          service: service ?? undefined,
+          environment: environment ?? undefined,
+        }),
+      );
       try {
-        const logger = this.management.new(name, { managed: true });
-        logger.setLevel(level as any);
-        await logger.save();
+        const result = await this._http.POST("/api/v1/loggers/bulk", {
+          body: { loggers },
+        });
+        if (result.error !== undefined) await checkError(result.response, "Failed to bulk-register loggers");
       } catch (err: unknown) {
         console.warn(
-          `[smplkit] Failed to register logger "${name}": ${err instanceof Error ? err.message : String(err)}`,
+          `[smplkit] Failed to bulk-register loggers: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
