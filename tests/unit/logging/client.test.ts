@@ -154,56 +154,73 @@ describe("LoggingClient — logger management", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Logger.save() — POST (create)
+  // Logger.save() — create (new logger: bulk register then PUT)
   // -----------------------------------------------------------------------
 
-  describe("Logger.save() — POST", () => {
-    it("should POST when createdAt is null", async () => {
+  describe("Logger.save() — create (bulk + PUT)", () => {
+    it("should bulk-register then PUT when createdAt is null", async () => {
       const client = makeClient();
       const logger = client.management.new("sqlalchemy.engine", {
         name: "SQLAlchemy Engine",
         managed: true,
       });
 
+      // First response: bulk register; second response: PUT
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
       await logger.save();
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      const request: Request = mockFetch.mock.calls[0][0];
-      expect(request.method).toBe("POST");
-      expect(request.url).toContain("/api/v1/loggers");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const bulkRequest: Request = mockFetch.mock.calls[0][0];
+      expect(bulkRequest.method).toBe("POST");
+      expect(bulkRequest.url).toContain("/api/v1/loggers/bulk");
+      const putRequest: Request = mockFetch.mock.calls[1][0];
+      expect(putRequest.method).toBe("PUT");
+      expect(putRequest.url).toContain("/api/v1/loggers/sqlalchemy.engine");
       expect(logger.id).toBe("sqlalchemy.engine");
     });
 
-    it("should send JSON:API body with correct attributes", async () => {
+    it("should send JSON:API body with correct attributes in the PUT", async () => {
       const client = makeClient();
       const logger = client.management.new("my-logger", { name: "My Logger", managed: false });
 
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
 
       await logger.save();
 
-      const request: Request = mockFetch.mock.calls[0][0];
-      const body = JSON.parse(await request.text());
+      const putRequest: Request = mockFetch.mock.calls[1][0];
+      const body = JSON.parse(await putRequest.text());
       expect(body.data.type).toBe("logger");
       expect(body.data.id).toBe("my-logger");
       expect(body.data.attributes.name).toBe("My Logger");
       expect(body.data.attributes.managed).toBe(false);
     });
+
+    it("should throw SmplConnectionError when create-path PUT throws a network error", async () => {
+      const client = makeClient();
+      const logger = client.management.new("my-logger", { name: "My Logger" });
+
+      // bulk register succeeds, PUT throws network error
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      await expect(logger.save()).rejects.toThrow(SmplConnectionError);
+    });
   });
 
   // -----------------------------------------------------------------------
-  // Logger.save() — PUT (update)
+  // Logger.save() — PUT (update existing logger)
   // -----------------------------------------------------------------------
 
-  describe("Logger.save() — PUT", () => {
+  describe("Logger.save() — PUT (update)", () => {
     it("should PUT when createdAt is set", async () => {
       const client = makeClient();
-      // Simulate a logger that was previously fetched (has createdAt set)
-      const logger = client.management.new("sqlalchemy.engine");
+      // Fetch an existing logger (has createdAt set from server).
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
-      await logger.save(); // POST sets createdAt
+      const logger = await client.management.get("sqlalchemy.engine");
+      expect(logger.createdAt).not.toBeNull();
 
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
@@ -212,7 +229,7 @@ describe("LoggingClient — logger management", () => {
       );
 
       logger.setLevel({ toString: () => "ERROR" } as never);
-      await logger.save(); // PUT
+      await logger.save(); // PUT only (logger already exists)
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       const putRequest: Request = mockFetch.mock.calls[1][0];
@@ -867,7 +884,7 @@ describe("LoggingClient — error handling", () => {
     );
   });
 
-  it("should throw SmplConnectionError on Logger.save() POST network error", async () => {
+  it("should throw SmplConnectionError on Logger.save() bulk register network error", async () => {
     const client = makeClient();
     const logger = client.management.new("test-logger");
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
@@ -877,11 +894,9 @@ describe("LoggingClient — error handling", () => {
 
   it("should throw SmplConnectionError on Logger.save() PUT network error", async () => {
     const client = makeClient();
-    const logger = client.management.new("test-logger");
-
-    // POST succeeds
+    // Fetch an existing logger so createdAt is set (skips bulk register on save).
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOGGER }));
-    await logger.save();
+    const logger = await client.management.get("test-logger");
 
     // PUT fails
     mockFetch.mockRejectedValueOnce(new TypeError("connection reset"));

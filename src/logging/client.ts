@@ -321,12 +321,32 @@ export class LoggingClient {
     };
 
     if (logger.createdAt === null) {
-      // POST — create
+      // Bulk-register first to create the record, then PUT to apply properties.
+      try {
+        const bulkResult = await this._http.POST("/api/v1/loggers/bulk", {
+          body: {
+            loggers: [
+              {
+                id: logger.id!,
+                level: logger.level ?? undefined,
+                resolved_level: logger.level ?? undefined,
+              },
+            ],
+          },
+        });
+        if (bulkResult.error !== undefined)
+          await checkError(bulkResult.response, "Failed to register logger");
+      } catch (err) {
+        wrapFetchError(err);
+      }
       let data: components["schemas"]["LoggerResponse"] | undefined;
       try {
-        const result = await this._http.POST("/api/v1/loggers", { body });
+        const result = await this._http.PUT("/api/v1/loggers/{id}", {
+          params: { path: { id: logger.id! } },
+          body,
+        });
         if (result.error !== undefined)
-          await checkError(result.response, "Failed to create logger");
+          await checkError(result.response, `Failed to update logger ${logger.id}`);
         data = result.data;
       } catch (err) {
         wrapFetchError(err);
@@ -677,7 +697,7 @@ export class LoggingClient {
       id: resource.id ?? null,
       name: attrs.name,
       level: attrs.level ?? null,
-      group: attrs.group ?? null,
+      group: attrs.parent_id ?? null,
       environments: (attrs.environments ?? {}) as Record<string, any>,
       createdAt: attrs.created_at ?? null,
       updatedAt: attrs.updated_at ?? null,
