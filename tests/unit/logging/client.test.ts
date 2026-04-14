@@ -197,6 +197,17 @@ describe("LoggingClient — logger management", () => {
       expect(body.data.attributes.name).toBe("My Logger");
       expect(body.data.attributes.managed).toBe(false);
     });
+
+    it("should throw SmplConnectionError when create-path PUT throws a network error", async () => {
+      const client = makeClient();
+      const logger = client.management.new("my-logger", { name: "My Logger" });
+
+      // bulk register succeeds, PUT throws network error
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      await expect(logger.save()).rejects.toThrow(SmplConnectionError);
+    });
   });
 
   // -----------------------------------------------------------------------
