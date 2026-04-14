@@ -38,8 +38,9 @@ export interface paths {
          */
         get: operations["get_logger"];
         /**
-         * Update Logger
-         * @description Update a logger. Fields absent from the body are preserved; explicit null clears them.
+         * Update or Create Logger
+         * @description Create or update a logger (upsert). If the logger does not exist it is created.
+         *     Fields absent from the body are preserved on update; explicit null clears them.
          */
         put: operations["update_logger"];
         post?: never;
