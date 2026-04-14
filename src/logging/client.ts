@@ -332,8 +332,7 @@ export class LoggingClient {
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data)
-      throw new SmplValidationError(`Failed to save logger ${logger.id}`);
+    if (!data || !data.data) throw new SmplValidationError(`Failed to save logger ${logger.id}`);
     return this._loggerToModel(data.data);
   }
 
