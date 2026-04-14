@@ -170,6 +170,10 @@ export class SmplClient {
         body: {
           contexts: [
             {
+              type: "environment",
+              key: this._environment,
+            },
+            {
               type: "service",
               key: this._service,
               attributes: { name: this._service },
