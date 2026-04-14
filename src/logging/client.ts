@@ -304,7 +304,7 @@ export class LoggingClient {
   // Management: internal save methods
   // ------------------------------------------------------------------
 
-  /** @internal — POST or PUT a logger. */
+  /** @internal — PUT a logger (upsert: server creates if not found). */
   async _saveLogger(logger: Logger): Promise<Logger> {
     const body = {
       data: {
@@ -320,57 +320,20 @@ export class LoggingClient {
       },
     };
 
-    if (logger.createdAt === null) {
-      // Bulk-register first to create the record, then PUT to apply properties.
-      try {
-        const bulkResult = await this._http.POST("/api/v1/loggers/bulk", {
-          body: {
-            loggers: [
-              {
-                id: logger.id!,
-                level: logger.level ?? undefined,
-                resolved_level: logger.level ?? undefined,
-              },
-            ],
-          },
-        });
-        if (bulkResult.error !== undefined)
-          await checkError(bulkResult.response, "Failed to register logger");
-      } catch (err) {
-        wrapFetchError(err);
-      }
-      let data: components["schemas"]["LoggerResponse"] | undefined;
-      try {
-        const result = await this._http.PUT("/api/v1/loggers/{id}", {
-          params: { path: { id: logger.id! } },
-          body,
-        });
-        if (result.error !== undefined)
-          await checkError(result.response, `Failed to update logger ${logger.id}`);
-        data = result.data;
-      } catch (err) {
-        wrapFetchError(err);
-      }
-      if (!data || !data.data) throw new SmplValidationError("Failed to create logger");
-      return this._loggerToModel(data.data);
-    } else {
-      // PUT — update
-      let data: components["schemas"]["LoggerResponse"] | undefined;
-      try {
-        const result = await this._http.PUT("/api/v1/loggers/{id}", {
-          params: { path: { id: logger.id! } },
-          body,
-        });
-        if (result.error !== undefined)
-          await checkError(result.response, `Failed to update logger ${logger.id}`);
-        data = result.data;
-      } catch (err) {
-        wrapFetchError(err);
-      }
-      if (!data || !data.data)
-        throw new SmplValidationError(`Failed to update logger ${logger.id}`);
-      return this._loggerToModel(data.data);
+    let data: components["schemas"]["LoggerResponse"] | undefined;
+    try {
+      const result = await this._http.PUT("/api/v1/loggers/{id}", {
+        params: { path: { id: logger.id! } },
+        body,
+      });
+      if (result.error !== undefined)
+        await checkError(result.response, `Failed to save logger ${logger.id}`);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
     }
+    if (!data || !data.data) throw new SmplValidationError(`Failed to save logger ${logger.id}`);
+    return this._loggerToModel(data.data);
   }
 
   /** @internal — POST or PUT a log group. */
