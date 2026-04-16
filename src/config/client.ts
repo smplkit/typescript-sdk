@@ -20,6 +20,7 @@ import { Config } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
+import { debug } from "../_debug.js";
 
 /** Describes a single config value change detected on refresh. */
 export interface ConfigChangeEvent {
@@ -548,6 +549,7 @@ export class ConfigClient {
     if (this._getSharedWs) {
       const ws = this._getSharedWs();
       ws.on("config_changed", this._handleConfigChanged);
+      ws.on("config_deleted", this._handleConfigChanged);
     }
   }
 
@@ -573,7 +575,8 @@ export class ConfigClient {
   // Internal: WebSocket handler
   // ------------------------------------------------------------------
 
-  private _handleConfigChanged = (_data: Record<string, any>): void => {
+  private _handleConfigChanged = (data: Record<string, any>): void => {
+    debug("websocket", `config event received: ${JSON.stringify(data)}`);
     void this.refresh().catch(() => {
       // ignore refresh errors from WebSocket events
     });

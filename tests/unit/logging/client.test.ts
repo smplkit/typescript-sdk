@@ -568,8 +568,8 @@ describe("LoggingClient — runtime", () => {
       await client.start();
       await client.start();
 
-      // _ensureWs should only be called once (the mock ws.on is called once)
-      expect(lastMockWs.on).toHaveBeenCalledTimes(1);
+      // _ensureWs should only be called once (4 ws.on calls for logger_changed/deleted and group_changed/deleted)
+      expect(lastMockWs.on).toHaveBeenCalledTimes(4);
     });
 
     it("should wire a WebSocket listener for logger_changed", async () => {
@@ -743,6 +743,54 @@ describe("LoggingClient — runtime", () => {
       const client = makeClient();
       expect(() => client.onChange("my-id", undefined as never)).toThrow(SmplError);
     });
+
+    it("should wire a WebSocket listener for group_changed and group_deleted", async () => {
+      const client = makeClient();
+      prepareForStart(client);
+      await client.start();
+
+      expect(lastMockWs.on).toHaveBeenCalledWith("group_changed", expect.any(Function));
+      expect(lastMockWs.on).toHaveBeenCalledWith("group_deleted", expect.any(Function));
+    });
+
+    it("should trigger re-fetch when group_changed fires", async () => {
+      const client = makeClient();
+      prepareForStart(client);
+      await client.start();
+
+      const initialCallCount = mockFetch.mock.calls.length;
+      // Simulate a group_changed event
+      lastMockWs._emit("group_changed", { id: "my-group" });
+
+      // Allow the async promise to settle
+      await new Promise((r) => setTimeout(r, 10));
+      // At least 2 more calls (list + listGroups) should have been made
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+
+    it("should handle fetch error in group event handler without throwing", async () => {
+      const client = makeClient();
+      prepareForStart(client);
+      await client.start();
+
+      // Make subsequent fetches fail
+      mockFetch.mockRejectedValue(new Error("network error"));
+      // Should not throw — errors are swallowed in the group handler
+      lastMockWs._emit("group_changed", { id: "my-group" });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it("should handle fetch error in logger_changed handler without throwing", async () => {
+      const client = makeClient();
+      prepareForStart(client);
+      await client.start();
+
+      // Make subsequent fetches fail
+      mockFetch.mockRejectedValue(new Error("network error"));
+      // Should not throw — errors are swallowed
+      lastMockWs._emit("logger_changed", { id: "test.logger", level: "DEBUG" });
+      await new Promise((r) => setTimeout(r, 10));
+    });
   });
 
   describe("_close()", () => {
@@ -768,7 +816,7 @@ describe("LoggingClient — runtime", () => {
       // Re-register adapter since _close resets state but _explicitAdapters stays true
       await client.start();
 
-      expect(lastMockWs.on).toHaveBeenCalledTimes(1);
+      expect(lastMockWs.on).toHaveBeenCalledTimes(4);
     });
   });
 });

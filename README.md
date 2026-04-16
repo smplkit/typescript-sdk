@@ -227,6 +227,16 @@ try {
 | `SmplConnectionError`  | Network connectivity issue    |
 | `SmplError`            | Any other SDK error           |
 
+## Debug Logging
+
+Set `SMPLKIT_DEBUG=1` to enable verbose diagnostic output to stderr. This is useful for troubleshooting real-time level changes, WebSocket connectivity, and SDK initialization. Debug output bypasses the managed logging framework and writes directly to stderr.
+
+```bash
+SMPLKIT_DEBUG=1 node my-app.js
+```
+
+Accepted values: `1`, `true`, `yes` (case-insensitive). Any other value (or unset) disables debug output.
+
 ## Documentation
 
 - [Getting Started](https://docs.smplkit.com/getting-started)

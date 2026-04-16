@@ -20,6 +20,7 @@ import type { Context } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
+import { debug } from "../_debug.js";
 
 // Use require-style import for json-logic-js (no TS types)
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -722,6 +723,7 @@ export class FlagsClient {
    */
   async initialize(): Promise<void> {
     if (this._initialized) return;
+    debug("lifecycle", "FlagsClient.initialize() called");
     this._environment = this._parent?._environment ?? null;
     await this._fetchAllFlags();
     this._initialized = true;
@@ -943,6 +945,7 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   private _handleFlagChanged = (data: Record<string, any>): void => {
+    debug("websocket", `flag event received: ${JSON.stringify(data)}`);
     const flagId = data.id as string | undefined;
     // Re-fetch all flags (async, fire-and-forget)
     void this._fetchAllFlags().then(() => {
@@ -952,6 +955,7 @@ export class FlagsClient {
   };
 
   private _handleFlagDeleted = (data: Record<string, any>): void => {
+    debug("websocket", `flag deleted event received: ${JSON.stringify(data)}`);
     const flagId = data.id as string | undefined;
     void this._fetchAllFlags().then(() => {
       this._cache.clear();
@@ -973,6 +977,7 @@ export class FlagsClient {
   }
 
   private async _fetchFlagsList(): Promise<Array<Record<string, any>>> {
+    debug("api", "GET /api/v1/flags");
     let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
       const result = await this._http.GET("/api/v1/flags", {});
@@ -982,7 +987,9 @@ export class FlagsClient {
       wrapFetchError(err);
     }
     if (!data) return [];
-    return data.data.map((r) => this._resourceToPlainDict(r));
+    const flags = data.data.map((r) => this._resourceToPlainDict(r));
+    debug("api", `GET /api/v1/flags -> ${flags.length} flag(s)`);
+    return flags;
   }
 
   // ------------------------------------------------------------------

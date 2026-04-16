@@ -21,6 +21,7 @@ import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
 import type { SharedWebSocket } from "../ws.js";
+import { debug } from "../_debug.js";
 
 const LOGGING_BASE_URL = "https://logging.smplkit.com";
 
@@ -397,6 +398,7 @@ export class LoggingClient {
    */
   async start(): Promise<void> {
     if (this._started) return;
+    debug("lifecycle", "LoggingClient.start() called");
 
     // 1. Auto-load adapters if none registered explicitly
     if (!this._explicitAdapters) {
@@ -413,6 +415,7 @@ export class LoggingClient {
         // ignore adapter discovery errors
       }
     }
+    debug("discovery", `discovered ${discovered.length} logger(s) from adapters`);
 
     // 3. Install hooks on each adapter for new logger creation
     for (const adapter of this._adapters) {
@@ -420,6 +423,7 @@ export class LoggingClient {
         adapter.installHook((name: string, level: string) => {
           this._onAdapterNewLogger(name, level);
         });
+        debug("discovery", `hook installed on adapter`);
       } catch {
         // ignore hook installation errors
       }
@@ -447,12 +451,14 @@ export class LoggingClient {
           environment: environment ?? undefined,
         }),
       );
+      debug("registration", `flushing ${loggers.length} logger(s) to bulk-register endpoint`);
       try {
         const result = await this._http.POST("/api/v1/loggers/bulk", {
           body: { loggers },
         });
         if (result.error !== undefined)
           await checkError(result.response, "Failed to bulk-register loggers");
+        debug("registration", `bulk-register complete (${loggers.length} logger(s))`);
       } catch (err: unknown) {
         console.warn(
           `[smplkit] Failed to bulk-register loggers: ${err instanceof Error ? err.message : String(err)}`,
@@ -461,11 +467,13 @@ export class LoggingClient {
     }
 
     // 5. Fetch all loggers and groups from the server, resolve levels
+    debug("resolution", `starting resolution pass (trigger: start())`);
     try {
-      const [serverLoggers] = await Promise.all([
+      const [serverLoggers, serverGroups] = await Promise.all([
         this.management.list(),
         this.management.listGroups(),
       ]);
+      debug("api", `fetched ${serverLoggers.length} logger(s) and ${serverGroups.length} group(s) from server`);
 
       // 6. Apply levels from server to adapters
       this._applyLevels(serverLoggers);
@@ -473,9 +481,12 @@ export class LoggingClient {
       // Server may be unreachable — continue with WebSocket wiring
     }
 
-    // 7. Wire WebSocket for logger_changed events
+    // 7. Wire WebSocket for logger change/delete and group change/delete events
     this._wsManager = this._ensureWs();
     this._wsManager.on("logger_changed", this._handleLoggerChanged);
+    this._wsManager.on("logger_deleted", this._handleLoggerChanged);
+    this._wsManager.on("group_changed", this._handleGroupChanged);
+    this._wsManager.on("group_deleted", this._handleGroupChanged);
 
     this._started = true;
   }
@@ -514,10 +525,12 @@ export class LoggingClient {
 
   /** @internal */
   _close(): void {
+    debug("lifecycle", "LoggingClient._close() called");
     // Uninstall adapter hooks
     for (const adapter of this._adapters) {
       try {
         adapter.uninstallHook();
+        debug("adapter", "applying-guard OFF — adapter hook uninstalled");
       } catch {
         // ignore cleanup errors
       }
@@ -525,6 +538,9 @@ export class LoggingClient {
 
     if (this._wsManager !== null) {
       this._wsManager.off("logger_changed", this._handleLoggerChanged);
+      this._wsManager.off("logger_deleted", this._handleLoggerChanged);
+      this._wsManager.off("group_changed", this._handleGroupChanged);
+      this._wsManager.off("group_deleted", this._handleGroupChanged);
       this._wsManager = null;
     }
     this._started = false;
@@ -574,6 +590,8 @@ export class LoggingClient {
         }
       }
 
+      debug("resolution", `${logger.id} -> ${effectiveLevel}`);
+
       const metrics = this._parent?._metrics;
       if (metrics) {
         metrics.record("logging.level_changes", 1, "changes", { logger: logger.id! });
@@ -581,6 +599,7 @@ export class LoggingClient {
 
       for (const adapter of this._adapters) {
         try {
+          debug("adapter", `setLevel(${logger.id}, ${effectiveLevel})`);
           adapter.applyLevel(logger.id!, effectiveLevel);
         } catch {
           // ignore adapter errors
@@ -591,6 +610,7 @@ export class LoggingClient {
 
   /** Called by adapter hooks when a new logger is created in the framework. */
   private _onAdapterNewLogger(_name: string, _level: string): void {
+    debug("discovery", `new logger intercepted at runtime: ${_name}`);
     // Register with server asynchronously — fire-and-forget.
     // Errors are swallowed to avoid breaking the framework's logger creation.
     const logger = this.management.new(_name, { managed: true });
@@ -605,6 +625,7 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   private _handleLoggerChanged = (data: Record<string, any>): void => {
+    debug("websocket", `logger event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (id) {
       const level = data.level ?? null;
@@ -613,6 +634,15 @@ export class LoggingClient {
         level,
         source: "websocket",
       };
+      // Trigger a full re-fetch → resolve → apply pipeline (ADR-023 §4.5)
+      void Promise.all([this.management.list(), this.management.listGroups()])
+        .then(([serverLoggers]) => {
+          debug("resolution", `resolution pass (trigger: websocket event for logger ${id})`);
+          this._applyLevels(serverLoggers);
+        })
+        .catch(() => {
+          // ignore refresh errors from WebSocket events
+        });
       // Global listeners first
       for (const cb of this._globalListeners) {
         try {
@@ -633,6 +663,19 @@ export class LoggingClient {
         }
       }
     }
+  };
+
+  private _handleGroupChanged = (data: Record<string, any>): void => {
+    debug("websocket", `group event received: ${JSON.stringify(data)}`);
+    // Group change triggers full re-fetch → resolve → apply pipeline (ADR-023 §4.5)
+    void Promise.all([this.management.list(), this.management.listGroups()])
+      .then(([serverLoggers]) => {
+        debug("resolution", `resolution pass (trigger: group websocket event)`);
+        this._applyLevels(serverLoggers);
+      })
+      .catch(() => {
+        // ignore refresh errors from WebSocket events
+      });
   };
 
   // ------------------------------------------------------------------

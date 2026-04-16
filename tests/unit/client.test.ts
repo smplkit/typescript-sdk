@@ -94,6 +94,11 @@ describe("SmplClient", () => {
     expect(() => client.close()).not.toThrow();
   });
 
+  it("should accept a long API key (> 14 chars) without throwing", () => {
+    const client = new SmplClient({ ...DEFAULT_OPTS, apiKey: "sk_api_1234567890abcdef" });
+    expect(client).toBeInstanceOf(SmplClient);
+  });
+
   it("should call logging._close() on close()", () => {
     const client = new SmplClient(DEFAULT_OPTS);
     const spy = vi.spyOn(client.logging, "_close");

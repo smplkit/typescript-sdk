@@ -4,6 +4,7 @@
 
 import WebSocket from "ws";
 import type { MetricsReporter } from "./_metrics.js";
+import { debug } from "./_debug.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -57,13 +58,16 @@ export class SharedWebSocket {
 
   private _dispatch(eventName: string, data: Record<string, any>): void {
     const callbacks = this._listeners.get(eventName);
-    if (callbacks) {
-      for (const cb of [...callbacks]) {
-        try {
-          cb(data);
-        } catch {
-          // ignore listener errors
-        }
+    if (!callbacks || callbacks.length === 0) {
+      debug("websocket", `no handler registered for event: "${eventName}"`);
+      return;
+    }
+    debug("websocket", `routing "${eventName}" to ${callbacks.length} handler(s)`);
+    for (const cb of [...callbacks]) {
+      try {
+        cb(data);
+      } catch {
+        // ignore listener errors
       }
     }
   }
@@ -82,12 +86,14 @@ export class SharedWebSocket {
 
   /** Start the WebSocket connection. */
   start(): void {
+    debug("websocket", "starting WebSocket connection");
     this._closed = false;
     this._connect();
   }
 
   /** Stop the WebSocket connection. */
   stop(): void {
+    debug("websocket", "stopping WebSocket connection");
     this._closed = true;
     this._connectionStatus = "disconnected";
 
@@ -124,6 +130,8 @@ export class SharedWebSocket {
 
     this._connectionStatus = "connecting";
     const wsUrl = this._buildWsUrl();
+    const safeUrl = wsUrl.split("?")[0];
+    debug("websocket", `connecting to ${safeUrl}`);
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -143,16 +151,19 @@ export class SharedWebSocket {
 
           // Heartbeat: server sends "ping", we respond with "pong"
           if (raw === "ping") {
+            debug("websocket", "ping received, sending pong");
             ws.send("pong");
             return;
           }
 
+          debug("websocket", `event received: ${raw}`);
           const msg = JSON.parse(raw) as Record<string, any>;
 
           // Connection confirmation
           if (msg.type === "connected") {
             this._backoffIndex = 0;
             this._connectionStatus = "connected";
+            debug("websocket", `connected to ${safeUrl}`);
             if (this._metrics) {
               this._metrics.recordGauge("platform.websocket_connections", 1, "connections");
             }
@@ -161,6 +172,7 @@ export class SharedWebSocket {
 
           // Error from server
           if (msg.type === "error") {
+            debug("websocket", `connection error from server: ${JSON.stringify(msg.message)}`);
             return;
           }
 
@@ -174,7 +186,8 @@ export class SharedWebSocket {
         }
       });
 
-      ws.on("close", () => {
+      ws.on("close", (code: number) => {
+        debug("websocket", `connection closed (code=${code})`);
         if (this._metrics) {
           this._metrics.recordGauge("platform.websocket_connections", 0, "connections");
         }
@@ -184,10 +197,12 @@ export class SharedWebSocket {
         }
       });
 
-      ws.on("error", () => {
+      ws.on("error", (err: Error) => {
+        debug("websocket", `WebSocket error: ${err.message}`);
         // 'close' will fire after 'error'; reconnect is handled there
       });
-    } catch {
+    } catch (err) {
+      debug("websocket", `failed to create WebSocket: ${err instanceof Error ? err.message : String(err)}`);
       if (!this._closed) {
         this._scheduleReconnect();
       }
@@ -200,6 +215,7 @@ export class SharedWebSocket {
     const delay = BACKOFF_MS[Math.min(this._backoffIndex, BACKOFF_MS.length - 1)];
     this._backoffIndex++;
     this._connectionStatus = "connecting";
+    debug("websocket", `reconnecting in ${delay}ms (attempt ${this._backoffIndex})`);
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
