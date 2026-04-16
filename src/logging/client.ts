@@ -473,7 +473,10 @@ export class LoggingClient {
         this.management.list(),
         this.management.listGroups(),
       ]);
-      debug("api", `fetched ${serverLoggers.length} logger(s) and ${serverGroups.length} group(s) from server`);
+      debug(
+        "api",
+        `fetched ${serverLoggers.length} logger(s) and ${serverGroups.length} group(s) from server`,
+      );
 
       // 6. Apply levels from server to adapters
       this._applyLevels(serverLoggers);

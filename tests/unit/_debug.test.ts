@@ -212,22 +212,17 @@ describe("debug() — output format when enabled", () => {
     vi.restoreAllMocks();
   });
 
-  it.each([
-    "lifecycle",
-    "websocket",
-    "api",
-    "discovery",
-    "resolution",
-    "adapter",
-    "registration",
-  ])("all subsystems render correctly: %s", (subsystem) => {
-    let output = "";
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-      output += typeof chunk === "string" ? chunk : chunk.toString();
-      return true;
-    });
-    debugMod.debug(subsystem, "test");
-    expect(output).toContain(`[smplkit:${subsystem}]`);
-    vi.restoreAllMocks();
-  });
+  it.each(["lifecycle", "websocket", "api", "discovery", "resolution", "adapter", "registration"])(
+    "all subsystems render correctly: %s",
+    (subsystem) => {
+      let output = "";
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+        output += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      });
+      debugMod.debug(subsystem, "test");
+      expect(output).toContain(`[smplkit:${subsystem}]`);
+      vi.restoreAllMocks();
+    },
+  );
 });

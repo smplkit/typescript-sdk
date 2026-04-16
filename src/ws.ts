@@ -202,7 +202,10 @@ export class SharedWebSocket {
         // 'close' will fire after 'error'; reconnect is handled there
       });
     } catch (err) {
-      debug("websocket", `failed to create WebSocket: ${err instanceof Error ? err.message : String(err)}`);
+      debug(
+        "websocket",
+        `failed to create WebSocket: ${err instanceof Error ? err.message : String(err)}`,
+      );
       if (!this._closed) {
         this._scheduleReconnect();
       }

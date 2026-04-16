@@ -131,10 +131,14 @@ export class SmplClient {
 
     this._timeout = options.timeout ?? 30_000;
 
-    const maskedKey = apiKey.length > 14
-      ? apiKey.slice(0, 10) + "..." + apiKey.slice(-4)
-      : apiKey.slice(0, Math.min(4, apiKey.length)) + "...";
-    debug("lifecycle", `SmplClient created (api_key=${maskedKey}, environment=${environment}, service=${service})`);
+    const maskedKey =
+      apiKey.length > 14
+        ? apiKey.slice(0, 10) + "..." + apiKey.slice(-4)
+        : apiKey.slice(0, Math.min(4, apiKey.length)) + "...";
+    debug(
+      "lifecycle",
+      `SmplClient created (api_key=${maskedKey}, environment=${environment}, service=${service})`,
+    );
 
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
       baseUrl: APP_BASE_URL,
