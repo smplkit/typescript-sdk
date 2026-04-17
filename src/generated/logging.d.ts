@@ -564,7 +564,7 @@ export interface components {
          *       "data": [
          *         {
          *           "attributes": {
-         *             "limit_key": "logging.items",
+         *             "limit_key": "logging.managed_loggers",
          *             "period": "current",
          *             "value": 8
          *           },
@@ -591,7 +591,7 @@ export interface components {
          * UsageResource
          * @example {
          *       "attributes": {
-         *         "limit_key": "logging.items",
+         *         "limit_key": "logging.managed_loggers",
          *         "period": "current",
          *         "value": 8
          *       },
