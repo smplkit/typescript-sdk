@@ -56,6 +56,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/flags/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Register Flags
+         * @description Register flags discovered by an SDK. Creates new flags or updates source observations on existing ones.
+         */
+        post: operations["bulk_register_flags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/flags/{id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Flag Sources
+         * @description List all sources (service/environment observations) for a specific flag.
+         */
+        get: operations["list_flag_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/flag_sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List All Flag Sources
+         * @description List all flag sources across all flags. Optionally filter by environment or service.
+         */
+        get: operations["list_all_flag_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -108,6 +168,7 @@ export interface components {
          *           "rules": []
          *         }
          *       },
+         *       "managed": true,
          *       "name": "Dark Mode",
          *       "type": "BOOLEAN",
          *       "updated_at": "2026-03-27T10:00:00Z",
@@ -150,10 +211,91 @@ export interface components {
             environments?: {
                 [key: string]: components["schemas"]["FlagEnvironment"];
             };
+            /**
+             * Managed
+             * @description True if admin-managed, false if auto-discovered
+             */
+            managed?: boolean | null;
+            /** Sources */
+            readonly sources?: {
+                [key: string]: unknown;
+            }[] | null;
             /** Created At */
             readonly created_at?: string | null;
             /** Updated At */
             readonly updated_at?: string | null;
+        };
+        /**
+         * FlagBulkItem
+         * @example {
+         *       "default": false,
+         *       "environment": "production",
+         *       "id": "dark-mode",
+         *       "service": "api-gateway",
+         *       "type": "BOOLEAN"
+         *     }
+         */
+        FlagBulkItem: {
+            /**
+             * Id
+             * @description Flag key as declared in code
+             */
+            id: string;
+            /**
+             * Type
+             * @description Flag type: BOOLEAN, STRING, NUMERIC, or JSON
+             */
+            type: string;
+            /**
+             * Default
+             * @description Default value declared in code
+             */
+            default: unknown;
+            /**
+             * Service
+             * @description Service that declared this flag
+             */
+            service?: string | null;
+            /**
+             * Environment
+             * @description Environment where observed
+             */
+            environment?: string | null;
+        };
+        /**
+         * FlagBulkRequest
+         * @example {
+         *       "flags": [
+         *         {
+         *           "default": false,
+         *           "environment": "production",
+         *           "id": "dark-mode",
+         *           "service": "api-gateway",
+         *           "type": "BOOLEAN"
+         *         },
+         *         {
+         *           "default": 3,
+         *           "environment": "production",
+         *           "id": "max-retries",
+         *           "service": "api-gateway",
+         *           "type": "NUMERIC"
+         *         }
+         *       ]
+         *     }
+         */
+        FlagBulkRequest: {
+            /** Flags */
+            flags: components["schemas"]["FlagBulkItem"][];
+        };
+        /**
+         * FlagBulkResponse
+         * @example {
+         *       "registered": 5
+         *     }
+         */
+        FlagBulkResponse: {
+            /** Registered */
+            registered: number;
         };
         /** FlagEnvironment */
         FlagEnvironment: {
@@ -196,6 +338,7 @@ export interface components {
          *             ]
          *           }
          *         },
+         *         "managed": true,
          *         "name": "Dark Mode",
          *         "type": "BOOLEAN",
          *         "updated_at": "2026-03-27T10:00:00Z",
@@ -238,6 +381,73 @@ export interface components {
             };
             /** Value */
             value: unknown;
+        };
+        /**
+         * FlagSource
+         * @example {
+         *       "created_at": "2026-04-17T10:00:00Z",
+         *       "data": {
+         *         "default": true,
+         *         "type": "BOOLEAN"
+         *       },
+         *       "environment": "production",
+         *       "first_observed": "2026-04-17T10:00:00Z",
+         *       "last_seen": "2026-04-17T15:30:00Z",
+         *       "service": "api-gateway",
+         *       "updated_at": "2026-04-17T15:30:00Z"
+         *     }
+         */
+        FlagSource: {
+            /** Service */
+            readonly service?: string;
+            /** Environment */
+            readonly environment?: string;
+            /** First Observed */
+            readonly first_observed?: string | null;
+            /** Last Seen */
+            readonly last_seen?: string | null;
+            /** Data */
+            readonly data?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+        };
+        /** FlagSourceListResponse */
+        FlagSourceListResponse: {
+            /** Data */
+            data: components["schemas"]["FlagSourceResource"][];
+        };
+        /**
+         * FlagSourceResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-17T10:00:00Z",
+         *         "data": {
+         *           "default": true,
+         *           "type": "BOOLEAN"
+         *         },
+         *         "environment": "production",
+         *         "first_observed": "2026-04-17T10:00:00Z",
+         *         "last_seen": "2026-04-17T15:30:00Z",
+         *         "service": "api-gateway",
+         *         "updated_at": "2026-04-17T15:30:00Z"
+         *       },
+         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+         *       "type": "flag_source"
+         *     }
+         */
+        FlagSourceResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "flag_source";
+            attributes: components["schemas"]["FlagSource"];
         };
         /** FlagValue */
         FlagValue: {
@@ -310,6 +520,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[type]"?: string | null;
+                "filter[managed]"?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -417,6 +628,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    bulk_register_flags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["FlagBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["FlagBulkResponse"];
+                };
+            };
+        };
+    };
+    list_flag_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["FlagSourceListResponse"];
+                };
+            };
+        };
+    };
+    list_all_flag_sources: {
+        parameters: {
+            query?: {
+                "filter[environment]"?: string | null;
+                "filter[service]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["FlagSourceListResponse"];
+                };
             };
         };
     };
