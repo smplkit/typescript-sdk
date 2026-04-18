@@ -685,7 +685,10 @@ export class LoggingClient {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[smplkit] Logger bulk registration failed: ${msg}`);
-      debug("registration", `logger bulk-register error: ${err instanceof Error ? err.stack ?? msg : msg}`);
+      debug(
+        "registration",
+        `logger bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+      );
     }
   }
 
