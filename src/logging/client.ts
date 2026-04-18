@@ -25,6 +25,55 @@ import { debug } from "../_debug.js";
 
 const LOGGING_BASE_URL = "https://logging.smplkit.com";
 
+/** @internal — deduplicates and batches logger registrations for bulk upload. */
+export class LoggerRegistrationBuffer {
+  private _seen = new Set<string>();
+  private _pending: Array<{
+    id: string;
+    level: string;
+    resolved_level: string;
+    service?: string;
+    environment?: string;
+  }> = [];
+
+  add(
+    id: string,
+    level: string,
+    resolvedLevel: string,
+    service: string | null,
+    environment: string | null,
+  ): void {
+    if (this._seen.has(id)) return;
+    this._seen.add(id);
+    const item: {
+      id: string;
+      level: string;
+      resolved_level: string;
+      service?: string;
+      environment?: string;
+    } = { id, level, resolved_level: resolvedLevel };
+    if (service) item.service = service;
+    if (environment) item.environment = environment;
+    this._pending.push(item);
+  }
+
+  drain(): Array<{
+    id: string;
+    level: string;
+    resolved_level: string;
+    service?: string;
+    environment?: string;
+  }> {
+    const batch = this._pending;
+    this._pending = [];
+    return batch;
+  }
+
+  get pendingCount(): number {
+    return this._pending.length;
+  }
+}
+
 type LoggerResource = components["schemas"]["LoggerResource"];
 type LogGroupResource = components["schemas"]["LogGroupResource"];
 
@@ -135,6 +184,8 @@ export class LoggingClient {
 
   private _adapters: LoggingAdapter[] = [];
   private _explicitAdapters = false;
+  private _loggerBuffer = new LoggerRegistrationBuffer();
+  private _loggerFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
@@ -405,17 +456,22 @@ export class LoggingClient {
       this._adapters = this._autoLoadAdapters();
     }
 
-    // 2. Discover existing loggers from each adapter
-    const discovered: Array<{ name: string; level: string }> = [];
+    // 2. Discover existing loggers from each adapter and add to buffer
+    const service = this._parent?._service ?? null;
+    const environment = this._parent?._environment ?? null;
+    let discoveredCount = 0;
     for (const adapter of this._adapters) {
       try {
         const loggers = adapter.discover();
-        discovered.push(...loggers);
+        for (const { name, level } of loggers) {
+          this._loggerBuffer.add(name, level, level, service, environment);
+          discoveredCount++;
+        }
       } catch {
         // ignore adapter discovery errors
       }
     }
-    debug("discovery", `discovered ${discovered.length} logger(s) from adapters`);
+    debug("discovery", `discovered ${discoveredCount} logger(s) from adapters`);
 
     // 3. Install hooks on each adapter for new logger creation
     for (const adapter of this._adapters) {
@@ -430,41 +486,15 @@ export class LoggingClient {
     }
 
     // 4. Record discovery metric
-    if (discovered.length > 0) {
+    if (discoveredCount > 0) {
       const metrics = this._parent?._metrics;
       if (metrics) {
-        metrics.record("logging.loggers_discovered", discovered.length, "loggers");
+        metrics.record("logging.loggers_discovered", discoveredCount, "loggers");
       }
     }
 
-    // 5. Bulk-register discovered loggers with the server
-    if (discovered.length > 0) {
-      const service = this._parent?._service ?? null;
-      const environment = this._parent?._environment ?? null;
-      const loggers: components["schemas"]["LoggerBulkItem"][] = discovered.map(
-        ({ name, level }) => ({
-          id: name,
-          // For Winston/Pino there is no inherited-null distinction — both fields carry the same value.
-          level: level,
-          resolved_level: level,
-          service: service ?? undefined,
-          environment: environment ?? undefined,
-        }),
-      );
-      debug("registration", `flushing ${loggers.length} logger(s) to bulk-register endpoint`);
-      try {
-        const result = await this._http.POST("/api/v1/loggers/bulk", {
-          body: { loggers },
-        });
-        if (result.error !== undefined)
-          await checkError(result.response, "Failed to bulk-register loggers");
-        debug("registration", `bulk-register complete (${loggers.length} logger(s))`);
-      } catch (err: unknown) {
-        console.warn(
-          `[smplkit] Failed to bulk-register loggers: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
+    // 5. Flush discovered loggers to the bulk-register endpoint
+    await this._flushLoggerBuffer();
 
     // 5. Fetch all loggers and groups from the server, resolve levels
     debug("resolution", `starting resolution pass (trigger: start())`);
@@ -490,6 +520,11 @@ export class LoggingClient {
     this._wsManager.on("logger_deleted", this._handleLoggerChanged);
     this._wsManager.on("group_changed", this._handleGroupChanged);
     this._wsManager.on("group_deleted", this._handleGroupChanged);
+
+    // 8. Start periodic flush timer for post-startup logger discovery
+    this._loggerFlushTimer = setInterval(() => {
+      void this._flushLoggerBuffer();
+    }, 30_000);
 
     this._started = true;
   }
@@ -529,6 +564,13 @@ export class LoggingClient {
   /** @internal */
   _close(): void {
     debug("lifecycle", "LoggingClient._close() called");
+
+    // Cancel the periodic flush timer
+    if (this._loggerFlushTimer !== null) {
+      clearInterval(this._loggerFlushTimer);
+      this._loggerFlushTimer = null;
+    }
+
     // Uninstall adapter hooks
     for (const adapter of this._adapters) {
       try {
@@ -612,15 +654,36 @@ export class LoggingClient {
   }
 
   /** Called by adapter hooks when a new logger is created in the framework. */
-  private _onAdapterNewLogger(_name: string, _level: string): void {
-    debug("discovery", `new logger intercepted at runtime: ${_name}`);
-    // Register with server asynchronously — fire-and-forget.
-    // Errors are swallowed to avoid breaking the framework's logger creation.
-    const logger = this.management.new(_name, { managed: true });
-    logger.setLevel(_level as any);
-    logger.save().catch(() => {
-      // ignore — logger may already exist
-    });
+  private _onAdapterNewLogger(name: string, level: string): void {
+    debug("discovery", `new logger intercepted at runtime: ${name}`);
+    const service = this._parent?._service ?? null;
+    const environment = this._parent?._environment ?? null;
+    this._loggerBuffer.add(name, level, level, service, environment);
+
+    if (this._loggerBuffer.pendingCount >= 50) {
+      void this._flushLoggerBuffer();
+    }
+  }
+
+  /** Flush buffered loggers to the bulk-register endpoint. */
+  private async _flushLoggerBuffer(): Promise<void> {
+    const batch = this._loggerBuffer.drain();
+    if (batch.length === 0) return;
+    debug("registration", `flushing ${batch.length} logger(s) to bulk-register endpoint`);
+    try {
+      const result = await this._http.POST("/api/v1/loggers/bulk", {
+        body: { loggers: batch },
+      });
+      if (result.error !== undefined) {
+        console.warn("[smplkit] Logger bulk registration failed");
+      } else {
+        debug("registration", `bulk-register complete (${batch.length} logger(s))`);
+      }
+    } catch (err: unknown) {
+      console.warn(
+        `[smplkit] Logger bulk registration failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // ------------------------------------------------------------------

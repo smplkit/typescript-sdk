@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LoggingClient } from "../../../src/logging/client.js";
+import { LoggingClient, LoggerRegistrationBuffer } from "../../../src/logging/client.js";
 import { Logger, LogGroup } from "../../../src/logging/models.js";
 import {
   SmplNotFoundError,
@@ -605,7 +605,7 @@ describe("LoggingClient — runtime", () => {
       await client.start();
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[smplkit] Failed to bulk-register loggers"),
+        expect.stringContaining("[smplkit] Logger bulk registration failed"),
       );
       warnSpy.mockRestore();
     });
@@ -1043,5 +1043,337 @@ describe("LoggingClient — listener error swallowing", () => {
     lastMockWs._emit("logger_changed", { level: "INFO" });
 
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// LoggerRegistrationBuffer
+// ===========================================================================
+
+describe("LoggerRegistrationBuffer", () => {
+  it("should add a new entry and report pendingCount", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.server", "INFO", "INFO", null, null);
+    expect(buf.pendingCount).toBe(1);
+  });
+
+  it("should deduplicate entries with the same id", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.server", "INFO", "INFO", null, null);
+    buf.add("app.server", "WARN", "WARN", null, null);
+    expect(buf.pendingCount).toBe(1);
+  });
+
+  it("should add multiple distinct entries", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.a", "INFO", "INFO", null, null);
+    buf.add("app.b", "WARN", "WARN", null, null);
+    buf.add("app.c", "ERROR", "ERROR", null, null);
+    expect(buf.pendingCount).toBe(3);
+  });
+
+  it("drain() should return all pending entries and reset to empty", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.a", "INFO", "INFO", "my-service", "staging");
+    buf.add("app.b", "WARN", "WARN", null, null);
+
+    const batch = buf.drain();
+    expect(batch).toHaveLength(2);
+    expect(batch[0]).toEqual({
+      id: "app.a",
+      level: "INFO",
+      resolved_level: "INFO",
+      service: "my-service",
+      environment: "staging",
+    });
+    expect(batch[1]).toEqual({ id: "app.b", level: "WARN", resolved_level: "WARN" });
+    expect(buf.pendingCount).toBe(0);
+  });
+
+  it("drain() on empty buffer should return empty array", () => {
+    const buf = new LoggerRegistrationBuffer();
+    expect(buf.drain()).toEqual([]);
+  });
+
+  it("should omit service/environment when null", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.x", "DEBUG", "DEBUG", null, null);
+    const [item] = buf.drain();
+    expect(item).not.toHaveProperty("service");
+    expect(item).not.toHaveProperty("environment");
+  });
+
+  it("previously drained ids remain deduplicated", () => {
+    const buf = new LoggerRegistrationBuffer();
+    buf.add("app.x", "INFO", "INFO", null, null);
+    buf.drain();
+    buf.add("app.x", "WARN", "WARN", null, null);
+    expect(buf.pendingCount).toBe(0);
+  });
+});
+
+// ===========================================================================
+// Post-startup logger discovery: _onAdapterNewLogger and _flushLoggerBuffer
+// ===========================================================================
+
+describe("LoggingClient — post-startup logger discovery", () => {
+  function prepareForStart(client: LoggingClient): void {
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  }
+
+  it("_onAdapterNewLogger should add to buffer and NOT call management CRUD", async () => {
+    const client = makeClient();
+    const mgNewSpy = vi.spyOn(client.management, "new");
+
+    let capturedHook: ((name: string, level: string) => void) | null = null;
+    client.registerAdapter({
+      name: "test",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: (cb) => {
+        capturedHook = cb;
+      },
+      uninstallHook: () => {},
+    });
+
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await client.start();
+
+    // Fire the hook as if a new logger was created in the framework
+    capturedHook!("runtime.logger", "INFO");
+
+    expect(mgNewSpy).not.toHaveBeenCalled();
+    // Buffer should now have 1 pending item
+    expect((client as any)._loggerBuffer.pendingCount).toBe(1);
+
+    client._close();
+  });
+
+  it("_onAdapterNewLogger should not create managed loggers", async () => {
+    const client = makeClient();
+    const mgNewSpy = vi.spyOn(client.management, "new");
+
+    let capturedHook: ((name: string, level: string) => void) | null = null;
+    client.registerAdapter({
+      name: "test",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: (cb) => {
+        capturedHook = cb;
+      },
+      uninstallHook: () => {},
+    });
+
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await client.start();
+
+    capturedHook!("runtime.logger", "WARN");
+
+    // management.new() must never be called for auto-discovered loggers
+    expect(mgNewSpy).not.toHaveBeenCalled();
+
+    client._close();
+  });
+
+  it("_flushLoggerBuffer should POST to /api/v1/loggers/bulk", async () => {
+    const client = makeClient();
+    (client as any)._parent = { _environment: "prod", _service: "svc", _metrics: null };
+
+    let capturedHook: ((name: string, level: string) => void) | null = null;
+    client.registerAdapter({
+      name: "test",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: (cb) => {
+        capturedHook = cb;
+      },
+      uninstallHook: () => {},
+    });
+
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await client.start();
+
+    // Reset fetch mock to capture the flush call
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
+
+    capturedHook!("new.logger", "DEBUG");
+    await (client as any)._flushLoggerBuffer();
+
+    const bulkRequest: Request = mockFetch.mock.calls[0][0];
+    expect(bulkRequest.method).toBe("POST");
+    expect(bulkRequest.url).toContain("/api/v1/loggers/bulk");
+
+    const body = JSON.parse(await bulkRequest.text());
+    expect(body.loggers).toHaveLength(1);
+    expect(body.loggers[0]).toMatchObject({
+      id: "new.logger",
+      level: "DEBUG",
+      resolved_level: "DEBUG",
+      service: "svc",
+      environment: "prod",
+    });
+
+    client._close();
+  });
+
+  it("_flushLoggerBuffer should warn on error response", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = makeClient();
+    prepareForStart(client);
+    await client.start();
+
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "bad" }] }, 400));
+
+    // Manually add to buffer and flush
+    (client as any)._loggerBuffer.add("x", "INFO", "INFO", null, null);
+    await (client as any)._flushLoggerBuffer();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[smplkit] Logger bulk registration failed"),
+    );
+
+    warnSpy.mockRestore();
+    client._close();
+  });
+
+  it("_flushLoggerBuffer should warn on network error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = makeClient();
+    prepareForStart(client);
+    await client.start();
+
+    mockFetch.mockClear();
+    mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
+
+    (client as any)._loggerBuffer.add("x", "INFO", "INFO", null, null);
+    await (client as any)._flushLoggerBuffer();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[smplkit] Logger bulk registration failed"),
+    );
+
+    warnSpy.mockRestore();
+    client._close();
+  });
+
+  it("should trigger immediate flush at threshold of 50", async () => {
+    const client = makeClient();
+
+    let capturedHook: ((name: string, level: string) => void) | null = null;
+    client.registerAdapter({
+      name: "test",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: (cb) => {
+        capturedHook = cb;
+      },
+      uninstallHook: () => {},
+    });
+
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await client.start();
+
+    // Reset fetch mock
+    mockFetch.mockClear();
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ registered: 50 })));
+
+    const flushSpy = vi.spyOn(client as any, "_flushLoggerBuffer");
+
+    // Fire 49 hooks — should not trigger immediate flush
+    for (let i = 0; i < 49; i++) {
+      capturedHook!(`logger.${i}`, "INFO");
+    }
+    expect(flushSpy).not.toHaveBeenCalled();
+
+    // 50th logger triggers immediate flush
+    capturedHook!("logger.49", "INFO");
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+
+    client._close();
+  });
+});
+
+// ===========================================================================
+// Timer: setInterval started and cleared
+// ===========================================================================
+
+describe("LoggingClient — flush timer lifecycle", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should start a 30-second flush timer after start()", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+
+    await client.start();
+
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000);
+    expect((client as any)._loggerFlushTimer).not.toBeNull();
+
+    client._close();
+  });
+
+  it("should clear the flush timer on _close()", async () => {
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+
+    await client.start();
+    const timer = (client as any)._loggerFlushTimer;
+    client._close();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+    expect((client as any)._loggerFlushTimer).toBeNull();
+  });
+
+  it("should call _flushLoggerBuffer when timer fires", async () => {
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+
+    await client.start();
+    const flushSpy = vi.spyOn(client as any, "_flushLoggerBuffer");
+
+    // Advance time by 30 seconds to trigger the interval
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+
+    client._close();
   });
 });
