@@ -31,6 +31,8 @@ const APP_BASE_URL = "https://app.smplkit.com";
 const CACHE_MAX_SIZE = 10_000;
 const CONTEXT_REGISTRATION_LRU_SIZE = 10_000;
 const CONTEXT_BATCH_FLUSH_SIZE = 100;
+const FLAG_REGISTRATION_FLUSH_SIZE = 50;
+const FLAG_REGISTRATION_FLUSH_INTERVAL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -259,6 +261,45 @@ class ContextRegistrationBuffer {
 }
 
 // ---------------------------------------------------------------------------
+// Flag registration buffer
+// ---------------------------------------------------------------------------
+
+/** @internal */
+class FlagRegistrationBuffer {
+  private _seen = new Set<string>();
+  private _pending: Array<components["schemas"]["FlagBulkItem"]> = [];
+
+  add(
+    id: string,
+    type: string,
+    defaultValue: unknown,
+    service: string | null,
+    environment: string | null,
+  ): void {
+    if (!this._seen.has(id)) {
+      this._seen.add(id);
+      this._pending.push({
+        id,
+        type,
+        default: defaultValue,
+        service: service ?? undefined,
+        environment: environment ?? undefined,
+      });
+    }
+  }
+
+  drain(): Array<components["schemas"]["FlagBulkItem"]> {
+    const batch = this._pending;
+    this._pending = [];
+    return batch;
+  }
+
+  get pendingCount(): number {
+    return this._pending.length;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // FlagsClient
 // ---------------------------------------------------------------------------
 
@@ -356,6 +397,8 @@ export class FlagsClient {
   private _cache = new ResolutionCache();
   private _contextProvider: (() => Context[]) | null = null;
   private _contextBuffer = new ContextRegistrationBuffer();
+  private _flagBuffer = new FlagRegistrationBuffer();
+  private _flagFlushTimer: ReturnType<typeof setInterval> | null = null;
   private _handles: Record<string, Flag> = {};
   private _globalListeners: Array<(event: FlagChangeEvent) => void> = [];
   private _keyListeners: Map<string, Array<(event: FlagChangeEvent) => void>> = new Map();
@@ -636,6 +679,10 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
+    this._flagBuffer.add(id, "BOOLEAN", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
+      void this._flushFlags();
+    }
     return handle;
   }
 
@@ -653,6 +700,10 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
+    this._flagBuffer.add(id, "STRING", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
+      void this._flushFlags();
+    }
     return handle;
   }
 
@@ -670,6 +721,10 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
+    this._flagBuffer.add(id, "NUMERIC", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
+      void this._flushFlags();
+    }
     return handle;
   }
 
@@ -687,6 +742,10 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
+    this._flagBuffer.add(id, "JSON", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
+      void this._flushFlags();
+    }
     return handle;
   }
 
@@ -725,6 +784,7 @@ export class FlagsClient {
     if (this._initialized) return;
     debug("lifecycle", "FlagsClient.initialize() called");
     this._environment = this._parent?._environment ?? null;
+    await this._flushFlags();
     await this._fetchAllFlags();
     this._initialized = true;
     this._cache.clear();
@@ -733,6 +793,11 @@ export class FlagsClient {
     this._wsManager = this._ensureWs();
     this._wsManager.on("flag_changed", this._handleFlagChanged);
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+
+    // Start periodic flush timer
+    this._flagFlushTimer = setInterval(() => {
+      void this._flushFlags();
+    }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
   }
 
   /** Disconnect the flags runtime and release resources. */
@@ -741,6 +806,11 @@ export class FlagsClient {
       this._wsManager.off("flag_changed", this._handleFlagChanged);
       this._wsManager.off("flag_deleted", this._handleFlagDeleted);
       this._wsManager = null;
+    }
+
+    if (this._flagFlushTimer !== null) {
+      clearInterval(this._flagFlushTimer);
+      this._flagFlushTimer = null;
     }
 
     await this._flushContexts();
@@ -930,6 +1000,7 @@ export class FlagsClient {
   /** @internal — called by SmplClient constructor / lazy init. */
   async _connectInternal(environment: string): Promise<void> {
     this._environment = environment;
+    await this._flushFlags();
     await this._fetchAllFlags();
     this._initialized = true;
     this._cache.clear();
@@ -938,6 +1009,11 @@ export class FlagsClient {
     this._wsManager = this._ensureWs();
     this._wsManager.on("flag_changed", this._handleFlagChanged);
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+
+    // Start periodic flush timer
+    this._flagFlushTimer = setInterval(() => {
+      void this._flushFlags();
+    }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
   }
 
   // ------------------------------------------------------------------
@@ -1024,6 +1100,25 @@ export class FlagsClient {
   private _fireChangeListenersAll(source: string): void {
     for (const flagId of Object.keys(this._flagStore)) {
       this._fireChangeListeners(flagId, source);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: flag registration flush
+  // ------------------------------------------------------------------
+
+  private async _flushFlags(): Promise<void> {
+    const batch = this._flagBuffer.drain();
+    if (batch.length === 0) return;
+    debug("registration", `flushing ${batch.length} flag(s) to bulk-register endpoint`);
+    try {
+      await this._http.POST("/api/v1/flags/bulk", {
+        body: { flags: batch },
+      });
+    } catch (err) {
+      console.warn(
+        `[smplkit] Failed to bulk-register flags: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
