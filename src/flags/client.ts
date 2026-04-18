@@ -679,7 +679,13 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
-    this._flagBuffer.add(id, "BOOLEAN", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    this._flagBuffer.add(
+      id,
+      "BOOLEAN",
+      defaultValue,
+      this._parent?._service ?? null,
+      this._parent?._environment ?? null,
+    );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
       void this._flushFlags();
     }
@@ -700,7 +706,13 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
-    this._flagBuffer.add(id, "STRING", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    this._flagBuffer.add(
+      id,
+      "STRING",
+      defaultValue,
+      this._parent?._service ?? null,
+      this._parent?._environment ?? null,
+    );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
       void this._flushFlags();
     }
@@ -721,7 +733,13 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
-    this._flagBuffer.add(id, "NUMERIC", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    this._flagBuffer.add(
+      id,
+      "NUMERIC",
+      defaultValue,
+      this._parent?._service ?? null,
+      this._parent?._environment ?? null,
+    );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
       void this._flushFlags();
     }
@@ -742,7 +760,13 @@ export class FlagsClient {
       updatedAt: null,
     });
     this._handles[id] = handle;
-    this._flagBuffer.add(id, "JSON", defaultValue, this._parent?._service ?? null, this._parent?._environment ?? null);
+    this._flagBuffer.add(
+      id,
+      "JSON",
+      defaultValue,
+      this._parent?._service ?? null,
+      this._parent?._environment ?? null,
+    );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
       void this._flushFlags();
     }
