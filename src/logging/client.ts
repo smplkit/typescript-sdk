@@ -678,13 +678,14 @@ export class LoggingClient {
       });
       if (result.error !== undefined) {
         console.warn("[smplkit] Logger bulk registration failed");
+        debug("registration", "logger bulk-register returned an error response");
       } else {
         debug("registration", `bulk-register complete (${batch.length} logger(s))`);
       }
     } catch (err: unknown) {
-      console.warn(
-        `[smplkit] Logger bulk registration failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[smplkit] Logger bulk registration failed: ${msg}`);
+      debug("registration", `logger bulk-register error: ${err instanceof Error ? err.stack ?? msg : msg}`);
     }
   }
 

@@ -1149,9 +1149,9 @@ export class FlagsClient {
         body: { flags: batch },
       });
     } catch (err) {
-      console.warn(
-        `[smplkit] Failed to bulk-register flags: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+      debug("registration", `flag bulk-register error: ${err instanceof Error ? err.stack ?? msg : msg}`);
     }
   }
 
