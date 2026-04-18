@@ -162,32 +162,49 @@ describe("Transport", () => {
     it("should throw SmplConnectionError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
-        SmplConnectionError,
+      const err = await transport
+        .get("https://config.smplkit.com/api/v1/configs")
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SmplConnectionError);
+      expect((err as SmplConnectionError).message).toContain(
+        "https://config.smplkit.com/api/v1/configs",
       );
+      expect((err as SmplConnectionError).message).toContain("fetch failed");
     });
 
     it("should throw SmplTimeoutError on abort", async () => {
       mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
-      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
-        SmplTimeoutError,
+      const err = await transport
+        .get("https://config.smplkit.com/api/v1/configs")
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SmplTimeoutError);
+      expect((err as SmplTimeoutError).message).toContain(
+        "https://config.smplkit.com/api/v1/configs",
       );
     });
 
     it("should throw SmplConnectionError on unknown errors", async () => {
       mockFetch.mockRejectedValueOnce(new Error("unexpected"));
 
-      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
-        SmplConnectionError,
+      const err = await transport
+        .get("https://config.smplkit.com/api/v1/configs")
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SmplConnectionError);
+      expect((err as SmplConnectionError).message).toContain(
+        "https://config.smplkit.com/api/v1/configs",
       );
     });
 
     it("should throw SmplConnectionError with String(error) when thrown value is not an Error", async () => {
       mockFetch.mockRejectedValueOnce("plain string error");
 
-      await expect(transport.get("https://config.smplkit.com/api/v1/configs")).rejects.toThrow(
-        SmplConnectionError,
+      const err = await transport
+        .get("https://config.smplkit.com/api/v1/configs")
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SmplConnectionError);
+      expect((err as SmplConnectionError).message).toContain(
+        "https://config.smplkit.com/api/v1/configs",
       );
     });
 

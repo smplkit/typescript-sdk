@@ -118,13 +118,17 @@ export class Transport {
     } catch (error: unknown) {
       clearTimeout(timeoutId);
       if (error instanceof DOMException && error.name === "AbortError") {
-        throw new SmplTimeoutError(`Request timed out after ${this.timeout}ms`);
+        throw new SmplTimeoutError(
+          `Request timed out after ${this.timeout}ms (${url})`,
+        );
       }
       if (error instanceof TypeError) {
-        throw new SmplConnectionError(`Network error: ${error.message}`);
+        throw new SmplConnectionError(
+          `Cannot connect to ${url}: ${error.message}`,
+        );
       }
       throw new SmplConnectionError(
-        `Request failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Request failed (${url}): ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       clearTimeout(timeoutId);

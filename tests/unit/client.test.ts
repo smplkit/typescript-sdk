@@ -2,6 +2,13 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Allow homedir to be overridden per-test so tests that require no ~/.smplkit
+// config file can point at a nonexistent directory.
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: vi.fn(actual.homedir) };
+});
 import { SmplClient } from "../../src/client.js";
 import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
@@ -142,8 +149,11 @@ describe("SmplClient", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it("should throw SmplError when no environment and no env var", () => {
+  it("should throw SmplError when no environment and no env var", async () => {
     delete process.env.SMPLKIT_ENVIRONMENT;
+    delete process.env.SMPLKIT_PROFILE;
+    // Point homedir at a nonexistent path so no ~/.smplkit file is read
+    vi.mocked(homedir).mockReturnValue("/tmp/nonexistent-smplkit-test-dir");
     expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(SmplError);
     expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
       "No environment provided",
