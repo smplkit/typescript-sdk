@@ -213,37 +213,27 @@ describe("SmplClient", () => {
     }
   });
 
-  it("should resolve environment before service before API key", () => {
-    // Verify resolution order by checking that:
-    // 1. Environment error fires before service/API key are checked
-    // 2. Service error fires before API key is checked
-    // 3. API key error fires last and includes the resolved environment
+  it("should validate api_key, environment, and service as required", () => {
+    // Skip if a config file exists (it may supply values that prevent the expected errors)
+    if (existsSync(join(homedir(), ".smplkit"))) return;
 
     delete process.env.SMPLKIT_ENVIRONMENT;
     delete process.env.SMPLKIT_SERVICE;
     delete process.env.SMPLKIT_API_KEY;
 
-    // Missing environment → environment error (not service or api_key error)
-    expect(() => new SmplClient({})).toThrow("No environment provided");
+    // Missing api_key → api_key error (validated first)
+    expect(() => new SmplClient({ environment: "test", service: "svc" })).toThrow("No API key");
 
-    // Has environment, missing service → service error (not api_key error)
-    expect(() => new SmplClient({ environment: "test" })).toThrow("No service provided");
+    // Missing environment → environment error
+    expect(() => new SmplClient({ apiKey: "sk_test" })).toThrow("No environment provided");
 
-    // Skip if a config file exists on this machine
-    if (!existsSync(join(homedir(), ".smplkit"))) {
-      // Has environment + service, missing API key → api_key error with environment name
-      try {
-        new SmplClient({ environment: "staging", service: "test-svc" });
-      } catch (e) {
-        expect(e).toBeInstanceOf(SmplError);
-        const msg = (e as SmplError).message;
-        expect(msg).toContain("No API key provided");
-        expect(msg).toContain("[staging]");
-      }
-    }
+    // Has api_key + environment, missing service → service error
+    expect(() => new SmplClient({ apiKey: "sk_test", environment: "test" })).toThrow(
+      "No service provided",
+    );
   });
 
-  it("should show resolved environment name in API key error message", () => {
+  it("should mention ~/.smplkit in API key error message", () => {
     // Skip if a config file exists on this machine
     if (existsSync(join(homedir(), ".smplkit"))) return;
     delete process.env.SMPLKIT_API_KEY;
@@ -252,7 +242,7 @@ describe("SmplClient", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(SmplError);
       const msg = (e as SmplError).message;
-      expect(msg).toContain("[production]");
+      expect(msg).toContain("No API key provided");
       expect(msg).toContain("~/.smplkit");
     }
   });

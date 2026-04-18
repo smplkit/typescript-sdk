@@ -177,7 +177,12 @@ export class SmplClient {
       flagsBaseUrl,
       appBaseUrl,
     );
-    this.logging = new LoggingClient(cfg.apiKey, () => this._ensureWs(), this._timeout, loggingBaseUrl);
+    this.logging = new LoggingClient(
+      cfg.apiKey,
+      () => this._ensureWs(),
+      this._timeout,
+      loggingBaseUrl,
+    );
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();

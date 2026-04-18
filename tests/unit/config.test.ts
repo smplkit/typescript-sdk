@@ -252,9 +252,13 @@ describe("resolveConfig", () => {
   });
 
   it("should throw when named profile is missing from file", () => {
-    mockReadFileSync.mockReturnValue("[staging]\napi_key = sk_stg\nenvironment = staging\nservice = stg\n");
+    mockReadFileSync.mockReturnValue(
+      "[staging]\napi_key = sk_stg\nenvironment = staging\nservice = stg\n",
+    );
     expect(() => resolveConfig({ profile: "production" })).toThrow(SmplError);
-    expect(() => resolveConfig({ profile: "production" })).toThrow('profile "production" not found');
+    expect(() => resolveConfig({ profile: "production" })).toThrow(
+      'profile "production" not found',
+    );
   });
 
   it("should silently skip when config file is missing", () => {
@@ -278,7 +282,9 @@ describe("resolveConfig", () => {
   // ---- Env vars ----
 
   it("should use env vars to override file values", () => {
-    mockReadFileSync.mockReturnValue("[default]\napi_key = sk_file\nenvironment = file-env\nservice = file-svc\n");
+    mockReadFileSync.mockReturnValue(
+      "[default]\napi_key = sk_file\nenvironment = file-env\nservice = file-svc\n",
+    );
     process.env.SMPLKIT_API_KEY = "sk_env";
     const cfg = resolveConfig({});
     expect(cfg.apiKey).toBe("sk_env");
@@ -287,7 +293,9 @@ describe("resolveConfig", () => {
 
   it("should skip empty env vars", () => {
     process.env.SMPLKIT_API_KEY = "";
-    mockReadFileSync.mockReturnValue("[default]\napi_key = sk_file\nenvironment = prod\nservice = svc\n");
+    mockReadFileSync.mockReturnValue(
+      "[default]\napi_key = sk_file\nenvironment = prod\nservice = svc\n",
+    );
     const cfg = resolveConfig({});
     expect(cfg.apiKey).toBe("sk_file");
   });

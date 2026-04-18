@@ -193,7 +193,8 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
   if (options.environment !== undefined) merged.environment = options.environment;
   if (options.service !== undefined) merged.service = options.service;
   if (options.debug !== undefined) merged.debug = String(options.debug);
-  if (options.disableTelemetry !== undefined) merged.disable_telemetry = String(options.disableTelemetry);
+  if (options.disableTelemetry !== undefined)
+    merged.disable_telemetry = String(options.disableTelemetry);
 
   // --- Step 5: Validate required fields ---
   if (!merged.api_key) throw new SmplError(NO_API_KEY_MESSAGE);
