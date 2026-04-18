@@ -273,11 +273,11 @@ export class ConfigClient {
   private _listeners: ChangeListener[] = [];
 
   /** @internal */
-  constructor(apiKey: string, timeout?: number) {
+  constructor(apiKey: string, timeout?: number, baseUrl?: string) {
     this._apiKey = apiKey;
     const ms = timeout ?? 30_000;
     this._http = createClient<import("../generated/config.d.ts").paths>({
-      baseUrl: BASE_URL,
+      baseUrl: baseUrl ?? BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",

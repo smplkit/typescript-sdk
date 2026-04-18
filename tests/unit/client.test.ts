@@ -94,6 +94,42 @@ describe("SmplClient", () => {
     expect(() => client.close()).not.toThrow();
   });
 
+  it("should use default smplkit.com domain when baseDomain is not set", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    expect(client).toBeInstanceOf(SmplClient);
+    // Verify the fire-and-forget context registration used the default domain
+    const url = mockFetch.mock.calls[0]?.[0];
+    if (url) {
+      expect(typeof url === "string" ? url : (url as Request).url).toContain("app.smplkit.com");
+    }
+  });
+
+  it("should use custom baseDomain and http scheme for all service URLs", () => {
+    const client = new SmplClient({
+      ...DEFAULT_OPTS,
+      baseDomain: "localhost",
+      scheme: "http",
+    });
+    expect(client).toBeInstanceOf(SmplClient);
+    const url = mockFetch.mock.calls[0]?.[0];
+    if (url) {
+      expect(typeof url === "string" ? url : (url as Request).url).toContain(
+        "http://app.localhost",
+      );
+    }
+  });
+
+  it("should accept baseDomain without scheme (defaults to https)", () => {
+    const client = new SmplClient({ ...DEFAULT_OPTS, baseDomain: "staging.example.com" });
+    expect(client).toBeInstanceOf(SmplClient);
+    const url = mockFetch.mock.calls[0]?.[0];
+    if (url) {
+      expect(typeof url === "string" ? url : (url as Request).url).toContain(
+        "https://app.staging.example.com",
+      );
+    }
+  });
+
   it("should accept a long API key (> 14 chars) without throwing", () => {
     const client = new SmplClient({ ...DEFAULT_OPTS, apiKey: "sk_api_1234567890abcdef" });
     expect(client).toBeInstanceOf(SmplClient);

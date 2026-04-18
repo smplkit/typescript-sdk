@@ -40,6 +40,7 @@ export class MetricsReporter {
   private readonly _environment: string;
   private readonly _service: string;
   private readonly _flushInterval: number;
+  private readonly _appBaseUrl: string;
 
   private _counters: Map<
     string,
@@ -57,11 +58,13 @@ export class MetricsReporter {
     environment: string;
     service: string;
     flushInterval?: number;
+    appBaseUrl?: string;
   }) {
     this._apiKey = options.apiKey;
     this._environment = options.environment;
     this._service = options.service;
     this._flushInterval = options.flushInterval ?? 60;
+    this._appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
   }
 
   // ------------------------------------------------------------------
@@ -166,7 +169,7 @@ export class MetricsReporter {
 
     // Fire-and-forget POST
     try {
-      fetch(`${APP_BASE_URL}/api/v1/metrics/bulk`, {
+      fetch(`${this._appBaseUrl}/api/v1/metrics/bulk`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this._apiKey}`,

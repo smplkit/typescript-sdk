@@ -15,8 +15,6 @@ import { SmplError } from "./errors.js";
 import { MetricsReporter } from "./_metrics.js";
 import { debug } from "./_debug.js";
 
-const APP_BASE_URL = "https://app.smplkit.com";
-
 const NO_ENVIRONMENT_MESSAGE =
   "No environment provided. Set one of:\n" +
   "  1. Pass environment to the constructor\n" +
@@ -61,6 +59,20 @@ export interface SmplClientOptions {
    * @default false
    */
   disableTelemetry?: boolean;
+
+  /**
+   * Base domain for all smplkit service URLs.
+   * Override for local development (e.g. `"localhost"`).
+   * @default "smplkit.com"
+   */
+  baseDomain?: string;
+
+  /**
+   * URL scheme used when constructing service URLs.
+   * Override for local development (e.g. `"http"`).
+   * @default "https"
+   */
+  scheme?: string;
 }
 
 /**
@@ -108,6 +120,7 @@ export class SmplClient {
   readonly _metrics: MetricsReporter | null = null;
 
   private readonly _timeout: number;
+  private readonly _appBaseUrl: string;
   private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
   constructor(options: SmplClientOptions = {}) {
@@ -131,6 +144,14 @@ export class SmplClient {
 
     this._timeout = options.timeout ?? 30_000;
 
+    const baseDomain = options.baseDomain ?? "smplkit.com";
+    const scheme = options.scheme ?? "https";
+    const appBaseUrl = `${scheme}://app.${baseDomain}`;
+    const configBaseUrl = `${scheme}://config.${baseDomain}`;
+    const flagsBaseUrl = `${scheme}://flags.${baseDomain}`;
+    const loggingBaseUrl = `${scheme}://logging.${baseDomain}`;
+    this._appBaseUrl = appBaseUrl;
+
     const maskedKey =
       apiKey.length > 14
         ? apiKey.slice(0, 10) + "..." + apiKey.slice(-4)
@@ -141,7 +162,7 @@ export class SmplClient {
     );
 
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
-      baseUrl: APP_BASE_URL,
+      baseUrl: appBaseUrl,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
@@ -154,12 +175,19 @@ export class SmplClient {
         apiKey,
         environment: this._environment,
         service: this._service,
+        appBaseUrl,
       });
     }
 
-    this.config = new ConfigClient(apiKey, this._timeout);
-    this.flags = new FlagsClient(apiKey, () => this._ensureWs(), this._timeout);
-    this.logging = new LoggingClient(apiKey, () => this._ensureWs(), this._timeout);
+    this.config = new ConfigClient(apiKey, this._timeout, configBaseUrl);
+    this.flags = new FlagsClient(
+      apiKey,
+      () => this._ensureWs(),
+      this._timeout,
+      flagsBaseUrl,
+      appBaseUrl,
+    );
+    this.logging = new LoggingClient(apiKey, () => this._ensureWs(), this._timeout, loggingBaseUrl);
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();
@@ -199,7 +227,7 @@ export class SmplClient {
   /** Lazily create and start the shared WebSocket. @internal */
   private _ensureWs(): SharedWebSocket {
     if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(APP_BASE_URL, this._apiKey, this._metrics);
+      this._wsManager = new SharedWebSocket(this._appBaseUrl, this._apiKey, this._metrics);
       this._wsManager.start();
     }
     return this._wsManager;

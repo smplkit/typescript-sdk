@@ -418,7 +418,13 @@ export class FlagsClient {
   readonly management: FlagsManagement;
 
   /** @internal */
-  constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
+  constructor(
+    apiKey: string,
+    ensureWs: () => SharedWebSocket,
+    timeout?: number,
+    flagsBaseUrl?: string,
+    appBaseUrl?: string,
+  ) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
     const ms = timeout ?? 30_000;
@@ -439,7 +445,7 @@ export class FlagsClient {
     };
 
     this._http = createClient<import("../generated/flags.d.ts").paths>({
-      baseUrl: FLAGS_BASE_URL,
+      baseUrl: flagsBaseUrl ?? FLAGS_BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
@@ -448,7 +454,7 @@ export class FlagsClient {
     });
 
     this._appHttp = createClient<import("../generated/app.d.ts").paths>({
-      baseUrl: APP_BASE_URL,
+      baseUrl: appBaseUrl ?? APP_BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",

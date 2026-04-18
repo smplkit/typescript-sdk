@@ -188,13 +188,13 @@ export class LoggingClient {
   private _loggerFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   /** @internal */
-  constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number) {
+  constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number, baseUrl?: string) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
     const ms = timeout ?? 30_000;
 
     this._http = createClient<import("../generated/logging.d.ts").paths>({
-      baseUrl: LOGGING_BASE_URL,
+      baseUrl: baseUrl ?? LOGGING_BASE_URL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
