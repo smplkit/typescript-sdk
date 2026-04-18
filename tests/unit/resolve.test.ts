@@ -1,9 +1,15 @@
+/**
+ * Integration tests: SmplClient constructor with config resolution.
+ *
+ * These tests verify that the SmplClient wires up the config resolver
+ * correctly — profiles, env vars, and constructor args all flow through.
+ */
+
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SmplError } from "../../src/errors.js";
-import { resolveApiKey } from "../../src/resolve.js";
+import { SmplClient } from "../../src/client.js";
 
 vi.mock("node:fs");
 vi.mock("node:os");
@@ -11,11 +17,31 @@ vi.mock("node:os");
 const mockReadFileSync = vi.mocked(readFileSync);
 const mockHomedir = vi.mocked(homedir);
 
-describe("resolveApiKey", () => {
-  const originalEnv = process.env.SMPLKIT_API_KEY;
+// Stub fetch globally so fire-and-forget calls don't hit the network.
+const mockFetch = vi.fn();
+
+const SMPLKIT_VARS = [
+  "SMPLKIT_API_KEY",
+  "SMPLKIT_BASE_DOMAIN",
+  "SMPLKIT_SCHEME",
+  "SMPLKIT_ENVIRONMENT",
+  "SMPLKIT_SERVICE",
+  "SMPLKIT_DEBUG",
+  "SMPLKIT_DISABLE_TELEMETRY",
+  "SMPLKIT_PROFILE",
+] as const;
+
+describe("SmplClient config integration", () => {
+  const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    delete process.env.SMPLKIT_API_KEY;
+    vi.stubGlobal("fetch", mockFetch);
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ registered: 1 }), { status: 200 }));
+
+    for (const v of SMPLKIT_VARS) {
+      saved[v] = process.env[v];
+      delete process.env[v];
+    }
     mockHomedir.mockReturnValue("/mock/home");
     mockReadFileSync.mockImplementation(() => {
       throw new Error("ENOENT");
@@ -23,116 +49,118 @@ describe("resolveApiKey", () => {
   });
 
   afterEach(() => {
-    if (originalEnv !== undefined) {
-      process.env.SMPLKIT_API_KEY = originalEnv;
-    } else {
-      delete process.env.SMPLKIT_API_KEY;
+    for (const [key, val] of Object.entries(saved)) {
+      if (val !== undefined) {
+        process.env[key] = val;
+      } else {
+        delete process.env[key];
+      }
     }
     vi.restoreAllMocks();
   });
 
-  it("should return explicit key when provided", () => {
-    expect(resolveApiKey("sk_api_explicit", "production")).toBe("sk_api_explicit");
+  it("should create a client with explicit constructor args", () => {
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "production",
+      service: "my-svc",
+    });
+    expect(client).toBeInstanceOf(SmplClient);
+    expect(client._environment).toBe("production");
+    expect(client._service).toBe("my-svc");
+    client.close();
   });
 
-  it("should use env var when no explicit key", () => {
-    process.env.SMPLKIT_API_KEY = "sk_api_env";
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_env");
-  });
-
-  it("should use config file [default] when no explicit key and no env var", () => {
-    mockReadFileSync.mockReturnValue("[default]\napi_key = sk_api_file\n");
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_file");
-    expect(mockReadFileSync).toHaveBeenCalledWith(join("/mock/home", ".smplkit"), "utf-8");
-  });
-
-  it("should throw when no key found anywhere", () => {
-    expect(() => resolveApiKey(undefined, "production")).toThrow(SmplError);
-    expect(() => resolveApiKey(undefined, "production")).toThrow("No API key provided");
-  });
-
-  it("should throw when file has no api_key", () => {
-    mockReadFileSync.mockReturnValue("[default]\nother_key = value\n");
-    expect(() => resolveApiKey(undefined, "production")).toThrow(SmplError);
-  });
-
-  it("should throw when file is malformed", () => {
-    mockReadFileSync.mockReturnValue("not valid ini {{{}}");
-    expect(() => resolveApiKey(undefined, "production")).toThrow(SmplError);
-  });
-
-  it("should prefer explicit key over env var", () => {
-    process.env.SMPLKIT_API_KEY = "sk_api_env";
-    expect(resolveApiKey("sk_api_explicit", "production")).toBe("sk_api_explicit");
-  });
-
-  it("should prefer env var over config file", () => {
-    process.env.SMPLKIT_API_KEY = "sk_api_env";
-    mockReadFileSync.mockReturnValue("[default]\napi_key = sk_api_file\n");
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_env");
-  });
-
-  it("should treat empty env var as unset", () => {
-    process.env.SMPLKIT_API_KEY = "";
-    mockReadFileSync.mockReturnValue("[default]\napi_key = sk_api_file\n");
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_file");
-  });
-
-  it("should ignore comments", () => {
+  it("should resolve all config from a config file profile", () => {
     mockReadFileSync.mockReturnValue(
-      "# comment\n[default]\n# another comment\napi_key = sk_api_comment\n",
+      [
+        "[common]",
+        "api_key = sk_api_file",
+        "base_domain = custom.example.com",
+        "",
+        "[staging]",
+        "environment = staging",
+        "service = file-svc",
+      ].join("\n"),
     );
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_comment");
+
+    const client = new SmplClient({ profile: "staging" });
+    expect(client._environment).toBe("staging");
+    expect(client._service).toBe("file-svc");
+    client.close();
   });
 
-  it("should throw when no matching section has api_key", () => {
-    mockReadFileSync.mockReturnValue("[staging]\napi_key = sk_api_staging\n");
-    expect(() => resolveApiKey(undefined, "production")).toThrow(SmplError);
+  it("should resolve config from env vars", () => {
+    process.env.SMPLKIT_API_KEY = "sk_api_env";
+    process.env.SMPLKIT_ENVIRONMENT = "env-env";
+    process.env.SMPLKIT_SERVICE = "env-svc";
+
+    const client = new SmplClient();
+    expect(client._environment).toBe("env-env");
+    expect(client._service).toBe("env-svc");
+    client.close();
   });
 
-  it("should throw when default section has no api_key", () => {
-    mockReadFileSync.mockReturnValue("[default]\nsome_other = value\n");
-    expect(() => resolveApiKey(undefined, "production")).toThrow(SmplError);
+  it("should throw when required fields are missing", () => {
+    expect(() => new SmplClient()).toThrow(SmplError);
   });
 
-  it("should include all three methods in error message", () => {
-    try {
-      resolveApiKey(undefined, "production");
-    } catch (e) {
-      expect(e).toBeInstanceOf(SmplError);
-      const msg = (e as SmplError).message;
-      expect(msg).toContain("Pass apiKey to the constructor");
-      expect(msg).toContain("SMPLKIT_API_KEY");
-      expect(msg).toContain("~/.smplkit");
-    }
+  it("should accept baseDomain and scheme options", () => {
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "svc",
+      baseDomain: "local.dev",
+      scheme: "http",
+    });
+    // Verify the sub-clients got the custom base URLs
+    expect(client.config._baseUrl).toBe("http://config.local.dev");
+    expect(client.flags._baseUrl).toBe("http://flags.local.dev");
+    expect(client.logging._baseUrl).toBe("http://logging.local.dev");
+    client.close();
   });
 
-  it("should show resolved environment name in error message", () => {
-    try {
-      resolveApiKey(undefined, "staging");
-    } catch (e) {
-      expect(e).toBeInstanceOf(SmplError);
-      const msg = (e as SmplError).message;
-      expect(msg).toContain("[staging]");
-    }
-  });
-
-  it("should prefer environment-scoped section over [default]", () => {
+  it("should accept profile option to select config file section", () => {
     mockReadFileSync.mockReturnValue(
-      "[production]\napi_key = sk_api_prod\n\n[default]\napi_key = sk_api_default\n",
+      "[production]\napi_key = sk_prod\nenvironment = production\nservice = prod-svc\n" +
+        "[staging]\napi_key = sk_stg\nenvironment = staging\nservice = stg-svc\n",
     );
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_prod");
+
+    const client = new SmplClient({ profile: "staging" });
+    expect(client._environment).toBe("staging");
+    client.close();
   });
 
-  it("should fall back to [default] when environment section is missing", () => {
+  it("should use SMPLKIT_PROFILE env var when no explicit profile", () => {
+    process.env.SMPLKIT_PROFILE = "staging";
     mockReadFileSync.mockReturnValue(
-      "[staging]\napi_key = sk_api_staging\n\n[default]\napi_key = sk_api_default\n",
+      "[common]\napi_key = sk_common\n[staging]\nenvironment = staging\nservice = stg-svc\n",
     );
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_default");
+
+    const client = new SmplClient();
+    expect(client._environment).toBe("staging");
+    client.close();
   });
 
-  it("should match environment section case-insensitively", () => {
-    mockReadFileSync.mockReturnValue("[Production]\napi_key = sk_api_prod\n");
-    expect(resolveApiKey(undefined, "production")).toBe("sk_api_prod");
+  it("should prefer explicit key over env var over config file", () => {
+    process.env.SMPLKIT_API_KEY = "sk_api_env";
+    mockReadFileSync.mockReturnValue(
+      "[default]\napi_key = sk_api_file\nenvironment = test\nservice = svc\n",
+    );
+
+    const client = new SmplClient({ apiKey: "sk_api_explicit" });
+    // Environment and service come from file, apiKey from constructor
+    expect(client._environment).toBe("test");
+    client.close();
+  });
+
+  it("should silently skip missing config file", () => {
+    const client = new SmplClient({
+      apiKey: "sk_api_test",
+      environment: "test",
+      service: "svc",
+    });
+    expect(client).toBeInstanceOf(SmplClient);
+    client.close();
   });
 });

@@ -250,7 +250,7 @@ export class ConfigClient {
   readonly _apiKey: string;
 
   /** @internal */
-  readonly _baseUrl: string = BASE_URL;
+  readonly _baseUrl: string;
 
   /** @internal */
   private readonly _http: ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
@@ -275,9 +275,11 @@ export class ConfigClient {
   /** @internal */
   constructor(apiKey: string, timeout?: number, baseUrl?: string) {
     this._apiKey = apiKey;
+    const resolvedBaseUrl = baseUrl ?? BASE_URL;
+    this._baseUrl = resolvedBaseUrl;
     const ms = timeout ?? 30_000;
     this._http = createClient<import("../generated/config.d.ts").paths>({
-      baseUrl: baseUrl ?? BASE_URL,
+      baseUrl: resolvedBaseUrl,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",

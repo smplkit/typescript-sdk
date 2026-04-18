@@ -183,7 +183,7 @@ describe("SmplClient", () => {
     );
   });
 
-  it("should include both methods in service error message", () => {
+  it("should include all three methods in service error message", () => {
     delete process.env.SMPLKIT_SERVICE;
     try {
       new SmplClient({ apiKey: "sk_api_test", environment: "test" });
@@ -192,7 +192,7 @@ describe("SmplClient", () => {
       const msg = (e as SmplError).message;
       expect(msg).toContain("Pass service in options");
       expect(msg).toContain("SMPLKIT_SERVICE");
-      expect(msg).not.toContain("~/.smplkit");
+      expect(msg).toContain("~/.smplkit");
     }
   });
 
@@ -202,14 +202,14 @@ describe("SmplClient", () => {
     expect(client._service).toBe("env-service");
   });
 
-  it("should not mention ~/.smplkit in environment error message", () => {
+  it("should mention ~/.smplkit in environment error message", () => {
     delete process.env.SMPLKIT_ENVIRONMENT;
     try {
       new SmplClient({ apiKey: "sk_api_test", service: "test-svc" });
     } catch (e) {
       expect(e).toBeInstanceOf(SmplError);
       const msg = (e as SmplError).message;
-      expect(msg).not.toContain("~/.smplkit");
+      expect(msg).toContain("~/.smplkit");
     }
   });
 

@@ -10,20 +10,9 @@ import { ConfigClient } from "./config/client.js";
 import { FlagsClient } from "./flags/client.js";
 import { LoggingClient } from "./logging/client.js";
 import { SharedWebSocket } from "./ws.js";
-import { resolveApiKey } from "./resolve.js";
-import { SmplError } from "./errors.js";
+import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
 import { debug } from "./_debug.js";
-
-const NO_ENVIRONMENT_MESSAGE =
-  "No environment provided. Set one of:\n" +
-  "  1. Pass environment to the constructor\n" +
-  "  2. Set the SMPLKIT_ENVIRONMENT environment variable";
-
-const NO_SERVICE_MESSAGE =
-  "No service provided. Set one of:\n" +
-  "  1. Pass service in options\n" +
-  "  2. Set the SMPLKIT_SERVICE environment variable";
 
 /** Configuration options for the {@link SmplClient}. */
 export interface SmplClientOptions {
@@ -36,14 +25,16 @@ export interface SmplClientOptions {
 
   /**
    * The environment to connect to (e.g. `"production"`, `"staging"`).
-   * When omitted, resolved from the `SMPLKIT_ENVIRONMENT` environment variable.
+   * When omitted, resolved from the `SMPLKIT_ENVIRONMENT` environment variable
+   * or the `~/.smplkit` configuration file.
    */
   environment?: string;
 
   /**
    * Service name. The SDK automatically registers the service as a
    * context instance and includes it in flag evaluation context.
-   * When omitted, resolved from the `SMPLKIT_SERVICE` environment variable.
+   * When omitted, resolved from the `SMPLKIT_SERVICE` environment variable
+   * or the `~/.smplkit` configuration file.
    */
   service?: string;
 
@@ -61,18 +52,31 @@ export interface SmplClientOptions {
   disableTelemetry?: boolean;
 
   /**
-   * Base domain for all smplkit service URLs.
-   * Override for local development (e.g. `"localhost"`).
-   * @default "smplkit.com"
+   * Configuration profile to use from `~/.smplkit`.
+   * When omitted, resolved from `SMPLKIT_PROFILE` env var, falling back to `"default"`.
+   */
+  profile?: string;
+
+  /**
+   * Base domain for all service URLs.
+   * When omitted, resolved from `SMPLKIT_BASE_DOMAIN` env var or config file,
+   * falling back to `"smplkit.com"`.
    */
   baseDomain?: string;
 
   /**
-   * URL scheme used when constructing service URLs.
-   * Override for local development (e.g. `"http"`).
-   * @default "https"
+   * URL scheme for service URLs (`"https"` or `"http"`).
+   * When omitted, resolved from `SMPLKIT_SCHEME` env var or config file,
+   * falling back to `"https"`.
    */
   scheme?: string;
+
+  /**
+   * Enable debug logging to stderr.
+   * When omitted, resolved from `SMPLKIT_DEBUG` env var or config file,
+   * falling back to `false`.
+   */
+  debug?: boolean;
 }
 
 /**
@@ -124,70 +128,56 @@ export class SmplClient {
   private readonly _appHttp: ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
   constructor(options: SmplClientOptions = {}) {
-    // 1. Resolve environment first
-    const environment = options.environment || process.env.SMPLKIT_ENVIRONMENT;
-    if (!environment) {
-      throw new SmplError(NO_ENVIRONMENT_MESSAGE);
-    }
-    this._environment = environment;
+    const cfg = resolveConfig(options);
 
-    // 2. Resolve service second
-    const service = options.service || process.env.SMPLKIT_SERVICE;
-    if (!service) {
-      throw new SmplError(NO_SERVICE_MESSAGE);
-    }
-    this._service = service;
-
-    // 3. Resolve API key last (receives the already-resolved environment)
-    const apiKey = resolveApiKey(options.apiKey, environment);
-    this._apiKey = apiKey;
-
+    this._apiKey = cfg.apiKey;
+    this._environment = cfg.environment;
+    this._service = cfg.service;
     this._timeout = options.timeout ?? 30_000;
 
-    const baseDomain = options.baseDomain ?? "smplkit.com";
-    const scheme = options.scheme ?? "https";
-    const appBaseUrl = `${scheme}://app.${baseDomain}`;
-    const configBaseUrl = `${scheme}://config.${baseDomain}`;
-    const flagsBaseUrl = `${scheme}://flags.${baseDomain}`;
-    const loggingBaseUrl = `${scheme}://logging.${baseDomain}`;
+    // Build service URLs from resolved config
+    const appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
+    const configBaseUrl = serviceUrl(cfg.scheme, "config", cfg.baseDomain);
+    const flagsBaseUrl = serviceUrl(cfg.scheme, "flags", cfg.baseDomain);
+    const loggingBaseUrl = serviceUrl(cfg.scheme, "logging", cfg.baseDomain);
     this._appBaseUrl = appBaseUrl;
 
     const maskedKey =
-      apiKey.length > 14
-        ? apiKey.slice(0, 10) + "..." + apiKey.slice(-4)
-        : apiKey.slice(0, Math.min(4, apiKey.length)) + "...";
+      cfg.apiKey.length > 14
+        ? cfg.apiKey.slice(0, 10) + "..." + cfg.apiKey.slice(-4)
+        : cfg.apiKey.slice(0, Math.min(4, cfg.apiKey.length)) + "...";
     debug(
       "lifecycle",
-      `SmplClient created (api_key=${maskedKey}, environment=${environment}, service=${service})`,
+      `SmplClient created (api_key=${maskedKey}, environment=${cfg.environment}, service=${cfg.service})`,
     );
 
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
       baseUrl: appBaseUrl,
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${cfg.apiKey}`,
         Accept: "application/json",
       },
     });
 
-    // 4. Metrics reporter
-    if (!options.disableTelemetry) {
+    // Metrics reporter
+    if (!cfg.disableTelemetry) {
       this._metrics = new MetricsReporter({
-        apiKey,
+        apiKey: cfg.apiKey,
         environment: this._environment,
         service: this._service,
         appBaseUrl,
       });
     }
 
-    this.config = new ConfigClient(apiKey, this._timeout, configBaseUrl);
+    this.config = new ConfigClient(cfg.apiKey, this._timeout, configBaseUrl);
     this.flags = new FlagsClient(
-      apiKey,
+      cfg.apiKey,
       () => this._ensureWs(),
       this._timeout,
       flagsBaseUrl,
       appBaseUrl,
     );
-    this.logging = new LoggingClient(apiKey, () => this._ensureWs(), this._timeout, loggingBaseUrl);
+    this.logging = new LoggingClient(cfg.apiKey, () => this._ensureWs(), this._timeout, loggingBaseUrl);
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();

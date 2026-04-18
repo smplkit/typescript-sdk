@@ -383,7 +383,7 @@ export class FlagsClient {
   /** @internal */
   readonly _apiKey: string;
   /** @internal */
-  readonly _baseUrl: string = FLAGS_BASE_URL;
+  readonly _baseUrl: string;
 
   /** @internal */
   private readonly _http: ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
@@ -427,6 +427,9 @@ export class FlagsClient {
   ) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
+    const resolvedBaseUrl = flagsBaseUrl ?? FLAGS_BASE_URL;
+    const resolvedAppBaseUrl = appBaseUrl ?? APP_BASE_URL;
+    this._baseUrl = resolvedBaseUrl;
     const ms = timeout ?? 30_000;
 
     const fetchWithTimeout = async (request: Request): Promise<Response> => {
@@ -445,7 +448,7 @@ export class FlagsClient {
     };
 
     this._http = createClient<import("../generated/flags.d.ts").paths>({
-      baseUrl: flagsBaseUrl ?? FLAGS_BASE_URL,
+      baseUrl: resolvedBaseUrl,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
@@ -454,7 +457,7 @@ export class FlagsClient {
     });
 
     this._appHttp = createClient<import("../generated/app.d.ts").paths>({
-      baseUrl: appBaseUrl ?? APP_BASE_URL,
+      baseUrl: resolvedAppBaseUrl,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",

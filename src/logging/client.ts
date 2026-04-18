@@ -159,7 +159,7 @@ export class LoggingClient {
   /** @internal */
   readonly _apiKey: string;
   /** @internal */
-  readonly _baseUrl: string = LOGGING_BASE_URL;
+  readonly _baseUrl: string;
 
   /** @internal */
   private readonly _http: ReturnType<
@@ -191,10 +191,12 @@ export class LoggingClient {
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number, baseUrl?: string) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
+    const resolvedBaseUrl = baseUrl ?? LOGGING_BASE_URL;
+    this._baseUrl = resolvedBaseUrl;
     const ms = timeout ?? 30_000;
 
     this._http = createClient<import("../generated/logging.d.ts").paths>({
-      baseUrl: baseUrl ?? LOGGING_BASE_URL,
+      baseUrl: resolvedBaseUrl,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
