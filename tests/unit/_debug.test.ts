@@ -39,7 +39,47 @@ describe("_parseDebugEnv", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. isDebugEnabled() — reads module-level cache
+// 2. enableDebug() — programmatic activation
+// ---------------------------------------------------------------------------
+
+describe("enableDebug", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("enables debug when called, even if SMPLKIT_DEBUG is unset", async () => {
+    vi.stubEnv("SMPLKIT_DEBUG", "");
+    vi.resetModules();
+    const mod = await import("../../src/_debug.js");
+    expect(mod.isDebugEnabled()).toBe(false);
+    mod.enableDebug();
+    expect(mod.isDebugEnabled()).toBe(true);
+  });
+
+  it("allows debug() to emit output after enableDebug() is called", async () => {
+    vi.stubEnv("SMPLKIT_DEBUG", "");
+    vi.resetModules();
+    const mod = await import("../../src/_debug.js");
+    mod.enableDebug();
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    mod.debug("lifecycle", "enabled programmatically");
+    expect(write).toHaveBeenCalled();
+    write.mockRestore();
+  });
+
+  it("is idempotent — calling twice keeps debug enabled", async () => {
+    vi.stubEnv("SMPLKIT_DEBUG", "");
+    vi.resetModules();
+    const mod = await import("../../src/_debug.js");
+    mod.enableDebug();
+    mod.enableDebug();
+    expect(mod.isDebugEnabled()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. isDebugEnabled() — reads module-level cache
 // ---------------------------------------------------------------------------
 
 describe("isDebugEnabled", () => {

@@ -12,7 +12,7 @@ import { LoggingClient } from "./logging/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
-import { debug } from "./_debug.js";
+import { debug, enableDebug } from "./_debug.js";
 
 /** Configuration options for the {@link SmplClient}. */
 export interface SmplClientOptions {
@@ -129,6 +129,10 @@ export class SmplClient {
 
   constructor(options: SmplClientOptions = {}) {
     const cfg = resolveConfig(options);
+
+    if (cfg.debug) {
+      enableDebug();
+    }
 
     this._apiKey = cfg.apiKey;
     this._environment = cfg.environment;

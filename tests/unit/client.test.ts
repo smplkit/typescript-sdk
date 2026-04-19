@@ -10,6 +10,7 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: vi.fn(actual.homedir) };
 });
 import { SmplClient } from "../../src/client.js";
+import * as _debugMod from "../../src/_debug.js";
 import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { FlagsClient } from "../../src/flags/client.js";
@@ -241,6 +242,27 @@ describe("SmplClient", () => {
     expect(() => new SmplClient({ apiKey: "sk_test", environment: "test" })).toThrow(
       "No service provided",
     );
+  });
+
+  it("should call enableDebug() when debug: true is passed to constructor", () => {
+    const spy = vi.spyOn(_debugMod, "enableDebug");
+    new SmplClient({ ...DEFAULT_OPTS, debug: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("should not call enableDebug() when debug is false", () => {
+    const spy = vi.spyOn(_debugMod, "enableDebug");
+    new SmplClient({ ...DEFAULT_OPTS, debug: false });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should not call enableDebug() when debug is not specified", () => {
+    const spy = vi.spyOn(_debugMod, "enableDebug");
+    new SmplClient(DEFAULT_OPTS);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("should mention ~/.smplkit in API key error message", () => {

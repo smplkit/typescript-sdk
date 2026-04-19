@@ -25,11 +25,22 @@ export function _parseDebugEnv(value: string): boolean {
 }
 
 /** Cached at module load time — re-reading the env on every call is unnecessary. */
-const _DEBUG_ENABLED: boolean = _parseDebugEnv(process.env.SMPLKIT_DEBUG ?? "");
+let _DEBUG_ENABLED: boolean = _parseDebugEnv(process.env.SMPLKIT_DEBUG ?? "");
 
 /** Return `true` if SMPLKIT_DEBUG is enabled. */
 export function isDebugEnabled(): boolean {
   return _DEBUG_ENABLED;
+}
+
+/**
+ * Enable debug logging programmatically.
+ *
+ * Called by the SDK client when `debug: true` is resolved from constructor
+ * options or the `~/.smplkit` configuration file.
+ * @internal
+ */
+export function enableDebug(): void {
+  _DEBUG_ENABLED = true;
 }
 
 /**
