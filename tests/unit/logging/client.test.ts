@@ -580,6 +580,14 @@ describe("LoggingClient — runtime", () => {
       expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
     });
 
+    it("should wire a WebSocket listener for logger_deleted", async () => {
+      const client = makeClient();
+      prepareForStart(client);
+      await client.start();
+
+      expect(lastMockWs.on).toHaveBeenCalledWith("logger_deleted", expect.any(Function));
+    });
+
     it("should log console.warn when bulk logger registration fails", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const client = makeClient();

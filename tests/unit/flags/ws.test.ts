@@ -476,6 +476,18 @@ describe("FlagsClient change listeners", () => {
     });
   });
 
+  describe("WebSocket event name registration", () => {
+    it("should register listeners for flag_changed and flag_deleted on the shared WS", async () => {
+      const client = makeFlagsClient();
+
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "my-flag" }]));
+      await client._connectInternal("staging");
+
+      expect(lastMockWs.on).toHaveBeenCalledWith("flag_changed", expect.any(Function));
+      expect(lastMockWs.on).toHaveBeenCalledWith("flag_deleted", expect.any(Function));
+    });
+  });
+
   describe("WebSocket flag_changed event", () => {
     it("should fire global and key-scoped listeners", async () => {
       const client = makeFlagsClient();
