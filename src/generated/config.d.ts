@@ -136,10 +136,14 @@ export interface components {
         /**
          * ConfigItemDefinition
          * @description Schema for a single config item.
+         *
+         *     ``value`` may be ``None`` to represent a cleared (typed but unset)
+         *     slot — e.g. after a type change that could not coerce the previous
+         *     value. See ADR-024.
          */
         ConfigItemDefinition: {
             /** Value */
-            value: unknown;
+            value?: unknown;
             /** Type */
             type?: ("STRING" | "NUMBER" | "BOOLEAN" | "JSON") | null;
             /** Description */
@@ -151,7 +155,7 @@ export interface components {
          */
         ConfigItemOverride: {
             /** Value */
-            value: unknown;
+            value?: unknown;
         };
         /** ConfigListResponse */
         ConfigListResponse: {
