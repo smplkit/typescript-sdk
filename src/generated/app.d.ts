@@ -6571,7 +6571,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/pdf": string;
                     "application/vnd.api+json": components["schemas"]["InvoiceSingleResponse"];
                 };
             };
