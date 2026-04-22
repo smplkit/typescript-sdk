@@ -620,6 +620,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Contact Us Email
+         * @description Send a contact-us message. Delivers two emails: a ticket to support with Reply-To set to the user, and an auto-response to the user. Nothing is persisted; the returned id is for correlation only.
+         */
+        post: operations["send_contact_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/metric_names": {
         parameters: {
             query?: never;
@@ -1266,6 +1286,12 @@ export interface components {
             attributes: components["schemas"]["CatalogBundleAttributes"];
         };
         /**
+         * ContactTopic
+         * @description Server-validated contact-us topics. Frontend dropdown values must match.
+         * @enum {string}
+         */
+        ContactTopic: "billing" | "technical" | "feature_request" | "account" | "other";
+        /**
          * Context
          * @example {
          *       "attributes": {
@@ -1528,6 +1554,53 @@ export interface components {
             /** Type */
             type: string;
             attributes: components["schemas"]["CreateSubscriptionAttributes"];
+        };
+        /**
+         * Email
+         * @description Contact-us email resource attributes.
+         *
+         *     This resource is a pure action — it is not persisted. The id returned in
+         *     the response is a per-request uuid4 for correlation only.
+         * @example {
+         *       "body": "Hi, I have a question about the pro plan pricing...",
+         *       "topic": "billing"
+         *     }
+         */
+        Email: {
+            topic: components["schemas"]["ContactTopic"];
+            /** Body */
+            body: string;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            readonly sent_at?: string | null;
+        };
+        /**
+         * EmailResource
+         * @example {
+         *       "attributes": {
+         *         "body": "Hi, I have a question about the pro plan pricing...",
+         *         "sent_at": "2026-04-22T14:32:01.234Z",
+         *         "topic": "billing"
+         *       },
+         *       "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+         *       "type": "email"
+         *     }
+         */
+        EmailResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "email";
+            attributes: components["schemas"]["Email"];
+        };
+        /** EmailResponse */
+        EmailResponse: {
+            data: components["schemas"]["EmailResource"];
         };
         /**
          * Environment
@@ -5071,6 +5144,97 @@ export interface operations {
             };
             /** @description Rate limit exceeded */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    send_contact_email: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "data": {
+                 *         "type": "email",
+                 *         "attributes": {
+                 *           "topic": "billing",
+                 *           "body": "Hi, I have a question about the pro plan pricing..."
+                 *         }
+                 *       }
+                 *     }
+                 */
+                "application/vnd.api+json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["EmailResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource type mismatch */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Email send failure */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
