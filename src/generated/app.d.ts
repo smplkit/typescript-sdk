@@ -1006,6 +1006,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Invoice
+         * @description Return a single invoice by ID. Supports content negotiation via Accept header:
+         *
+         *     - ``application/pdf`` — PDF bytes proxy-streamed from Stripe
+         *     - ``application/vnd.api+json`` / ``application/json`` / absent — JSON:API resource
+         *     - Any other value — 406 Not Acceptable
+         */
+        get: operations["get_invoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/functions/setup_intent/actions/execute": {
         parameters: {
             query?: never;
@@ -1869,6 +1893,10 @@ export interface components {
              */
             type: "invoice";
             attributes: components["schemas"]["Invoice"];
+        };
+        /** InvoiceSingleResponse */
+        InvoiceSingleResponse: {
+            data: components["schemas"]["InvoiceResource"];
         };
         /** LimitDefinition */
         LimitDefinition: {
@@ -6517,6 +6545,83 @@ export interface operations {
             };
             /** @description Rate limit exceeded */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_invoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Content type depends on the Accept header: application/vnd.api+json returns a JSON:API invoice resource; application/pdf streams the invoice PDF from Stripe. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "application/vnd.api+json": components["schemas"]["InvoiceSingleResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Accept header specifies an unsupported media type */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Billing provider (Stripe) unavailable */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
