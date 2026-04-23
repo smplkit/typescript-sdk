@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * Get Current User
-         * @description Return the currently authenticated user.
+         * @description Return the currently authenticated user. ``role`` and ``account`` are populated when the user has a membership; both are null when the caller is authenticated but has no account yet — e.g. a returning user who has just accepted an invitation email.
          */
         get: operations["get_current_user"];
         /**
@@ -545,7 +545,7 @@ export interface paths {
         };
         /**
          * List Invitations
-         * @description List all invitations for the authenticated account.
+         * @description List invitations. Authenticated admins list invitations for their own account and may narrow by status. Unauthenticated callers must pass ``filter[token]`` to look up a specific invitation by its token — used to render the invitation preview before sign-in. The token-filter path always returns an array of 0 or 1 elements.
          */
         get: operations["list_invitations"];
         put?: never;
@@ -1822,6 +1822,12 @@ export interface components {
             readonly status?: string | null;
             /** Invited By */
             readonly invited_by?: string | null;
+            /** Account Name */
+            readonly account_name?: string | null;
+            /** Inviter Display Name */
+            readonly inviter_display_name?: string | null;
+            /** Token */
+            readonly token?: string | null;
             /**
              * Expires At
              * Format: date-time
@@ -5013,6 +5019,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[status]"?: string | null;
+                "filter[token]"?: string | null;
             };
             header?: never;
             path?: never;
