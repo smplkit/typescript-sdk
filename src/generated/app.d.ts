@@ -2163,6 +2163,29 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
+        /** PageMeta */
+        PageMeta: {
+            /**
+             * Size
+             * @description Page size used for this response
+             */
+            size: number;
+            /**
+             * Number
+             * @description 1-based page number returned
+             */
+            number: number;
+            /**
+             * Total Items
+             * @description Total number of matching items across all pages
+             */
+            total_items: number;
+            /**
+             * Total Pages
+             * @description Total number of pages at the current page size
+             */
+            total_pages: number;
+        };
         /**
          * PaymentMethod
          * @description Attributes for a saved card payment method.
@@ -2599,10 +2622,15 @@ export interface components {
              */
             readonly created_at?: string | null;
         };
+        /** UserListMeta */
+        UserListMeta: {
+            page: components["schemas"]["PageMeta"];
+        };
         /** UserListResponse */
         UserListResponse: {
             /** Data */
             data: components["schemas"]["UserResource"][];
+            meta?: components["schemas"]["UserListMeta"];
         };
         /**
          * VerifyEmailRequest
@@ -5639,6 +5667,12 @@ export interface operations {
             query?: {
                 "filter[account]"?: string | null;
                 "filter[email]"?: string | null;
+                /** @description Case-insensitive substring match against display_name and email. If the value is a valid UUID, also matches user id exactly. */
+                "filter[search]"?: string | null;
+                /** @description 1-based page number */
+                "page[number]"?: number;
+                /** @description Items per page */
+                "page[size]"?: number;
             };
             header?: never;
             path?: never;
