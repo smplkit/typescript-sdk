@@ -968,16 +968,61 @@ export interface paths {
         };
         /**
          * List Payment Methods
-         * @description Return the default payment method for the account's Stripe Customer.
+         * @description List all payment methods for the account. Default is returned first, then newest first.
          */
         get: operations["list_payment_methods"];
         put?: never;
         /**
+         * Add Payment Method
+         * @description Register a Stripe payment method (``pm_...``) as a persistent resource. The frontend obtains the Stripe ID via SetupIntent + Stripe Elements, then POSTs it here. Body shape and server behavior per ADR-044 §5.1.
+         */
+        post: operations["create_payment_method"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payment_methods/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Payment Method
+         * @description Return a payment method by id.
+         */
+        get: operations["get_payment_method"];
+        /**
+         * Update Payment Method
+         * @description Update the mutable fields (``billing_details``, ``exp_month``, ``exp_year``). The ``default`` field is not mutable via PUT — see ADR-044 §5.2; use the ``set_default`` action instead.
+         */
+        put: operations["update_payment_method"];
+        post?: never;
+        /**
+         * Delete Payment Method
+         * @description Detach the payment method from Stripe and soft-delete the local row. Returns 409 if this is the only PM and the account has an active paid subscription. If the deleted row was default, the oldest remaining row is promoted.
+         */
+        delete: operations["delete_payment_method"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payment_methods/{id}/actions/set_default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
          * Set Default Payment Method
-         * @description Attach a payment method to the account's Stripe Customer and set it as the default.
-         *
-         *     Called by the frontend after ``stripe.confirmSetup()`` to persist the new card
-         *     as the customer's ``invoice_settings.default_payment_method``.
+         * @description Mark this payment method as the account's default. Idempotent — a no-op 200 if already default.
          */
         post: operations["set_default_payment_method"];
         delete?: never;
@@ -1123,6 +1168,51 @@ export interface components {
         /** AccountResponse */
         AccountResponse: {
             data: components["schemas"]["AccountResource"];
+        };
+        /**
+         * AddPaymentMethodAttributes
+         * @description Attributes for POST /api/v1/payment_methods.
+         *
+         *     Distinct from ``PaymentMethod`` because this shape takes the Stripe
+         *     ``pm_...`` ID at registration time; the persistent resource does not
+         *     expose that ID.
+         * @example {
+         *       "default": false,
+         *       "stripe_payment_method_id": "pm_1234567890abcdef"
+         *     }
+         */
+        AddPaymentMethodAttributes: {
+            /** Stripe Payment Method Id */
+            stripe_payment_method_id: string;
+            /**
+             * Default
+             * @default false
+             */
+            default: boolean;
+        };
+        /**
+         * AddPaymentMethodBody
+         * @example {
+         *       "data": {
+         *         "attributes": {
+         *           "default": false,
+         *           "stripe_payment_method_id": "pm_1234567890abcdef"
+         *         },
+         *         "type": "payment_method"
+         *       }
+         *     }
+         */
+        AddPaymentMethodBody: {
+            data: components["schemas"]["AddPaymentMethodData"];
+        };
+        /** AddPaymentMethodData */
+        AddPaymentMethodData: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "payment_method";
+            attributes: components["schemas"]["AddPaymentMethodAttributes"];
         };
         /**
          * ApiKey
@@ -1509,14 +1599,14 @@ export interface components {
          * CreateBundleAttributes
          * @example {
          *       "bundle": "standard",
-         *       "payment_method": "pm_1234567890abcdef"
+         *       "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
          *     }
          */
         CreateBundleAttributes: {
             /** Bundle */
             bundle: string;
             /** Payment Method */
-            payment_method: string;
+            payment_method?: string | null;
         };
         /** CreateBundleBody */
         CreateBundleBody: {
@@ -1534,7 +1624,7 @@ export interface components {
         /**
          * CreateSubscriptionAttributes
          * @example {
-         *       "payment_method_id": "pm_1234567890abcdef",
+         *       "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
          *       "plan": "pro",
          *       "product": "flags"
          *     }
@@ -1544,15 +1634,15 @@ export interface components {
             product: string;
             /** Plan */
             plan: string;
-            /** Payment Method Id */
-            payment_method_id: string;
+            /** Payment Method */
+            payment_method?: string | null;
         };
         /**
          * CreateSubscriptionBody
          * @example {
          *       "data": {
          *         "attributes": {
-         *           "payment_method_id": "pm_1234567890abcdef",
+         *           "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
          *           "plan": "pro",
          *           "product": "flags"
          *         },
@@ -1567,7 +1657,7 @@ export interface components {
          * CreateSubscriptionData
          * @example {
          *       "attributes": {
-         *         "payment_method_id": "pm_1234567890abcdef",
+         *         "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
          *         "plan": "pro",
          *         "product": "flags"
          *       },
@@ -2067,18 +2157,58 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
-        /** PaymentMethodAttributes */
-        PaymentMethodAttributes: {
+        /**
+         * PaymentMethod
+         * @description Attributes for a saved card payment method.
+         *
+         *     ``default`` is the API-facing name; the underlying column is ``is_default``
+         *     per ADR-013 (reserved-word exception) and ADR-014 (unprefixed API fields).
+         * @example {
+         *       "billing_details": {
+         *         "address": {
+         *           "city": "Leesburg",
+         *           "country": "US",
+         *           "line1": "123 Main St",
+         *           "postal_code": "20175",
+         *           "state": "VA"
+         *         },
+         *         "email": "jane@example.com",
+         *         "name": "Jane Doe"
+         *       },
+         *       "brand": "visa",
+         *       "created_at": "2026-04-23T12:34:56Z",
+         *       "default": true,
+         *       "exp_month": 8,
+         *       "exp_year": 2028,
+         *       "last4": "4242",
+         *       "updated_at": "2026-04-23T12:34:56Z"
+         *     }
+         */
+        PaymentMethod: {
             /** Brand */
-            brand: string;
+            readonly brand?: string | null;
             /** Last4 */
-            last4: string;
+            readonly last4?: string | null;
             /** Exp Month */
-            exp_month: number;
+            exp_month?: number | null;
             /** Exp Year */
-            exp_year: number;
-            /** Is Default */
-            is_default: boolean;
+            exp_year?: number | null;
+            /** Default */
+            default?: boolean | null;
+            /** Billing Details */
+            billing_details?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at?: string | null;
         };
         /** PaymentMethodListResponse */
         PaymentMethodListResponse: {
@@ -2089,13 +2219,19 @@ export interface components {
          * PaymentMethodResource
          * @example {
          *       "attributes": {
+         *         "billing_details": {
+         *           "email": "jane@example.com",
+         *           "name": "Jane Doe"
+         *         },
          *         "brand": "visa",
-         *         "exp_month": 12,
+         *         "created_at": "2026-04-23T12:34:56Z",
+         *         "default": true,
+         *         "exp_month": 8,
          *         "exp_year": 2028,
-         *         "is_default": true,
-         *         "last4": "4242"
+         *         "last4": "4242",
+         *         "updated_at": "2026-04-23T12:34:56Z"
          *       },
-         *       "id": "pm_1234567890abcdef",
+         *       "id": "0b8a9c9e-1111-2222-3333-444455556666",
          *       "type": "payment_method"
          *     }
          */
@@ -2107,7 +2243,11 @@ export interface components {
              * @enum {string}
              */
             type: "payment_method";
-            attributes: components["schemas"]["PaymentMethodAttributes"];
+            attributes: components["schemas"]["PaymentMethod"];
+        };
+        /** PaymentMethodResponse */
+        PaymentMethodResponse: {
+            data: components["schemas"]["PaymentMethodResource"];
         };
         /** Plan */
         Plan: {
@@ -2326,24 +2466,6 @@ export interface components {
         ServiceListResponse: {
             /** Data */
             data: components["schemas"]["ServiceResource"][];
-        };
-        /** SetDefaultPaymentMethodAttributes */
-        SetDefaultPaymentMethodAttributes: {
-            /** Payment Method Id */
-            payment_method_id: string;
-        };
-        /** SetDefaultPaymentMethodData */
-        SetDefaultPaymentMethodData: {
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "payment_method";
-            attributes: components["schemas"]["SetDefaultPaymentMethodAttributes"];
-        };
-        /** SetDefaultPaymentMethodRequest */
-        SetDefaultPaymentMethodRequest: {
-            data: components["schemas"]["SetDefaultPaymentMethodData"];
         };
         /** SetupIntentAttributes */
         SetupIntentAttributes: {
@@ -6438,7 +6560,7 @@ export interface operations {
             };
         };
     };
-    set_default_payment_method: {
+    create_payment_method: {
         parameters: {
             query?: never;
             header?: never;
@@ -6447,7 +6569,127 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["SetDefaultPaymentMethodRequest"];
+                "application/vnd.api+json": components["schemas"]["AddPaymentMethodBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_payment_method: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_payment_method: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
             };
         };
         responses: {
@@ -6457,7 +6699,121 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": components["schemas"]["PaymentMethodListResponse"];
+                    "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_payment_method: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_default_payment_method: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
                 };
             };
             /** @description Validation error or malformed request */
