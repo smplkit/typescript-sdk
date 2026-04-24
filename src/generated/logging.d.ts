@@ -243,7 +243,6 @@ export interface components {
          *           "level": "ERROR"
          *         }
          *       },
-         *       "key": "database-loggers",
          *       "level": "WARN",
          *       "name": "Database Loggers",
          *       "updated_at": "2026-04-01T10:00:00Z"
@@ -252,8 +251,6 @@ export interface components {
         LogGroup: {
             /** Name */
             name: string;
-            /** Key */
-            key?: string | null;
             /** Level */
             level?: string | null;
             /** Parent Id */
@@ -282,7 +279,6 @@ export interface components {
          *             "level": "ERROR"
          *           }
          *         },
-         *         "key": "database-loggers",
          *         "level": "WARN",
          *         "name": "Database Loggers",
          *         "updated_at": "2026-04-01T10:00:00Z"
