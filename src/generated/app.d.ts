@@ -472,7 +472,11 @@ export interface paths {
          * @description Return a context instance by composite id (type:key).
          */
         get: operations["get_context"];
-        put?: never;
+        /**
+         * Update Context
+         * @description Update a context instance by composite id (type:key). Only the human-readable display name is mutable through this endpoint; context_type and observed attributes are written by the SDK ingestion path.
+         */
+        put: operations["update_context"];
         post?: never;
         /**
          * Delete Context
@@ -4695,6 +4699,68 @@ export interface operations {
             };
         };
     };
+    update_context: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ContextResponse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     delete_context: {
         parameters: {
             query?: never;
@@ -5347,17 +5413,6 @@ export interface operations {
         };
         requestBody: {
             content: {
-                /**
-                 * @example {
-                 *       "data": {
-                 *         "type": "email",
-                 *         "attributes": {
-                 *           "topic": "billing",
-                 *           "body": "Hi, I have a question about the pro plan pricing..."
-                 *         }
-                 *       }
-                 *     }
-                 */
                 "application/vnd.api+json": {
                     [key: string]: unknown;
                 };
