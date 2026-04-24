@@ -706,14 +706,7 @@ export class LoggingClient {
           debug("resolution", `resolution pass (trigger: websocket event for logger ${id})`);
           this._applyLevels(serverLoggers);
           const logger = serverLoggers.find((l) => l.id === id);
-          const env = this._parent?._environment;
-          let level = (logger?.level ?? null) as LogLevel | null;
-          if (env && logger?.environments) {
-            const envOverride = (logger.environments as Record<string, any>)[env];
-            if (envOverride?.level) {
-              level = envOverride.level as LogLevel;
-            }
-          }
+          const level = (logger?.level ?? null) as LogLevel | null;
           const event: LoggerChangeEvent = {
             id,
             level,
