@@ -521,6 +521,10 @@ export interface operations {
             query?: {
                 "filter[type]"?: string | null;
                 "filter[managed]"?: boolean | null;
+                /** @description Return flags whose rules reference this context instance. Format: {type}:{key} */
+                "filter[references_context]"?: string | null;
+                /** @description Return flags whose rules reference any attribute of the given context type. */
+                "filter[references_context_type]"?: string | null;
             };
             header?: never;
             path?: never;
