@@ -930,6 +930,7 @@ describe("_ensureInitialized WebSocket wiring", () => {
     };
     client._getSharedWs = () => mockWs as never;
 
+    // Initial list fetch (used by _ensureInitialized)
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [
@@ -946,20 +947,18 @@ describe("_ensureInitialized WebSocket wiring", () => {
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
 
-    // Simulate WebSocket config_changed event — refresh will re-fetch
+    // Simulate WebSocket config_changed event — handler does scoped GET /configs/{id}
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
-        data: [
-          configResource({
-            id: "app",
-            items: { retries: 99 },
-          }),
-        ],
+        data: configResource({
+          id: "app",
+          items: { retries: 99 },
+        }),
       }),
     );
 
-    // Trigger the WebSocket handler
-    wsListeners["config_changed"]({ key: "app" });
+    // Trigger the WebSocket handler with id field
+    wsListeners["config_changed"]({ id: "app" });
 
     // Wait for the async refresh to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -993,12 +992,246 @@ describe("_ensureInitialized WebSocket wiring", () => {
 
     await client.get("app");
 
-    // Simulate WebSocket event where refresh fails
+    // Simulate WebSocket event where refresh fails (scoped fetch fails)
     mockFetch.mockRejectedValueOnce(new Error("network"));
 
     // Should not throw
-    wsListeners["config_changed"]({ key: "app" });
+    wsListeners["config_changed"]({ id: "app" });
     await new Promise((r) => setTimeout(r, 50));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket event behaviors: config_changed, config_deleted, configs_changed
+// ---------------------------------------------------------------------------
+
+describe("Config WebSocket event behaviors", () => {
+  function makeWsClient() {
+    const client = makeClient();
+    const wsListeners: Record<string, (data: Record<string, unknown>) => void> = {};
+    const mockWs = {
+      on: vi.fn((event: string, cb: (data: Record<string, unknown>) => void) => {
+        wsListeners[event] = cb;
+      }),
+      off: vi.fn(),
+      connectionStatus: "connected",
+    };
+    client._getSharedWs = () => mockWs as never;
+    return { client, wsListeners };
+  }
+
+  it("config_changed: scoped fetch fires listener when content changed", async () => {
+    const { client, wsListeners } = makeWsClient();
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    // Initial list fetch
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "app", items: { timeout: 30 } })],
+      }),
+    );
+    await client.get("app");
+
+    // Scoped re-fetch: content changed
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "app", items: { timeout: 60 } }) }),
+    );
+
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].configId).toBe("app");
+    expect(events[0].itemKey).toBe("timeout");
+    expect(events[0].newValue).toBe(60);
+  });
+
+  it("config_changed: scoped fetch does NOT fire listener when content unchanged", async () => {
+    const { client, wsListeners } = makeWsClient();
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "app", items: { timeout: 30 } })],
+      }),
+    );
+    await client.get("app");
+
+    // Scoped re-fetch: same content
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "app", items: { timeout: 30 } }) }),
+    );
+
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(events).toHaveLength(0);
+  });
+
+  it("config_changed: no-op if event has no id", async () => {
+    const { client, wsListeners } = makeWsClient();
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [configResource({ id: "app", items: {} })] }),
+    );
+    await client.get("app");
+
+    wsListeners["config_changed"]({});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(events).toHaveLength(0);
+  });
+
+  it("config_deleted: removes from cache, fires listener, no HTTP fetch", async () => {
+    const { client, wsListeners } = makeWsClient();
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "app", items: { timeout: 30 } })],
+      }),
+    );
+    await client.get("app");
+
+    const fetchCallsBefore = mockFetch.mock.calls.length;
+
+    wsListeners["config_deleted"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Listener fired for the removed item
+    expect(events).toHaveLength(1);
+    expect(events[0].configId).toBe("app");
+    expect(events[0].newValue).toBeNull();
+    // No additional HTTP fetch
+    expect(mockFetch.mock.calls.length).toBe(fetchCallsBefore);
+  });
+
+  it("configs_changed: full list fetch, diff-based listener firing", async () => {
+    const { client, wsListeners } = makeWsClient();
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    // Initial list
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "app", items: { timeout: 30 } })],
+      }),
+    );
+    await client.get("app");
+
+    // configs_changed triggers full refresh → list fetch
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "app", items: { timeout: 99 } })],
+      }),
+    );
+
+    wsListeners["configs_changed"]({});
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].newValue).toBe(99);
+  });
+
+  it("should register config_deleted and configs_changed listeners", async () => {
+    const { client, wsListeners } = makeWsClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [configResource({ id: "app", items: {} })] }),
+    );
+    await client.get("app");
+
+    expect(wsListeners["config_deleted"]).toBeDefined();
+    expect(wsListeners["configs_changed"]).toBeDefined();
+  });
+
+  it("config_changed: does not crash if scoped fetch throws", async () => {
+    const { client, wsListeners } = makeWsClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [configResource({ id: "app", items: {} })] }),
+    );
+    await client.get("app");
+
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    // Should not throw
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it("config_changed: does not crash if _diffAndFire throws (catch block)", async () => {
+    const { client, wsListeners } = makeWsClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [configResource({ id: "app", items: { x: 1 } })] }),
+    );
+    await client.get("app");
+
+    // Make _diffAndFire throw by spying
+    vi.spyOn(client as never, "_diffAndFire" as never).mockImplementationOnce(
+      (() => { throw new Error("diffAndFire error"); }) as never,
+    );
+
+    // Scoped fetch returns changed content
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "app", items: { x: 2 } }) }),
+    );
+
+    // Should not throw — outer catch swallows it
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it("configs_changed: does not crash if refresh throws", async () => {
+    const { client, wsListeners } = makeWsClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [configResource({ id: "app", items: {} })] }),
+    );
+    await client.get("app");
+
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    // Should not throw
+    wsListeners["configs_changed"]({});
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it("config_changed: applies environment overrides when resolving values", async () => {
+    const { client, wsListeners } = makeWsClient();
+    // makeClient() uses environment "staging"
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { timeout: 30 },
+            environments: { staging: { values: { timeout: 45 } } },
+          }),
+        ],
+      }),
+    );
+    await client.get("app");
+
+    // Scoped re-fetch: environment override changed
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: configResource({
+          id: "app",
+          items: { timeout: 30 },
+          environments: { staging: { values: { timeout: 90 } } },
+        }),
+      }),
+    );
+
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].newValue).toBe(90);
   });
 });
 

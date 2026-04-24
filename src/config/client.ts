@@ -551,7 +551,8 @@ export class ConfigClient {
     if (this._getSharedWs) {
       const ws = this._getSharedWs();
       ws.on("config_changed", this._handleConfigChanged);
-      ws.on("config_deleted", this._handleConfigChanged);
+      ws.on("config_deleted", this._handleConfigDeleted);
+      ws.on("configs_changed", this._handleConfigsChanged);
     }
   }
 
@@ -578,7 +579,51 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   private _handleConfigChanged = (data: Record<string, any>): void => {
-    debug("websocket", `config event received: ${JSON.stringify(data)}`);
+    debug("websocket", `config_changed event received: ${JSON.stringify(data)}`);
+    const configKey = data.id as string | undefined;
+    if (!configKey) return;
+    // Scoped fetch: GET /configs/{key}
+    void this._fetchSingleConfig(configKey).then((newConfig) => {
+      const environment = this._parent?._environment;
+      if (!environment) return;
+      const oldValues = this._configCache[configKey];
+      let newValues: Record<string, unknown>;
+      if (newConfig !== null) {
+        // Build a temporary chain with just this config (for simplicity, no parent resolution)
+        newValues = this._resolveConfigValues(newConfig, environment);
+      } else {
+        newValues = {};
+      }
+      const oldJson = JSON.stringify(oldValues ?? {});
+      const newJson = JSON.stringify(newValues);
+      if (oldJson === newJson) return; // no change
+      const oldCache = { ...this._configCache };
+      if (newConfig !== null) {
+        this._configCache[configKey] = newValues;
+      } else {
+        delete this._configCache[configKey];
+      }
+      this._diffAndFire(oldCache, this._configCache, "websocket");
+    }).catch((err: unknown) => {
+      debug("websocket", `config_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  };
+
+  private _handleConfigDeleted = (data: Record<string, any>): void => {
+    debug("websocket", `config_deleted event received: ${JSON.stringify(data)}`);
+    const configKey = data.id as string | undefined;
+    if (!configKey) return;
+    // Remove from cache — no HTTP fetch
+    if (configKey in this._configCache) {
+      const oldCache = { ...this._configCache };
+      delete this._configCache[configKey];
+      this._diffAndFire(oldCache, this._configCache, "websocket");
+    }
+  };
+
+  private _handleConfigsChanged = (_data: Record<string, any>): void => {
+    debug("websocket", `configs_changed event received`);
+    // Full list fetch, rebuild resolution, fire listeners
     void this.refresh().catch(() => {
       // ignore refresh errors from WebSocket events
     });
@@ -587,6 +632,33 @@ export class ConfigClient {
   // ------------------------------------------------------------------
   // Internal: change detection
   // ------------------------------------------------------------------
+
+  /** Fetch a single config by key. Returns null if not found. @internal */
+  private async _fetchSingleConfig(key: string): Promise<Config | null> {
+    debug("api", `GET /api/v1/configs/${key}`);
+    try {
+      const result = await this._http.GET("/api/v1/configs/{id}", {
+        params: { path: { id: key } },
+      });
+      if (!result.response.ok) return null;
+      if (!result.data?.data) return null;
+      return resourceToConfig(result.data.data, this);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Resolve a config's values for an environment (no parent chain). @internal */
+  private _resolveConfigValues(
+    config: Config,
+    environment: string,
+  ): Record<string, unknown> {
+    // Merge base items with environment overrides
+    const base = config.items ?? {};
+    const envEntry = (config.environments as Record<string, any>)?.[environment];
+    if (!envEntry?.values) return { ...base };
+    return { ...base, ...envEntry.values };
+  }
 
   /** @internal */
   private _diffAndFire(

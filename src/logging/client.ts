@@ -187,6 +187,10 @@ export class LoggingClient {
   private _loggerBuffer = new LoggerRegistrationBuffer();
   private _loggerFlushTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Local stores for diff-based listener firing
+  private _loggerStore: Record<string, string | null> = {}; // key -> level
+  private _groupStore: Record<string, string | null> = {}; // key -> level
+
   /** @internal */
   constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number, baseUrl?: string) {
     this._apiKey = apiKey;
@@ -317,12 +321,21 @@ export class LoggingClient {
 
   /** @internal */
   async _mgGetGroup(id: string): Promise<LogGroup> {
-    const groups = await this.management.listGroups();
-    const match = groups.find((g) => g.id === id);
-    if (!match) {
+    let data: components["schemas"]["LogGroupResponse"] | undefined;
+    try {
+      const result = await this._http.GET("/api/v1/log_groups/{id}", {
+        params: { path: { id } },
+      });
+      if (result.error !== undefined)
+        await checkError(result.response, `LogGroup with id '${id}' not found`);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) {
       throw new SmplNotFoundError(`LogGroup with id '${id}' not found`);
     }
-    return match;
+    return this._groupToModel(data.data);
   }
 
   /** @internal */
@@ -510,8 +523,14 @@ export class LoggingClient {
         `fetched ${serverLoggers.length} logger(s) and ${serverGroups.length} group(s) from server`,
       );
 
-      // 6. Apply levels from server to adapters
+      // 6. Apply levels from server to adapters and populate stores
       this._applyLevels(serverLoggers);
+      for (const l of serverLoggers) {
+        this._loggerStore[l.id!] = l.level;
+      }
+      for (const g of serverGroups) {
+        this._groupStore[g.id!] = g.level;
+      }
     } catch {
       // Server may be unreachable — continue with WebSocket wiring
     }
@@ -519,9 +538,10 @@ export class LoggingClient {
     // 7. Wire WebSocket for logger change/delete and group change/delete events
     this._wsManager = this._ensureWs();
     this._wsManager.on("logger_changed", this._handleLoggerChanged);
-    this._wsManager.on("logger_deleted", this._handleLoggerChanged);
+    this._wsManager.on("logger_deleted", this._handleLoggerDeleted);
     this._wsManager.on("group_changed", this._handleGroupChanged);
-    this._wsManager.on("group_deleted", this._handleGroupChanged);
+    this._wsManager.on("group_deleted", this._handleGroupDeleted);
+    this._wsManager.on("loggers_changed", this._handleLoggersChanged);
 
     // 8. Start periodic flush timer for post-startup logger discovery
     this._loggerFlushTimer = setInterval(() => {
@@ -585,9 +605,10 @@ export class LoggingClient {
 
     if (this._wsManager !== null) {
       this._wsManager.off("logger_changed", this._handleLoggerChanged);
-      this._wsManager.off("logger_deleted", this._handleLoggerChanged);
+      this._wsManager.off("logger_deleted", this._handleLoggerDeleted);
       this._wsManager.off("group_changed", this._handleGroupChanged);
-      this._wsManager.off("group_deleted", this._handleGroupChanged);
+      this._wsManager.off("group_deleted", this._handleGroupDeleted);
+      this._wsManager.off("loggers_changed", this._handleLoggersChanged);
       this._wsManager = null;
     }
     this._started = false;
@@ -697,59 +718,236 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   private _handleLoggerChanged = (data: Record<string, any>): void => {
-    debug("websocket", `logger event received: ${JSON.stringify(data)}`);
+    debug("websocket", `logger_changed event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
-    if (id) {
-      // Trigger a full re-fetch → resolve → apply pipeline (ADR-023 §4.5)
-      void Promise.all([this.management.list(), this.management.listGroups()])
-        .then(([serverLoggers]) => {
-          debug("resolution", `resolution pass (trigger: websocket event for logger ${id})`);
-          this._applyLevels(serverLoggers);
-          const logger = serverLoggers.find((l) => l.id === id);
-          const level = (logger?.level ?? null) as LogLevel | null;
-          const event: LoggerChangeEvent = {
-            id,
-            level,
-            source: "websocket",
-          };
-          // Global listeners first
-          for (const cb of this._globalListeners) {
+    if (!id) return;
+    // Scoped fetch: GET /loggers/{key}
+    void this._fetchSingleLogger(id)
+      .then((logger) => {
+        const oldLevel = this._loggerStore[id] ?? null;
+        const newLevel = logger?.level ?? null;
+        if (oldLevel === newLevel) return; // no change
+        this._loggerStore[id] = newLevel;
+        if (logger) {
+          this._applyLevels([logger]);
+        }
+        const event: LoggerChangeEvent = {
+          id,
+          level: newLevel as LogLevel | null,
+          source: "websocket",
+        };
+        for (const cb of this._globalListeners) {
+          try {
+            cb(event);
+          } catch {
+            // ignore listener errors
+          }
+        }
+        const idCallbacks = this._keyListeners.get(id);
+        if (idCallbacks) {
+          for (const cb of idCallbacks) {
             try {
               cb(event);
             } catch {
               // ignore listener errors
             }
           }
-          // Id-scoped listeners
-          const idCallbacks = this._keyListeners.get(id);
-          if (idCallbacks) {
-            for (const cb of idCallbacks) {
+        }
+      })
+      .catch((err: unknown) => {
+        debug("websocket", `logger_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  };
+
+  private _handleLoggerDeleted = (data: Record<string, any>): void => {
+    debug("websocket", `logger_deleted event received: ${JSON.stringify(data)}`);
+    const id = data.id as string | undefined;
+    if (!id) return;
+    // Remove from store — no HTTP fetch
+    delete this._loggerStore[id];
+    const event: LoggerChangeEvent & { deleted: true } = {
+      id,
+      level: null,
+      source: "websocket",
+      deleted: true,
+    };
+    for (const cb of this._globalListeners) {
+      try {
+        cb(event);
+      } catch (err) {
+        debug("websocket", `logger_deleted listener error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const idCallbacks = this._keyListeners.get(id);
+    if (idCallbacks) {
+      for (const cb of idCallbacks) {
+        try {
+          cb(event);
+        } catch (err) {
+          debug("websocket", `logger_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+  };
+
+  private _handleGroupChanged = (data: Record<string, any>): void => {
+    debug("websocket", `group_changed event received: ${JSON.stringify(data)}`);
+    const id = data.id as string | undefined;
+    if (!id) return;
+    // Scoped fetch: GET /log_groups/{key}
+    void this._fetchSingleGroup(id)
+      .then((group) => {
+        const oldLevel = this._groupStore[id] ?? null;
+        const newLevel = group?.level ?? null;
+        if (oldLevel === newLevel) return; // no change
+        this._groupStore[id] = newLevel;
+        // Group level change means re-apply to all loggers in this group
+        void this.management.list().then((loggers) => {
+          this._applyLevels(loggers);
+        }).catch(() => {});
+      })
+      .catch((err: unknown) => {
+        debug("websocket", `group_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  };
+
+  private _handleGroupDeleted = (data: Record<string, any>): void => {
+    debug("websocket", `group_deleted event received: ${JSON.stringify(data)}`);
+    const id = data.id as string | undefined;
+    if (!id) return;
+    // Remove from store — no HTTP fetch
+    delete this._groupStore[id];
+    const event: LoggerChangeEvent & { deleted: true } = {
+      id,
+      level: null,
+      source: "websocket",
+      deleted: true,
+    };
+    for (const cb of this._globalListeners) {
+      try {
+        cb(event);
+      } catch (err) {
+        debug("websocket", `group_deleted listener error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const idCallbacks = this._keyListeners.get(id);
+    if (idCallbacks) {
+      for (const cb of idCallbacks) {
+        try {
+          cb(event);
+        } catch (err) {
+          debug("websocket", `group_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+  };
+
+  private _handleLoggersChanged = (_data: Record<string, any>): void => {
+    debug("websocket", `loggers_changed event received`);
+    // Full refetch of both loggers AND log_groups, diff-based firing
+    void Promise.all([this.management.list(), this.management.listGroups()])
+      .then(([serverLoggers, serverGroups]) => {
+        debug("resolution", `resolution pass (trigger: loggers_changed event)`);
+        // Diff loggers
+        const changedLoggerIds = new Set<string>();
+        const newLoggerKeys = new Set(serverLoggers.map((l) => l.id!));
+        // Check new/changed loggers
+        for (const logger of serverLoggers) {
+          const key = logger.id!;
+          const oldLevel = this._loggerStore[key] ?? null;
+          const newLevel = logger.level ?? null;
+          if (oldLevel !== newLevel || !(key in this._loggerStore)) {
+            changedLoggerIds.add(key);
+            this._loggerStore[key] = newLevel;
+          }
+        }
+        // Check deleted loggers
+        for (const key of Object.keys(this._loggerStore)) {
+          if (!newLoggerKeys.has(key)) {
+            changedLoggerIds.add(key);
+            delete this._loggerStore[key];
+          }
+        }
+        // Update group store
+        for (const group of serverGroups) {
+          this._groupStore[group.id!] = group.level ?? null;
+        }
+        // Apply levels
+        this._applyLevels(serverLoggers);
+        if (changedLoggerIds.size === 0) return;
+        // Fire global listener ONCE
+        const [firstKey] = changedLoggerIds;
+        const firstLogger = serverLoggers.find((l) => l.id === firstKey);
+        const globalEvent: LoggerChangeEvent = {
+          id: firstKey,
+          level: (firstLogger?.level ?? null) as LogLevel | null,
+          source: "websocket",
+        };
+        for (const cb of this._globalListeners) {
+          try {
+            cb(globalEvent);
+          } catch {
+            // ignore listener errors
+          }
+        }
+        // Fire per-key listeners for each changed key
+        for (const key of changedLoggerIds) {
+          const keyCallbacks = this._keyListeners.get(key);
+          if (keyCallbacks) {
+            const l = serverLoggers.find((x) => x.id === key);
+            const keyEvent: LoggerChangeEvent = {
+              id: key,
+              level: (l?.level ?? null) as LogLevel | null,
+              source: "websocket",
+            };
+            for (const cb of keyCallbacks) {
               try {
-                cb(event);
+                cb(keyEvent);
               } catch {
                 // ignore listener errors
               }
             }
           }
-        })
-        .catch(() => {
-          // ignore refresh errors from WebSocket events
-        });
-    }
-  };
-
-  private _handleGroupChanged = (data: Record<string, any>): void => {
-    debug("websocket", `group event received: ${JSON.stringify(data)}`);
-    // Group change triggers full re-fetch → resolve → apply pipeline (ADR-023 §4.5)
-    void Promise.all([this.management.list(), this.management.listGroups()])
-      .then(([serverLoggers]) => {
-        debug("resolution", `resolution pass (trigger: group websocket event)`);
-        this._applyLevels(serverLoggers);
+        }
       })
       .catch(() => {
-        // ignore refresh errors from WebSocket events
+        // ignore refresh errors
       });
   };
+
+  // ------------------------------------------------------------------
+  // Internal: single-resource fetchers
+  // ------------------------------------------------------------------
+
+  /** Fetch a single logger by key. Returns null if not found. @internal */
+  private async _fetchSingleLogger(key: string): Promise<Logger | null> {
+    debug("api", `GET /api/v1/loggers/${key}`);
+    try {
+      const result = await this._http.GET("/api/v1/loggers/{id}", {
+        params: { path: { id: key } },
+      });
+      if (result.error !== undefined) return null;
+      if (!result.data?.data) return null;
+      return this._loggerToModel(result.data.data);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fetch a single log group by key. Returns null if not found. @internal */
+  private async _fetchSingleGroup(key: string): Promise<LogGroup | null> {
+    debug("api", `GET /api/v1/log_groups/${key}`);
+    try {
+      const result = await this._http.GET("/api/v1/log_groups/{id}", {
+        params: { path: { id: key } },
+      });
+      if (result.error !== undefined) return null;
+      if (!result.data?.data) return null;
+      return this._groupToModel(result.data.data);
+    } catch {
+      return null;
+    }
+  }
 
   // ------------------------------------------------------------------
   // Internal: model conversion

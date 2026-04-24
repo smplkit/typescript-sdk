@@ -21,4 +21,6 @@ export interface LoggerChangeEvent {
   level: LogLevel | null;
   /** How the change was delivered. */
   source: string;
+  /** True when the logger or group was deleted. */
+  deleted?: true;
 }

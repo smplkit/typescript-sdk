@@ -154,10 +154,13 @@ function evaluateFlag(
 export class FlagChangeEvent {
   readonly id: string;
   readonly source: string;
+  /** True when the flag was deleted. */
+  readonly deleted?: true;
 
-  constructor(id: string, source: string) {
+  constructor(id: string, source: string, deleted?: true) {
     this.id = id;
     this.source = source;
+    if (deleted) this.deleted = deleted;
   }
 }
 
@@ -826,6 +829,7 @@ export class FlagsClient {
     this._wsManager = this._ensureWs();
     this._wsManager.on("flag_changed", this._handleFlagChanged);
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+    this._wsManager.on("flags_changed", this._handleFlagsChanged);
 
     // Start periodic flush timer
     this._flagFlushTimer = setInterval(() => {
@@ -838,6 +842,7 @@ export class FlagsClient {
     if (this._wsManager !== null) {
       this._wsManager.off("flag_changed", this._handleFlagChanged);
       this._wsManager.off("flag_deleted", this._handleFlagDeleted);
+      this._wsManager.off("flags_changed", this._handleFlagsChanged);
       this._wsManager = null;
     }
 
@@ -1042,6 +1047,7 @@ export class FlagsClient {
     this._wsManager = this._ensureWs();
     this._wsManager.on("flag_changed", this._handleFlagChanged);
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+    this._wsManager.on("flags_changed", this._handleFlagsChanged);
 
     // Start periodic flush timer
     this._flagFlushTimer = setInterval(() => {
@@ -1054,21 +1060,95 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   private _handleFlagChanged = (data: Record<string, any>): void => {
-    debug("websocket", `flag event received: ${JSON.stringify(data)}`);
-    const flagId = data.id as string | undefined;
-    // Re-fetch all flags (async, fire-and-forget)
-    void this._fetchAllFlags().then(() => {
+    debug("websocket", `flag_changed event received: ${JSON.stringify(data)}`);
+    const flagKey = data.id as string | undefined;
+    if (!flagKey) return;
+    // Scoped fetch: GET /flags/{key}
+    void this._fetchSingleFlag(flagKey).then((newDef) => {
+      const oldDef = this._flagStore[flagKey];
+      const oldJson = oldDef !== undefined ? JSON.stringify(oldDef) : null;
+      const newJson = newDef !== undefined ? JSON.stringify(newDef) : null;
+      if (oldJson === newJson) return; // no change — skip listeners
+      if (newDef !== undefined) {
+        this._flagStore[flagKey] = newDef;
+      } else {
+        delete this._flagStore[flagKey];
+      }
       this._cache.clear();
-      this._fireChangeListeners(flagId ?? null, "websocket");
+      this._fireChangeListeners(flagKey, "websocket");
     });
   };
 
   private _handleFlagDeleted = (data: Record<string, any>): void => {
-    debug("websocket", `flag deleted event received: ${JSON.stringify(data)}`);
-    const flagId = data.id as string | undefined;
+    debug("websocket", `flag_deleted event received: ${JSON.stringify(data)}`);
+    const flagKey = data.id as string | undefined;
+    if (!flagKey) return;
+    // Remove from store — no HTTP fetch
+    if (flagKey in this._flagStore) {
+      delete this._flagStore[flagKey];
+    }
+    this._cache.clear();
+    const deletedEvent = new FlagChangeEvent(flagKey, "websocket", true);
+    for (const cb of this._globalListeners) {
+      try {
+        cb(deletedEvent);
+      } catch {
+        // ignore listener errors
+      }
+    }
+    const keyCallbacks = this._keyListeners.get(flagKey);
+    if (keyCallbacks) {
+      for (const cb of keyCallbacks) {
+        try {
+          cb(deletedEvent);
+        } catch {
+          // ignore listener errors
+        }
+      }
+    }
+  };
+
+  private _handleFlagsChanged = (_data: Record<string, any>): void => {
+    debug("websocket", `flags_changed event received`);
+    // Full list fetch, diff pre vs post store, fire global listener ONCE + per-key for changed keys
+    const preStore = { ...this._flagStore };
     void this._fetchAllFlags().then(() => {
       this._cache.clear();
-      this._fireChangeListeners(flagId ?? null, "websocket");
+      const postStore = this._flagStore;
+      const changedKeys = new Set<string>();
+      const allKeys = new Set([...Object.keys(preStore), ...Object.keys(postStore)]);
+      for (const key of allKeys) {
+        const preJson = preStore[key] !== undefined ? JSON.stringify(preStore[key]) : null;
+        const postJson = postStore[key] !== undefined ? JSON.stringify(postStore[key]) : null;
+        if (preJson !== postJson) {
+          changedKeys.add(key);
+        }
+      }
+      if (changedKeys.size === 0) return; // nothing changed
+      // Fire global listener ONCE (with the first changed key as representative)
+      const [firstKey] = changedKeys;
+      const globalEvent = new FlagChangeEvent(firstKey, "websocket");
+      for (const cb of this._globalListeners) {
+        try {
+          cb(globalEvent);
+        } catch {
+          // ignore listener errors
+        }
+      }
+      // Fire per-key listeners for each changed key
+      for (const key of changedKeys) {
+        const keyCallbacks = this._keyListeners.get(key);
+        if (keyCallbacks) {
+          const keyEvent = new FlagChangeEvent(key, "websocket");
+          for (const cb of keyCallbacks) {
+            try {
+              cb(keyEvent);
+            } catch {
+              // ignore listener errors
+            }
+          }
+        }
+      }
     });
   };
 
@@ -1083,6 +1163,21 @@ export class FlagsClient {
       store[f.id] = f;
     }
     this._flagStore = store;
+  }
+
+  /** Fetch a single flag by key. Returns undefined if not found. @internal */
+  private async _fetchSingleFlag(key: string): Promise<Record<string, any> | undefined> {
+    debug("api", `GET /api/v1/flags/${key}`);
+    try {
+      const result = await this._http.GET("/api/v1/flags/{id}", {
+        params: { path: { id: key } },
+      });
+      if (!result.response.ok) return undefined;
+      if (!result.data?.data) return undefined;
+      return this._resourceToPlainDict(result.data.data);
+    } catch {
+      return undefined;
+    }
   }
 
   private async _fetchFlagsList(): Promise<Array<Record<string, any>>> {
