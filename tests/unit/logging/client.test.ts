@@ -713,13 +713,36 @@ describe("LoggingClient — runtime", () => {
     it("should register a global listener", async () => {
       const client = makeClient();
       prepareForStart(client);
+      // Return a logger list with a known level so the refetch provides the right data
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "test.logger",
+                type: "logger",
+                attributes: {
+                  name: "Test",
+                  level: "INFO",
+                  group: null,
+                  managed: false,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        ),
+      );
       const cb = vi.fn();
       client.onChange(cb);
 
       await client.start();
 
-      // Simulate a logger_changed event
-      lastMockWs._emit("logger_changed", { id: "test.logger", level: "INFO" });
+      // No level in payload — server never sends it
+      lastMockWs._emit("logger_changed", { id: "test.logger" });
+      await new Promise((r) => setTimeout(r, 10));
 
       expect(cb).toHaveBeenCalledWith({
         id: "test.logger",
@@ -731,13 +754,36 @@ describe("LoggingClient — runtime", () => {
     it("should register an id-scoped listener", async () => {
       const client = makeClient();
       prepareForStart(client);
+      // Return a logger list with a known level so the refetch provides the right data
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "test.logger",
+                type: "logger",
+                attributes: {
+                  name: "Test",
+                  level: "DEBUG",
+                  group: null,
+                  managed: false,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        ),
+      );
       const cb = vi.fn();
       client.onChange("test.logger", cb);
 
       await client.start();
 
-      lastMockWs._emit("logger_changed", { id: "test.logger", level: "DEBUG" });
-      lastMockWs._emit("logger_changed", { id: "other.logger", level: "WARN" });
+      lastMockWs._emit("logger_changed", { id: "test.logger" });
+      lastMockWs._emit("logger_changed", { id: "other.logger" });
+      await new Promise((r) => setTimeout(r, 10));
 
       expect(cb).toHaveBeenCalledTimes(1);
       expect(cb).toHaveBeenCalledWith({
@@ -795,8 +841,8 @@ describe("LoggingClient — runtime", () => {
 
       // Make subsequent fetches fail
       mockFetch.mockRejectedValue(new Error("network error"));
-      // Should not throw — errors are swallowed
-      lastMockWs._emit("logger_changed", { id: "test.logger", level: "DEBUG" });
+      // Should not throw — errors are swallowed; no level in payload
+      lastMockWs._emit("logger_changed", { id: "test.logger" });
       await new Promise((r) => setTimeout(r, 10));
     });
   });
@@ -1015,7 +1061,9 @@ describe("LoggingClient — listener error swallowing", () => {
 
     await client.start();
 
-    lastMockWs._emit("logger_changed", { id: "test", level: "INFO" });
+    // No level in payload — listeners fire after refetch
+    lastMockWs._emit("logger_changed", { id: "test" });
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(throwingCb).toHaveBeenCalledTimes(1);
     expect(goodCb).toHaveBeenCalledTimes(1);
@@ -1034,7 +1082,9 @@ describe("LoggingClient — listener error swallowing", () => {
 
     await client.start();
 
-    lastMockWs._emit("logger_changed", { id: "test", level: "DEBUG" });
+    // No level in payload — listeners fire after refetch
+    lastMockWs._emit("logger_changed", { id: "test" });
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(throwingCb).toHaveBeenCalledTimes(1);
     expect(goodCb).toHaveBeenCalledTimes(1);

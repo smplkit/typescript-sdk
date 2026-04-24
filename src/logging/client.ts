@@ -16,7 +16,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
-import type { LoggerChangeEvent } from "./types.js";
+import { LogLevel, type LoggerChangeEvent } from "./types.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
@@ -700,40 +700,48 @@ export class LoggingClient {
     debug("websocket", `logger event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (id) {
-      const level = data.level ?? null;
-      const event: LoggerChangeEvent = {
-        id,
-        level,
-        source: "websocket",
-      };
       // Trigger a full re-fetch → resolve → apply pipeline (ADR-023 §4.5)
       void Promise.all([this.management.list(), this.management.listGroups()])
         .then(([serverLoggers]) => {
           debug("resolution", `resolution pass (trigger: websocket event for logger ${id})`);
           this._applyLevels(serverLoggers);
+          const logger = serverLoggers.find((l) => l.id === id);
+          const env = this._parent?._environment;
+          let level = (logger?.level ?? null) as LogLevel | null;
+          if (env && logger?.environments) {
+            const envOverride = (logger.environments as Record<string, any>)[env];
+            if (envOverride?.level) {
+              level = envOverride.level as LogLevel;
+            }
+          }
+          const event: LoggerChangeEvent = {
+            id,
+            level,
+            source: "websocket",
+          };
+          // Global listeners first
+          for (const cb of this._globalListeners) {
+            try {
+              cb(event);
+            } catch {
+              // ignore listener errors
+            }
+          }
+          // Id-scoped listeners
+          const idCallbacks = this._keyListeners.get(id);
+          if (idCallbacks) {
+            for (const cb of idCallbacks) {
+              try {
+                cb(event);
+              } catch {
+                // ignore listener errors
+              }
+            }
+          }
         })
         .catch(() => {
           // ignore refresh errors from WebSocket events
         });
-      // Global listeners first
-      for (const cb of this._globalListeners) {
-        try {
-          cb(event);
-        } catch {
-          // ignore listener errors
-        }
-      }
-      // Id-scoped listeners
-      const idCallbacks = this._keyListeners.get(id);
-      if (idCallbacks) {
-        for (const cb of idCallbacks) {
-          try {
-            cb(event);
-          } catch {
-            // ignore listener errors
-          }
-        }
-      }
     }
   };
 
