@@ -1170,9 +1170,9 @@ describe("Config WebSocket event behaviors", () => {
     await client.get("app");
 
     // Make _diffAndFire throw by spying
-    vi.spyOn(client as never, "_diffAndFire" as never).mockImplementationOnce(
-      (() => { throw new Error("diffAndFire error"); }) as never,
-    );
+    vi.spyOn(client as never, "_diffAndFire" as never).mockImplementationOnce((() => {
+      throw new Error("diffAndFire error");
+    }) as never);
 
     // Scoped fetch returns changed content
     mockFetch.mockResolvedValueOnce(

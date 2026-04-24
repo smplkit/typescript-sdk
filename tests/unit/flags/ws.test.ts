@@ -593,9 +593,7 @@ describe("FlagsClient change listeners", () => {
       const client = makeFlagsClient();
       const receivedEvents: Array<{ id: string; deleted?: boolean }> = [];
       client.onChange((e) => receivedEvents.push({ id: e.id, deleted: e.deleted }));
-      client.onChange("del-flag", (e) =>
-        receivedEvents.push({ id: e.id, deleted: e.deleted }),
-      );
+      client.onChange("del-flag", (e) => receivedEvents.push({ id: e.id, deleted: e.deleted }));
 
       mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "del-flag" }]));
       await client._connectInternal("staging");
@@ -720,15 +718,11 @@ describe("FlagsClient change listeners", () => {
       client.onChange(throwingCb);
       client.onChange(goodCb);
 
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: false }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: false }]));
       await client._connectInternal("staging");
 
       // Content changed to trigger listeners
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: true }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: true }]));
       lastMockWs._emit("flags_changed", {});
 
       await vi.waitFor(() => {
@@ -746,14 +740,10 @@ describe("FlagsClient change listeners", () => {
       client.onChange("flag-a", throwingCb);
       client.onChange("flag-a", goodCb);
 
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: false }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: false }]));
       await client._connectInternal("staging");
 
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: true }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: true }]));
       lastMockWs._emit("flags_changed", {});
 
       await vi.waitFor(() => {
@@ -767,15 +757,11 @@ describe("FlagsClient change listeners", () => {
       const events: string[] = [];
       client.onChange((e) => events.push(e.id));
 
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: false }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: false }]));
       await client._connectInternal("staging");
 
       // Same content
-      mockFetch.mockResolvedValueOnce(
-        makeFlagListResponse([{ id: "flag-a", default: false }]),
-      );
+      mockFetch.mockResolvedValueOnce(makeFlagListResponse([{ id: "flag-a", default: false }]));
       lastMockWs._emit("flags_changed", {});
 
       await vi.advanceTimersByTimeAsync(100);

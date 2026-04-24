@@ -1368,9 +1368,9 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Spy on _applyLevels to throw
-    vi.spyOn(client as never, "_applyLevels" as never).mockImplementationOnce(
-      (() => { throw new Error("applyLevels error"); }) as never,
-    );
+    vi.spyOn(client as never, "_applyLevels" as never).mockImplementationOnce((() => {
+      throw new Error("applyLevels error");
+    }) as never);
 
     // Scoped fetch returns a logger with changed level
     mockFetch.mockResolvedValueOnce(
@@ -1378,7 +1378,15 @@ describe("LoggingClient — WebSocket event behaviors", () => {
         data: {
           id: "sql",
           type: "logger",
-          attributes: { name: "sql", level: "ERROR", group: null, managed: false, environments: {}, created_at: null, updated_at: null },
+          attributes: {
+            name: "sql",
+            level: "ERROR",
+            group: null,
+            managed: false,
+            environments: {},
+            created_at: null,
+            updated_at: null,
+          },
         },
       }),
     );
@@ -1394,17 +1402,30 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Spy on _groupStore setter to throw after change is detected
-    const origGroupStore = (client as unknown as { _groupStore: Record<string, string | null> })._groupStore;
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore = new Proxy(origGroupStore, {
-      set: (_t, _k, _v) => { throw new Error("groupStore set error"); },
-    });
+    const origGroupStore = (client as unknown as { _groupStore: Record<string, string | null> })
+      ._groupStore;
+    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore = new Proxy(
+      origGroupStore,
+      {
+        set: (_t, _k, _v) => {
+          throw new Error("groupStore set error");
+        },
+      },
+    );
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
           id: "db-group",
           type: "log_group",
-          attributes: { name: "DB", level: "ERROR", parent_id: null, environments: {}, created_at: null, updated_at: null },
+          attributes: {
+            name: "DB",
+            level: "ERROR",
+            parent_id: null,
+            environments: {},
+            created_at: null,
+            updated_at: null,
+          },
         },
       }),
     );
@@ -1421,9 +1442,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Manually populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore[
-      "db-group"
-    ] = "WARN";
+    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
+      "WARN";
 
     const fetchCountBefore = mockFetch.mock.calls.length;
     // Scoped group fetch returns same level
@@ -1449,9 +1469,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore[
-      "db-group"
-    ] = "WARN";
+    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
+      "WARN";
 
     const fetchCountBefore = mockFetch.mock.calls.length;
     lastMockWs._emit("group_deleted", { id: "db-group" });
@@ -1476,9 +1495,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore[
-      "db-group"
-    ] = "WARN";
+    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
+      "WARN";
 
     lastMockWs._emit("group_deleted", { id: "db-group" });
     await new Promise((r) => setTimeout(r, 10));
@@ -1498,9 +1516,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     client.onChange("db-group", goodCb);
     await client.start();
 
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore[
-      "db-group"
-    ] = "WARN";
+    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
+      "WARN";
 
     lastMockWs._emit("group_deleted", { id: "db-group" });
     await new Promise((r) => setTimeout(r, 10));
@@ -1672,9 +1689,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
 
     // sql was deleted → changedLoggerIds includes sql → global fires
     expect(cb).toHaveBeenCalledTimes(1);
-    expect(cb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", source: "websocket" }),
-    );
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", source: "websocket" }));
   });
 
   it("loggers_changed: does not crash if fetch throws", async () => {

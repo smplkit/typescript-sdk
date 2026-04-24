@@ -583,30 +583,35 @@ export class ConfigClient {
     const configKey = data.id as string | undefined;
     if (!configKey) return;
     // Scoped fetch: GET /configs/{key}
-    void this._fetchSingleConfig(configKey).then((newConfig) => {
-      const environment = this._parent?._environment;
-      if (!environment) return;
-      const oldValues = this._configCache[configKey];
-      let newValues: Record<string, unknown>;
-      if (newConfig !== null) {
-        // Build a temporary chain with just this config (for simplicity, no parent resolution)
-        newValues = this._resolveConfigValues(newConfig, environment);
-      } else {
-        newValues = {};
-      }
-      const oldJson = JSON.stringify(oldValues ?? {});
-      const newJson = JSON.stringify(newValues);
-      if (oldJson === newJson) return; // no change
-      const oldCache = { ...this._configCache };
-      if (newConfig !== null) {
-        this._configCache[configKey] = newValues;
-      } else {
-        delete this._configCache[configKey];
-      }
-      this._diffAndFire(oldCache, this._configCache, "websocket");
-    }).catch((err: unknown) => {
-      debug("websocket", `config_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    void this._fetchSingleConfig(configKey)
+      .then((newConfig) => {
+        const environment = this._parent?._environment;
+        if (!environment) return;
+        const oldValues = this._configCache[configKey];
+        let newValues: Record<string, unknown>;
+        if (newConfig !== null) {
+          // Build a temporary chain with just this config (for simplicity, no parent resolution)
+          newValues = this._resolveConfigValues(newConfig, environment);
+        } else {
+          newValues = {};
+        }
+        const oldJson = JSON.stringify(oldValues ?? {});
+        const newJson = JSON.stringify(newValues);
+        if (oldJson === newJson) return; // no change
+        const oldCache = { ...this._configCache };
+        if (newConfig !== null) {
+          this._configCache[configKey] = newValues;
+        } else {
+          delete this._configCache[configKey];
+        }
+        this._diffAndFire(oldCache, this._configCache, "websocket");
+      })
+      .catch((err: unknown) => {
+        debug(
+          "websocket",
+          `config_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   };
 
   private _handleConfigDeleted = (data: Record<string, any>): void => {
@@ -649,10 +654,7 @@ export class ConfigClient {
   }
 
   /** Resolve a config's values for an environment (no parent chain). @internal */
-  private _resolveConfigValues(
-    config: Config,
-    environment: string,
-  ): Record<string, unknown> {
+  private _resolveConfigValues(config: Config, environment: string): Record<string, unknown> {
     // Merge base items with environment overrides
     const base = config.items ?? {};
     const envEntry = (config.environments as Record<string, any>)?.[environment];

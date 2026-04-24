@@ -755,7 +755,10 @@ export class LoggingClient {
         }
       })
       .catch((err: unknown) => {
-        debug("websocket", `logger_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
+        debug(
+          "websocket",
+          `logger_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       });
   };
 
@@ -775,7 +778,10 @@ export class LoggingClient {
       try {
         cb(event);
       } catch (err) {
-        debug("websocket", `logger_deleted listener error: ${err instanceof Error ? err.message : String(err)}`);
+        debug(
+          "websocket",
+          `logger_deleted listener error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     const idCallbacks = this._keyListeners.get(id);
@@ -784,7 +790,10 @@ export class LoggingClient {
         try {
           cb(event);
         } catch (err) {
-          debug("websocket", `logger_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`);
+          debug(
+            "websocket",
+            `logger_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     }
@@ -802,12 +811,18 @@ export class LoggingClient {
         if (oldLevel === newLevel) return; // no change
         this._groupStore[id] = newLevel;
         // Group level change means re-apply to all loggers in this group
-        void this.management.list().then((loggers) => {
-          this._applyLevels(loggers);
-        }).catch(() => {});
+        void this.management
+          .list()
+          .then((loggers) => {
+            this._applyLevels(loggers);
+          })
+          .catch(() => {});
       })
       .catch((err: unknown) => {
-        debug("websocket", `group_changed handler error: ${err instanceof Error ? err.message : String(err)}`);
+        debug(
+          "websocket",
+          `group_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       });
   };
 
@@ -827,7 +842,10 @@ export class LoggingClient {
       try {
         cb(event);
       } catch (err) {
-        debug("websocket", `group_deleted listener error: ${err instanceof Error ? err.message : String(err)}`);
+        debug(
+          "websocket",
+          `group_deleted listener error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     const idCallbacks = this._keyListeners.get(id);
@@ -836,7 +854,10 @@ export class LoggingClient {
         try {
           cb(event);
         } catch (err) {
-          debug("websocket", `group_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`);
+          debug(
+            "websocket",
+            `group_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     }
