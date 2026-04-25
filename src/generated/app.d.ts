@@ -804,7 +804,7 @@ export interface paths {
         };
         /**
          * List Products
-         * @description Return all products with their plans and limits as JSON:API resources.
+         * @description Return all flag-enabled products with their plans and limits.
          */
         get: operations["list_products"];
         put?: never;
