@@ -410,7 +410,7 @@
             "content": {
               "application/vnd.api+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemoveReferencesResponse"
+                  "$ref": "#/components/schemas/RemoveReferencesResultEnvelope"
                 }
               }
             }
@@ -1143,7 +1143,7 @@
         "type": "object",
         "title": "RemoveReferencesRequest"
       },
-      "RemoveReferencesResponse": {
+      "RemoveReferencesResultEnvelope": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/RemoveReferencesResultResource"
@@ -1153,7 +1153,7 @@
         "required": [
           "data"
         ],
-        "title": "RemoveReferencesResponse"
+        "title": "RemoveReferencesResultEnvelope"
       },
       "RemoveReferencesResultResource": {
         "properties": {
