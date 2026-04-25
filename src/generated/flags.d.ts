@@ -506,8 +506,8 @@ export interface components {
             /** Context Type */
             context_type?: string | null;
         };
-        /** RemoveReferencesResponse */
-        RemoveReferencesResponse: {
+        /** RemoveReferencesResultEnvelope */
+        RemoveReferencesResultEnvelope: {
             data: components["schemas"]["RemoveReferencesResultResource"];
         };
         /**
@@ -807,7 +807,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": components["schemas"]["RemoveReferencesResponse"];
+                    "application/vnd.api+json": components["schemas"]["RemoveReferencesResultEnvelope"];
                 };
             };
         };
