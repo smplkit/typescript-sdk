@@ -116,6 +116,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/functions/remove_references/actions/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Remove References
+         * @description Bulk-remove context references from flag rules.
+         *
+         *     Traverses every flag in the account, removes rules that reference the
+         *     specified context, and emits a single flags_changed event when done.
+         */
+        post: operations["remove_references"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -456,6 +479,67 @@ export interface components {
             /** Value */
             value: unknown;
         };
+        /** ManualReviewItem */
+        ManualReviewItem: {
+            /** Flag */
+            flag: string;
+            /** Environment */
+            environment: string;
+            /** Rule Index */
+            rule_index: number;
+            /** Reason */
+            reason: string;
+        };
+        /** RemoveReferencesAttributes */
+        RemoveReferencesAttributes: {
+            /** Flags Modified */
+            flags_modified: string[];
+            /** Rules Removed */
+            rules_removed: number;
+            /** Rules Needing Manual Review */
+            rules_needing_manual_review: components["schemas"]["ManualReviewItem"][];
+        };
+        /** RemoveReferencesRequest */
+        RemoveReferencesRequest: {
+            /** Context */
+            context?: string | null;
+            /** Context Type */
+            context_type?: string | null;
+        };
+        /** RemoveReferencesResponse */
+        RemoveReferencesResponse: {
+            data: components["schemas"]["RemoveReferencesResultResource"];
+        };
+        /**
+         * RemoveReferencesResultResource
+         * @example {
+         *       "attributes": {
+         *         "flags_modified": [
+         *           "checkout-v2",
+         *           "banner-color"
+         *         ],
+         *         "rules_needing_manual_review": [
+         *           {
+         *             "environment": "production",
+         *             "flag": "pricing-tier",
+         *             "reason": "Context reference inside an AND expression — removing would broaden the rule",
+         *             "rule_index": 2
+         *           }
+         *         ],
+         *         "rules_removed": 3
+         *       },
+         *       "type": "remove_references_result"
+         *     }
+         */
+        RemoveReferencesResultResource: {
+            /**
+             * Type
+             * @default remove_references_result
+             * @constant
+             */
+            type: "remove_references_result";
+            attributes: components["schemas"]["RemoveReferencesAttributes"];
+        };
         /** UsageAttributes */
         UsageAttributes: {
             /** Limit Key */
@@ -700,6 +784,30 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["FlagSourceListResponse"];
+                };
+            };
+        };
+    };
+    remove_references: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["RemoveReferencesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RemoveReferencesResponse"];
                 };
             };
         };
