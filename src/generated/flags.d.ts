@@ -219,7 +219,7 @@ export interface components {
              * Type
              * @description Value type: STRING, BOOLEAN, NUMERIC, or JSON
              */
-            type?: string | null;
+            type: string;
             /**
              * Default
              * @description Default value; must reference a value in the values array (constrained) or match the flag type (unconstrained)
@@ -605,6 +605,10 @@ export interface operations {
             query?: {
                 "filter[type]"?: string | null;
                 "filter[managed]"?: boolean | null;
+                /** @description Return flags whose rules reference this context instance. Format: {type}:{key} */
+                "filter[references_context]"?: string | null;
+                /** @description Return flags whose rules reference any attribute of the given context type. */
+                "filter[references_context_type]"?: string | null;
             };
             header?: never;
             path?: never;
