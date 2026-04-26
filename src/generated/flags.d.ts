@@ -219,7 +219,7 @@ export interface components {
              * Type
              * @description Value type: STRING, BOOLEAN, NUMERIC, or JSON
              */
-            type: string;
+            type?: string | null;
             /**
              * Default
              * @description Default value; must reference a value in the values array (constrained) or match the flag type (unconstrained)
