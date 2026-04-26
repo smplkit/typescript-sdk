@@ -310,6 +310,7 @@ export class LoggingClient {
   _mgNewGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
     return new LogGroup(this, {
       id,
+      key: null,
       name: options?.name ?? keyToDisplayName(id),
       level: null,
       group: options?.group ?? null,
@@ -993,6 +994,7 @@ export class LoggingClient {
     const attrs = resource.attributes;
     return new LogGroup(this, {
       id: resource.id ?? null,
+      key: attrs.key ?? null,
       name: attrs.name,
       level: attrs.level ?? null,
       group: attrs.parent_id ?? null,

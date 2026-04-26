@@ -131,6 +131,8 @@ export class Logger {
 export class LogGroup {
   /** Unique identifier (slug), or `null` if unsaved. */
   id: string | null;
+  /** Human-readable key (slug), or `null` if not set. */
+  key: string | null;
   /** Human-readable display name. */
   name: string;
   /** Base log level, or null if inherited. */
@@ -152,6 +154,7 @@ export class LogGroup {
     client: LoggingClient,
     fields: {
       id: string | null;
+      key: string | null;
       name: string;
       level: string | null;
       group: string | null;
@@ -162,6 +165,7 @@ export class LogGroup {
   ) {
     this._client = client;
     this.id = fields.id;
+    this.key = fields.key;
     this.name = fields.name;
     this.level = fields.level;
     this.group = fields.group;
@@ -216,6 +220,7 @@ export class LogGroup {
   /** @internal — copy all fields from another LogGroup instance. */
   _apply(other: LogGroup): void {
     this.id = other.id;
+    this.key = other.key;
     this.name = other.name;
     this.level = other.level;
     this.group = other.group;

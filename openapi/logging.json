@@ -1208,6 +1208,18 @@
             "maxLength": 255,
             "title": "Name"
           },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
           "level": {
             "anyOf": [
               {

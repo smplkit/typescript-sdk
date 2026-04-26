@@ -251,6 +251,8 @@ export interface components {
         LogGroup: {
             /** Name */
             name: string;
+            /** Key */
+            key?: string | null;
             /** Level */
             level?: string | null;
             /** Parent Id */

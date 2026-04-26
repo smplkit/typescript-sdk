@@ -383,6 +383,12 @@ describe("LoggingClient — log group management", () => {
       const group = client.management.newGroup("top-level");
       expect(group.group).toBeNull();
     });
+
+    it("should have key: null for new groups", () => {
+      const client = makeClient();
+      const group = client.management.newGroup("database-loggers");
+      expect(group.key).toBeNull();
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -462,6 +468,21 @@ describe("LoggingClient — log group management", () => {
       // Should call GET /api/v1/log_groups/{id} directly
       const req: Request = mockFetch.mock.calls[0][0];
       expect(req.url).toContain("/api/v1/log_groups/database-loggers");
+    });
+
+    it("should map key from attributes", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            ...SAMPLE_GROUP,
+            attributes: { ...SAMPLE_GROUP.attributes, key: "database-loggers" },
+          },
+        }),
+      );
+
+      const group = await client.management.getGroup("database-loggers");
+      expect(group.key).toBe("database-loggers");
     });
 
     it("should throw SmplNotFoundError on 404", async () => {
