@@ -18,7 +18,7 @@ export class Flag {
   /** Human-readable display name. */
   name: string;
   /** Value type: BOOLEAN, STRING, NUMERIC, or JSON. */
-  type: string | null;
+  type: string;
   /** Flag-level default value. */
   default: unknown;
   /** Closed set of possible values (constrained), or null (unconstrained). */
@@ -41,7 +41,7 @@ export class Flag {
     fields: {
       id: string | null;
       name: string;
-      type: string | null;
+      type: string;
       default: unknown;
       values: Array<{ name: string; value: unknown }> | null;
       description: string | null;
