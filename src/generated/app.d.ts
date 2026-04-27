@@ -176,6 +176,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/current/actions/wipe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wipe Account Data
+         * @description Delete every config, flag, logger, log group, context, context type (except the auto-managed ``service``), and customer API key (except the caller's current key) on the account. Environments are preserved. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400.
+         */
+        post: operations["wipe_account_data"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/current/settings": {
         parameters: {
             query?: never;
@@ -1192,6 +1212,73 @@ export interface components {
         /** AccountResponse */
         AccountResponse: {
             data: components["schemas"]["AccountResource"];
+        };
+        /**
+         * AccountWipeRequest
+         * @description Confirmation envelope for ``POST /accounts/current/actions/wipe``.
+         * @example {
+         *       "confirm": true
+         *     }
+         */
+        AccountWipeRequest: {
+            /**
+             * Confirm
+             * @description Must be ``true`` to proceed. Anything else returns 400. The frontend gates the call behind a confirmation dialog; this field is the server-side seatbelt.
+             */
+            confirm: boolean;
+        };
+        /**
+         * AccountWipeResponse
+         * @description Summary of resources removed by a wipe.
+         * @example {
+         *       "api_keys_deleted": 1,
+         *       "configs_deleted": 9,
+         *       "context_types_deleted": 3,
+         *       "contexts_deleted": 30,
+         *       "failures": [],
+         *       "flags_deleted": 14,
+         *       "log_groups_deleted": 3,
+         *       "loggers_deleted": 10
+         *     }
+         */
+        AccountWipeResponse: {
+            /**
+             * Configs Deleted
+             * @default 0
+             */
+            configs_deleted: number;
+            /**
+             * Flags Deleted
+             * @default 0
+             */
+            flags_deleted: number;
+            /**
+             * Loggers Deleted
+             * @default 0
+             */
+            loggers_deleted: number;
+            /**
+             * Log Groups Deleted
+             * @default 0
+             */
+            log_groups_deleted: number;
+            /**
+             * Contexts Deleted
+             * @default 0
+             */
+            contexts_deleted: number;
+            /**
+             * Context Types Deleted
+             * @default 0
+             */
+            context_types_deleted: number;
+            /**
+             * Api Keys Deleted
+             * @default 0
+             */
+            api_keys_deleted: number;
+            /** Failures */
+            failures?: string[];
         };
         /**
          * AddPaymentMethodAttributes
@@ -3276,6 +3363,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    wipe_account_data: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["AccountWipeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["AccountWipeResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
