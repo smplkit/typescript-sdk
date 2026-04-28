@@ -1645,8 +1645,6 @@ export interface components {
          *     }
          */
         ContextType: {
-            /** Id */
-            id?: string | null;
             /**
              * Name
              * @description Display label: User, Account, Device
