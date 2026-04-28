@@ -187,7 +187,7 @@ export interface paths {
         put?: never;
         /**
          * Wipe Account Data
-         * @description Delete every config, flag, logger, log group, context, context type (except the auto-managed ``service``), and customer API key (except the caller's current key) on the account. Environments are preserved. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400.
+         * @description Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400. Returns 204 on success; if any sub-delete fails the response is 500.
          */
         post: operations["wipe_account_data"];
         delete?: never;
@@ -1226,59 +1226,6 @@ export interface components {
              * @description Must be ``true`` to proceed. Anything else returns 400. The frontend gates the call behind a confirmation dialog; this field is the server-side seatbelt.
              */
             confirm: boolean;
-        };
-        /**
-         * AccountWipeResponse
-         * @description Summary of resources removed by a wipe.
-         * @example {
-         *       "api_keys_deleted": 1,
-         *       "configs_deleted": 9,
-         *       "context_types_deleted": 3,
-         *       "contexts_deleted": 30,
-         *       "failures": [],
-         *       "flags_deleted": 14,
-         *       "log_groups_deleted": 3,
-         *       "loggers_deleted": 10
-         *     }
-         */
-        AccountWipeResponse: {
-            /**
-             * Configs Deleted
-             * @default 0
-             */
-            configs_deleted: number;
-            /**
-             * Flags Deleted
-             * @default 0
-             */
-            flags_deleted: number;
-            /**
-             * Loggers Deleted
-             * @default 0
-             */
-            loggers_deleted: number;
-            /**
-             * Log Groups Deleted
-             * @default 0
-             */
-            log_groups_deleted: number;
-            /**
-             * Contexts Deleted
-             * @default 0
-             */
-            contexts_deleted: number;
-            /**
-             * Context Types Deleted
-             * @default 0
-             */
-            context_types_deleted: number;
-            /**
-             * Api Keys Deleted
-             * @default 0
-             */
-            api_keys_deleted: number;
-            /** Failures */
-            failures?: string[];
         };
         /**
          * AddPaymentMethodAttributes
@@ -3414,13 +3361,11 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["AccountWipeResponse"];
-                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
