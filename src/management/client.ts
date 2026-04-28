@@ -57,10 +57,7 @@ function wrapFetchError(err: unknown): never {
   );
 }
 
-function envFromResource(
-  resource: any,
-  client: EnvironmentsClient,
-): Environment {
+function envFromResource(resource: any, client: EnvironmentsClient): Environment {
   const attrs = resource.attributes ?? {};
   return new Environment(client, {
     id: resource.id ?? null,
@@ -295,8 +292,7 @@ export class ContextTypesClient {
       const result = await this._http.GET("/api/v1/context_types/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok)
-        await checkError(result.response, `ContextType '${id}' not found`);
+      if (!result.response.ok) await checkError(result.response, `ContextType '${id}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -451,7 +447,8 @@ export class ContextsClient {
       const result = await this._http.GET("/api/v1/contexts/{id}", {
         params: { path: { id: composite } },
       });
-      if (!result.response.ok) await checkError(result.response, `Context '${composite}' not found`);
+      if (!result.response.ok)
+        await checkError(result.response, `Context '${composite}' not found`);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -566,11 +563,7 @@ export class ManagementClient {
   readonly account_settings: AccountSettingsClient;
 
   /** @internal */
-  constructor(options: {
-    appBaseUrl: string;
-    apiKey: string;
-    buffer: ContextRegistrationBuffer;
-  }) {
+  constructor(options: { appBaseUrl: string; apiKey: string; buffer: ContextRegistrationBuffer }) {
     const http = createClient<import("../generated/app.d.ts").paths>({
       baseUrl: options.appBaseUrl,
       headers: {

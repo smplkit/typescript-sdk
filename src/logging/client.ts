@@ -379,7 +379,8 @@ export class LoggingClient {
       const result = await this._http.POST("/api/v1/loggers/bulk", {
         body: { loggers },
       });
-      if (result.error !== undefined) await checkError(result.response, "Failed to register sources");
+      if (result.error !== undefined)
+        await checkError(result.response, "Failed to register sources");
     } catch (err) {
       wrapFetchError(err);
     }

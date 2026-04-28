@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ManagementClient } from "../../../src/management/client.js";
 import { ContextRegistrationBuffer } from "../../../src/flags/client.js";
-import { Environment, ContextType, ContextEntity, AccountSettings } from "../../../src/management/models.js";
+import {
+  Environment,
+  ContextType,
+  ContextEntity,
+  AccountSettings,
+} from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
 import { Context } from "../../../src/flags/types.js";
 import {

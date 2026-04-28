@@ -5,11 +5,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { EnvironmentClassification } from "./types.js";
-import type {
-  EnvironmentsClient,
-  ContextTypesClient,
-  AccountSettingsClient,
-} from "./client.js";
+import type { EnvironmentsClient, ContextTypesClient, AccountSettingsClient } from "./client.js";
 
 // ---------------------------------------------------------------------------
 // Environment

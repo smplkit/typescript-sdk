@@ -1,7 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
-import { Environment, ContextType, ContextEntity, AccountSettings } from "../../../src/management/models.js";
+import {
+  Environment,
+  ContextType,
+  ContextEntity,
+  AccountSettings,
+} from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
-import type { EnvironmentsClient, ContextTypesClient, AccountSettingsClient } from "../../../src/management/client.js";
+import type {
+  EnvironmentsClient,
+  ContextTypesClient,
+  AccountSettingsClient,
+} from "../../../src/management/client.js";
 
 // ---------------------------------------------------------------------------
 // Mock clients
@@ -32,7 +41,9 @@ function mockSettingsClient(): AccountSettingsClient {
 // ---------------------------------------------------------------------------
 
 describe("Environment", () => {
-  function makeEnv(overrides: Partial<ConstructorParameters<typeof Environment>[1]> = {}): Environment {
+  function makeEnv(
+    overrides: Partial<ConstructorParameters<typeof Environment>[1]> = {},
+  ): Environment {
     return new Environment(mockEnvsClient(), {
       id: "production",
       name: "Production",
@@ -171,7 +182,9 @@ describe("Environment", () => {
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
       const env = makeEnv();
-      expect(env.toString()).toBe("Environment(id=production, name=Production, classification=STANDARD)");
+      expect(env.toString()).toBe(
+        "Environment(id=production, name=Production, classification=STANDARD)",
+      );
     });
   });
 });
@@ -181,7 +194,9 @@ describe("Environment", () => {
 // ---------------------------------------------------------------------------
 
 describe("ContextType", () => {
-  function makeCt(overrides: Partial<ConstructorParameters<typeof ContextType>[1]> = {}): ContextType {
+  function makeCt(
+    overrides: Partial<ConstructorParameters<typeof ContextType>[1]> = {},
+  ): ContextType {
     return new ContextType(mockCtClient(), {
       id: "user",
       name: "User",
@@ -356,7 +371,9 @@ describe("ContextType", () => {
 // ---------------------------------------------------------------------------
 
 describe("ContextEntity", () => {
-  function makeEntity(overrides: Partial<ConstructorParameters<typeof ContextEntity>[0]> = {}): ContextEntity {
+  function makeEntity(
+    overrides: Partial<ConstructorParameters<typeof ContextEntity>[0]> = {},
+  ): ContextEntity {
     return new ContextEntity({
       type: "user",
       key: "u-123",
