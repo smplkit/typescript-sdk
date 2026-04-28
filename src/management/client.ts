@@ -78,7 +78,7 @@ function envFromResource(
 function ctFromResource(resource: any, client: ContextTypesClient): ContextType {
   const attrs = resource.attributes ?? {};
   const rawMeta = attrs.attributes;
-  let attributeMetadata: Record<string, Record<string, any>> = {};
+  const attributeMetadata: Record<string, Record<string, any>> = {};
   if (rawMeta && typeof rawMeta === "object") {
     for (const [k, v] of Object.entries(rawMeta)) {
       attributeMetadata[k] = typeof v === "object" && v !== null ? (v as Record<string, any>) : {};
