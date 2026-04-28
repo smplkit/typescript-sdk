@@ -85,6 +85,42 @@
               ],
               "title": "Filter[Managed]"
             }
+          },
+          {
+            "name": "filter[references_context]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return flags whose rules reference this context instance. Format: {type}:{key}",
+              "title": "Filter[References Context]"
+            },
+            "description": "Return flags whose rules reference this context instance. Format: {type}:{key}"
+          },
+          {
+            "name": "filter[references_context_type]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return flags whose rules reference any attribute of the given context type.",
+              "title": "Filter[References Context Type]"
+            },
+            "description": "Return flags whose rules reference any attribute of the given context type."
           }
         ],
         "responses": {
@@ -457,14 +493,7 @@
             "title": "Description"
           },
           "type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Type",
             "description": "Value type: STRING, BOOLEAN, NUMERIC, or JSON"
           },
@@ -552,6 +581,7 @@
         "type": "object",
         "required": [
           "name",
+          "type",
           "default"
         ],
         "title": "Flag",

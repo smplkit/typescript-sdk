@@ -1285,7 +1285,7 @@ export class FlagsClient {
     return new Flag(this, {
       id: resource.id ?? null,
       name: attrs.name,
-      type: attrs.type ?? null,
+      type: attrs.type,
       default: attrs.default,
       values: attrs.values ? attrs.values.map((v) => ({ name: v.name, value: v.value })) : null,
       description: attrs.description ?? null,
