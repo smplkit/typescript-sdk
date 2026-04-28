@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LogLevel } from "../../../src/logging/types.js";
+import { LogLevel, LoggerSource } from "../../../src/logging/types.js";
 
 describe("LogLevel", () => {
   it("should define TRACE", () => {
@@ -38,5 +38,48 @@ describe("LogLevel", () => {
   it("should be usable as string values", () => {
     const level: string = LogLevel.INFO;
     expect(level).toBe("INFO");
+  });
+});
+
+describe("LoggerSource", () => {
+  it("should set name, service, environment, and resolvedLevel", () => {
+    const src = new LoggerSource("sqlalchemy.engine", {
+      service: "api",
+      environment: "production",
+      resolved_level: LogLevel.WARN,
+    });
+    expect(src.name).toBe("sqlalchemy.engine");
+    expect(src.service).toBe("api");
+    expect(src.environment).toBe("production");
+    expect(src.resolvedLevel).toBe(LogLevel.WARN);
+  });
+
+  it("should default level to null when not provided", () => {
+    const src = new LoggerSource("app.server", {
+      service: "app",
+      environment: "staging",
+      resolved_level: LogLevel.DEBUG,
+    });
+    expect(src.level).toBeNull();
+  });
+
+  it("should accept explicit level", () => {
+    const src = new LoggerSource("app.server", {
+      service: "app",
+      environment: "staging",
+      resolved_level: LogLevel.WARN,
+      level: LogLevel.ERROR,
+    });
+    expect(src.level).toBe(LogLevel.ERROR);
+  });
+
+  it("should accept null level explicitly", () => {
+    const src = new LoggerSource("app.server", {
+      service: "app",
+      environment: "staging",
+      resolved_level: LogLevel.INFO,
+      level: null,
+    });
+    expect(src.level).toBeNull();
   });
 });

@@ -33,6 +33,20 @@ export type { WinstonAdapterConfig } from "./logging/adapters/winston.js";
 export { PinoAdapter } from "./logging/adapters/pino.js";
 export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 
+// Management
+export { ManagementClient } from "./management/client.js";
+export {
+  EnvironmentsClient,
+  ContextTypesClient,
+  ContextsClient,
+  AccountSettingsClient,
+} from "./management/client.js";
+export { Environment, ContextType, ContextEntity, AccountSettings } from "./management/models.js";
+export { EnvironmentClassification } from "./management/types.js";
+
+// Logging — LoggerSource
+export { LoggerSource } from "./logging/types.js";
+
 // Shared WebSocket
 export { SharedWebSocket } from "./ws.js";
 

@@ -1197,34 +1197,6 @@ describe("FlagsClient runtime", () => {
     expect(client.connectionStatus()).toBe("connected");
   });
 
-  it("should flush contexts to server", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    client.register(new Context("user", "u-1", { plan: "enterprise" }));
-
-    mockFetch.mockResolvedValueOnce(jsonResponse({}));
-    await client.flushContexts();
-
-    expect(mockFetch).toHaveBeenCalled();
-  });
-
-  it("should not flush when no pending contexts", async () => {
-    const client = makeFlagsClient();
-    await client.flushContexts();
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("should swallow errors from context flush", async () => {
-    const client = makeFlagsClient();
-    const { Context } = await import("../../../src/flags/types.js");
-
-    client.register(new Context("user", "u-1", { plan: "enterprise" }));
-
-    mockFetch.mockRejectedValueOnce(new Error("network error"));
-    await expect(client.flushContexts()).resolves.not.toThrow();
-  });
-
   it("should support contextProvider decorator-style alias", async () => {
     const client = makeFlagsClient();
     const { Context } = await import("../../../src/flags/types.js");
@@ -1273,6 +1245,9 @@ describe("FlagsClient runtime", () => {
   it("should auto-flush context buffer when it reaches batch size", async () => {
     const client = makeFlagsClient();
     const { Context } = await import("../../../src/flags/types.js");
+    // Access internal buffer to pre-fill it (register() moved to management.contexts)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._contextBuffer;
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -1294,7 +1269,7 @@ describe("FlagsClient runtime", () => {
     await client._connectInternal("staging");
 
     for (let i = 0; i < 100; i++) {
-      client.register(new Context("user", `u-${i}`, { plan: "free" }));
+      buffer.observe([new Context("user", `u-${i}`, { plan: "free" })]);
     }
 
     client.setContextProvider(() => [new Context("user", "u-trigger", { plan: "enterprise" })]);
@@ -1303,6 +1278,48 @@ describe("FlagsClient runtime", () => {
 
     const handle = client.booleanFlag("my-flag", false);
     handle.get();
+
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("should silently swallow errors from auto-flush context POST", async () => {
+    const client = makeFlagsClient();
+    const { Context } = await import("../../../src/flags/types.js");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._contextBuffer;
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "my-flag",
+            type: "flag",
+            attributes: {
+              name: "F",
+              type: "BOOLEAN",
+              default: false,
+              values: [],
+              environments: { staging: { enabled: true, rules: [] } },
+            },
+          },
+        ],
+      }),
+    );
+    await client._connectInternal("staging");
+
+    // Fill buffer past the auto-flush threshold
+    for (let i = 0; i < 100; i++) {
+      buffer.observe([new Context("user", `u-${i}`, { plan: "free" })]);
+    }
+
+    client.setContextProvider(() => [new Context("user", "u-trigger", { plan: "enterprise" })]);
+
+    // Context bulk POST will fail — should be silently swallowed
+    mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
+
+    const handle = client.booleanFlag("my-flag", false);
+    // Should NOT throw even though the background context flush fails
+    expect(() => handle.get()).not.toThrow();
 
     await new Promise((r) => setTimeout(r, 10));
   });

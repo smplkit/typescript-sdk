@@ -385,7 +385,7 @@ async function main(): Promise<void> {
     section("9. Context Registration");
 
     // Single context.
-    client.flags.register(
+    await client.management.contexts.register(
       new Context(
         "user",
         currentUser.id,
@@ -400,7 +400,7 @@ async function main(): Promise<void> {
     step("Registered single user context");
 
     // Multiple contexts at once — typical middleware pattern.
-    client.flags.register([
+    await client.management.contexts.register([
       new Context("user", "user-003", {
         first_name: "Charlie",
         plan: "business",
@@ -415,8 +415,8 @@ async function main(): Promise<void> {
     step("Registered user + account contexts (batch)");
 
     // Flush all pending registrations to the server.
-    await client.flags.flushContexts();
-    step("flushContexts() completed — contexts sent to server");
+    await client.management.contexts.flush();
+    step("flush() completed — contexts sent to server");
     step("Console rule builder now has autocomplete data for these context types");
 
     // ==================================================================

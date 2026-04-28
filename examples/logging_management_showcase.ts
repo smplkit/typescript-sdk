@@ -32,7 +32,7 @@
  *   npx tsx examples/logging_management_showcase.ts
  */
 
-import { SmplClient, LogLevel } from "@smplkit/sdk";
+import { SmplClient, LogLevel, LoggerSource } from "@smplkit/sdk";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -274,6 +274,38 @@ async function main(): Promise<void> {
   httpxRefresh.group = infraGroup.id;
   await httpxRefresh.save();
   step(`Assigned httpx to infrastructure group: ${httpxRefresh.group}`);
+
+  // ======================================================================
+  // 8b. REGISTER SYNTHETIC LOGGER SOURCES
+  // ======================================================================
+  //
+  // client.logging.start() registers loggers seen in the current process
+  // under the current SmplClient's service+environment.
+  // registerSources() accepts explicit (service, environment) overrides —
+  // useful for sample-data seeding, cross-tenant migration, and test
+  // fixtures.
+  // ======================================================================
+
+  section("8b. Register synthetic logger sources");
+
+  await client.logging.management.registerSources([
+    new LoggerSource("sqlalchemy.engine", {
+      service: "user-service",
+      environment: "production",
+      resolved_level: LogLevel.WARN,
+    }),
+    new LoggerSource("sqlalchemy.engine", {
+      service: "payment-service",
+      environment: "production",
+      resolved_level: LogLevel.WARN,
+    }),
+    new LoggerSource("httpx", {
+      service: "checkout-service",
+      environment: "staging",
+      resolved_level: LogLevel.INFO,
+    }),
+  ]);
+  step("3 sources registered");
 
   // ======================================================================
   // 9. LIST AND DELETE LOG GROUPS

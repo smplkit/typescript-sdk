@@ -226,8 +226,8 @@ export class FlagStats {
 // Context registration buffer
 // ---------------------------------------------------------------------------
 
-/** @internal */
-class ContextRegistrationBuffer {
+/** @internal — exported so ManagementClient.contexts can share the same buffer. */
+export class ContextRegistrationBuffer {
   private _seen = new Map<string, Record<string, any>>();
   private _pending: Array<Record<string, any>> = [];
 
@@ -427,6 +427,7 @@ export class FlagsClient {
     timeout?: number,
     flagsBaseUrl?: string,
     appBaseUrl?: string,
+    contextBuffer?: ContextRegistrationBuffer,
   ) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
@@ -467,6 +468,9 @@ export class FlagsClient {
       },
       fetch: fetchWithTimeout,
     });
+    if (contextBuffer !== undefined) {
+      this._contextBuffer = contextBuffer;
+    }
     this.management = new FlagsManagement(this);
   }
 
@@ -906,28 +910,6 @@ export class FlagsClient {
       }
       this._keyListeners.get(id)!.push(callback);
     }
-  }
-
-  // ------------------------------------------------------------------
-  // Runtime: context registration
-  // ------------------------------------------------------------------
-
-  /**
-   * Register context(s) with the server.
-   *
-   * Accepts a single Context or an array. Works before `initialize()` is called.
-   */
-  register(context: Context | Context[]): void {
-    if (Array.isArray(context)) {
-      this._contextBuffer.observe(context);
-    } else {
-      this._contextBuffer.observe([context]);
-    }
-  }
-
-  /** Flush pending context registrations to the server. */
-  async flushContexts(): Promise<void> {
-    await this._flushContexts();
   }
 
   // ------------------------------------------------------------------

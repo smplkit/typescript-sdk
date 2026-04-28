@@ -20,7 +20,7 @@ describe("Logger", () => {
     return new Logger(mockClient(), {
       id: "sqlalchemy.engine",
       name: "SQLAlchemy Engine",
-      level: "DEBUG",
+      level: LogLevel.DEBUG,
       group: null,
       managed: true,
       sources: [{ service: "api-gateway", first_observed: "2026-04-01T10:00:00Z" }],
@@ -36,7 +36,7 @@ describe("Logger", () => {
       const logger = makeLogger();
       expect(logger.id).toBe("sqlalchemy.engine");
       expect(logger.name).toBe("SQLAlchemy Engine");
-      expect(logger.level).toBe("DEBUG");
+      expect(logger.level).toBe(LogLevel.DEBUG);
       expect(logger.group).toBeNull();
       expect(logger.managed).toBe(true);
       expect(logger.sources).toHaveLength(1);
@@ -79,19 +79,19 @@ describe("Logger", () => {
     it("should set the base level", () => {
       const logger = makeLogger({ level: null });
       logger.setLevel(LogLevel.ERROR);
-      expect(logger.level).toBe("ERROR");
+      expect(logger.level).toBe(LogLevel.ERROR);
     });
 
     it("should overwrite an existing level", () => {
-      const logger = makeLogger({ level: "DEBUG" });
+      const logger = makeLogger({ level: LogLevel.DEBUG });
       logger.setLevel(LogLevel.WARN);
-      expect(logger.level).toBe("WARN");
+      expect(logger.level).toBe(LogLevel.WARN);
     });
   });
 
   describe("clearLevel()", () => {
     it("should clear the base level to null", () => {
-      const logger = makeLogger({ level: "INFO" });
+      const logger = makeLogger({ level: LogLevel.INFO });
       logger.clearLevel();
       expect(logger.level).toBeNull();
     });
@@ -174,7 +174,7 @@ describe("Logger", () => {
       const other = makeLogger({
         id: "new.key",
         name: "New Name",
-        level: "ERROR",
+        level: LogLevel.ERROR,
         group: "group-id",
         managed: false,
         sources: [{ service: "new-svc" }],
@@ -187,7 +187,7 @@ describe("Logger", () => {
 
       expect(logger.id).toBe("new.key");
       expect(logger.name).toBe("New Name");
-      expect(logger.level).toBe("ERROR");
+      expect(logger.level).toBe(LogLevel.ERROR);
       expect(logger.group).toBe("group-id");
       expect(logger.managed).toBe(false);
       expect(logger.sources).toEqual([{ service: "new-svc" }]);
@@ -236,7 +236,7 @@ describe("Logger", () => {
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const logger = makeLogger({ id: "app.server", level: "INFO" });
+      const logger = makeLogger({ id: "app.server", level: LogLevel.INFO });
       expect(logger.toString()).toBe("Logger(id=app.server, level=INFO)");
     });
 
@@ -255,8 +255,9 @@ describe("LogGroup", () => {
   function makeGroup(overrides: Partial<ConstructorParameters<typeof LogGroup>[1]> = {}): LogGroup {
     return new LogGroup(mockClient(), {
       id: "database-loggers",
+      key: null,
       name: "Database Loggers",
-      level: "WARN",
+      level: LogLevel.WARN,
       group: null,
       environments: { production: { level: "ERROR" } },
       createdAt: "2026-04-01T10:00:00Z",
@@ -270,7 +271,7 @@ describe("LogGroup", () => {
       const group = makeGroup();
       expect(group.id).toBe("database-loggers");
       expect(group.name).toBe("Database Loggers");
-      expect(group.level).toBe("WARN");
+      expect(group.level).toBe(LogLevel.WARN);
       expect(group.group).toBeNull();
       expect(group.environments).toEqual({ production: { level: "ERROR" } });
       expect(group.createdAt).toBe("2026-04-01T10:00:00Z");
@@ -281,6 +282,7 @@ describe("LogGroup", () => {
       const client = mockClient();
       const group = new LogGroup(client, {
         id: "test",
+        key: null,
         name: "Test",
         level: null,
         group: null,
@@ -296,13 +298,13 @@ describe("LogGroup", () => {
     it("should set the base level", () => {
       const group = makeGroup({ level: null });
       group.setLevel(LogLevel.ERROR);
-      expect(group.level).toBe("ERROR");
+      expect(group.level).toBe(LogLevel.ERROR);
     });
   });
 
   describe("clearLevel()", () => {
     it("should clear the base level to null", () => {
-      const group = makeGroup({ level: "WARN" });
+      const group = makeGroup({ level: LogLevel.WARN });
       group.clearLevel();
       expect(group.level).toBeNull();
     });
@@ -353,7 +355,7 @@ describe("LogGroup", () => {
       const other = makeGroup({
         id: "new-group",
         name: "New Group",
-        level: "FATAL",
+        level: LogLevel.FATAL,
         group: "parent-group",
         environments: { staging: { level: "TRACE" } },
         createdAt: "2026-05-01T00:00:00Z",
@@ -364,7 +366,7 @@ describe("LogGroup", () => {
 
       expect(group.id).toBe("new-group");
       expect(group.name).toBe("New Group");
-      expect(group.level).toBe("FATAL");
+      expect(group.level).toBe(LogLevel.FATAL);
       expect(group.group).toBe("parent-group");
       expect(group.environments).toEqual({ staging: { level: "TRACE" } });
       expect(group.createdAt).toBe("2026-05-01T00:00:00Z");
@@ -377,6 +379,7 @@ describe("LogGroup", () => {
       const client = mockClient();
       const group = new LogGroup(client, {
         id: "test-group",
+        key: null,
         name: "Test Group",
         level: null,
         group: null,
@@ -387,6 +390,7 @@ describe("LogGroup", () => {
 
       const saved = new LogGroup(client, {
         id: "test-group",
+        key: null,
         name: "Test Group",
         level: null,
         group: null,
@@ -407,7 +411,7 @@ describe("LogGroup", () => {
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const group = makeGroup({ id: "db-loggers", level: "WARN" });
+      const group = makeGroup({ id: "db-loggers", level: LogLevel.WARN });
       expect(group.toString()).toBe("LogGroup(id=db-loggers, level=WARN)");
     });
 

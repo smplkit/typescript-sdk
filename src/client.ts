@@ -7,8 +7,9 @@
 
 import createClient from "openapi-fetch";
 import { ConfigClient } from "./config/client.js";
-import { FlagsClient } from "./flags/client.js";
+import { FlagsClient, ContextRegistrationBuffer } from "./flags/client.js";
 import { LoggingClient } from "./logging/client.js";
+import { ManagementClient } from "./management/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
@@ -111,6 +112,9 @@ export class SmplClient {
   /** Client for logging management and runtime. */
   readonly logging: LoggingClient;
 
+  /** Client for app-plane management (environments, contexts, context types, account settings). */
+  readonly management: ManagementClient;
+
   private _wsManager: SharedWebSocket | null = null;
   private readonly _apiKey: string;
 
@@ -173,6 +177,8 @@ export class SmplClient {
       });
     }
 
+    const sharedContextBuffer = new ContextRegistrationBuffer();
+
     this.config = new ConfigClient(cfg.apiKey, this._timeout, configBaseUrl);
     this.flags = new FlagsClient(
       cfg.apiKey,
@@ -180,6 +186,7 @@ export class SmplClient {
       this._timeout,
       flagsBaseUrl,
       appBaseUrl,
+      sharedContextBuffer,
     );
     this.logging = new LoggingClient(
       cfg.apiKey,
@@ -187,6 +194,11 @@ export class SmplClient {
       this._timeout,
       loggingBaseUrl,
     );
+    this.management = new ManagementClient({
+      appBaseUrl,
+      apiKey: cfg.apiKey,
+      buffer: sharedContextBuffer,
+    });
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();

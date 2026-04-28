@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LoggingClient, LoggerRegistrationBuffer } from "../../../src/logging/client.js";
 import { Logger, LogGroup } from "../../../src/logging/models.js";
+import { LogLevel, LoggerSource } from "../../../src/logging/types.js";
 import {
   SmplNotFoundError,
   SmplValidationError,
@@ -2192,5 +2193,63 @@ describe("LoggingClient — flush timer lifecycle", () => {
     expect(flushSpy).toHaveBeenCalledTimes(1);
 
     client._close();
+  });
+});
+
+// ===========================================================================
+// registerSources
+// ===========================================================================
+
+describe("LoggingClient — registerSources", () => {
+  it("should POST logger sources to /api/v1/loggers/bulk", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    const sources = [
+      new LoggerSource("sqlalchemy.engine", {
+        service: "api",
+        environment: "production",
+        resolved_level: LogLevel.WARN,
+        level: LogLevel.ERROR,
+      }),
+      new LoggerSource("app.payments", {
+        service: "api",
+        environment: "production",
+        resolved_level: LogLevel.INFO,
+      }),
+    ];
+
+    await client.management.registerSources(sources);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.method).toBe("POST");
+    expect(req.url).toContain("/api/v1/loggers/bulk");
+    const body = JSON.parse(await req.text());
+    expect(body.loggers).toHaveLength(2);
+    expect(body.loggers[0].id).toBe("sqlalchemy.engine");
+    expect(body.loggers[0].service).toBe("api");
+    expect(body.loggers[0].environment).toBe("production");
+    expect(body.loggers[0].resolved_level).toBe("WARN");
+    expect(body.loggers[0].level).toBe("ERROR");
+    expect(body.loggers[1].id).toBe("app.payments");
+    expect(body.loggers[1].level).toBeUndefined();
+  });
+
+  it("should be a no-op for an empty sources list", async () => {
+    const client = makeClient();
+    await client.management.registerSources([]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("should throw SmplConnectionError on network failure", async () => {
+    const client = makeClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const src = new LoggerSource("app", {
+      service: "api",
+      environment: "production",
+      resolved_level: LogLevel.INFO,
+    });
+    await expect(client.management.registerSources([src])).rejects.toThrow(SmplConnectionError);
   });
 });

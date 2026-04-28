@@ -18,7 +18,7 @@ export class Logger {
   /** Human-readable display name. */
   name: string;
   /** Base log level, or null if inherited. */
-  level: string | null;
+  level: LogLevel | null;
   /** Id of the parent log group, or null. */
   group: string | null;
   /** Whether this logger is managed by the platform. */
@@ -41,7 +41,7 @@ export class Logger {
     fields: {
       id: string | null;
       name: string;
-      level: string | null;
+      level: LogLevel | null;
       group: string | null;
       managed: boolean;
       sources: Array<Record<string, any>>;
@@ -136,7 +136,7 @@ export class LogGroup {
   /** Human-readable display name. */
   name: string;
   /** Base log level, or null if inherited. */
-  level: string | null;
+  level: LogLevel | null;
   /** Id of the parent log group, or null. */
   group: string | null;
   /** Per-environment level overrides. */
@@ -156,7 +156,7 @@ export class LogGroup {
       id: string | null;
       key: string | null;
       name: string;
-      level: string | null;
+      level: LogLevel | null;
       group: string | null;
       environments: Record<string, any>;
       createdAt: string | null;

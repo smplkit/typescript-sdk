@@ -16,7 +16,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
-import { LogLevel, type LoggerChangeEvent } from "./types.js";
+import { LogLevel, LoggerSource, type LoggerChangeEvent } from "./types.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
@@ -147,6 +147,17 @@ export class LoggingManagement {
   /** Delete a log group by id. */
   async deleteGroup(id: string): Promise<void> {
     return this._client._mgDeleteGroup(id);
+  }
+
+  /**
+   * Bulk-register explicit logger sources with the logging service.
+   *
+   * Unlike `start()`, which auto-discovers loggers from the current
+   * process, this method accepts explicit `service` and `environment`
+   * overrides — useful for sample-data seeding and test fixtures.
+   */
+  async registerSources(sources: LoggerSource[]): Promise<void> {
+    return this._client._mgRegisterSources(sources);
   }
 }
 
@@ -352,6 +363,26 @@ export class LoggingClient {
     }
     if (!data) return [];
     return data.data.map((r) => this._groupToModel(r));
+  }
+
+  /** @internal */
+  async _mgRegisterSources(sources: LoggerSource[]): Promise<void> {
+    if (sources.length === 0) return;
+    const loggers = sources.map((src) => ({
+      id: src.name,
+      level: src.level ?? undefined,
+      resolved_level: src.resolvedLevel,
+      service: src.service,
+      environment: src.environment,
+    }));
+    try {
+      const result = await this._http.POST("/api/v1/loggers/bulk", {
+        body: { loggers },
+      });
+      if (result.error !== undefined) await checkError(result.response, "Failed to register sources");
+    } catch (err) {
+      wrapFetchError(err);
+    }
   }
 
   /** @internal */
@@ -977,10 +1008,11 @@ export class LoggingClient {
 
   private _loggerToModel(resource: LoggerResource): Logger {
     const attrs = resource.attributes;
+    const rawLevel = attrs.level ?? null;
     return new Logger(this, {
       id: resource.id ?? null,
       name: attrs.name,
-      level: attrs.level ?? null,
+      level: rawLevel as LogLevel | null,
       group: attrs.group ?? null,
       managed: attrs.managed ?? false,
       sources: [],
@@ -992,11 +1024,12 @@ export class LoggingClient {
 
   private _groupToModel(resource: LogGroupResource): LogGroup {
     const attrs = resource.attributes;
+    const rawLevel = attrs.level ?? null;
     return new LogGroup(this, {
       id: resource.id ?? null,
       key: attrs.key ?? null,
       name: attrs.name,
-      level: attrs.level ?? null,
+      level: rawLevel as LogLevel | null,
       group: attrs.parent_id ?? null,
       environments: (attrs.environments ?? {}) as Record<string, any>,
       createdAt: attrs.created_at ?? null,
