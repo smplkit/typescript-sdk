@@ -1028,7 +1028,7 @@ export class LoggingClient {
     const rawLevel = attrs.level ?? null;
     return new LogGroup(this, {
       id: resource.id ?? null,
-      key: attrs.key ?? null,
+      key: resource.id ?? null,
       name: attrs.name,
       level: rawLevel as LogLevel | null,
       group: attrs.parent_id ?? null,
