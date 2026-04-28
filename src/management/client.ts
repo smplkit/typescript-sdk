@@ -321,7 +321,6 @@ export class ContextTypesClient {
         id: ct.id,
         type: "context_type" as const,
         attributes: {
-          id: ct.id,
           name: ct.name,
           attributes: ct.attributes,
         },
@@ -347,7 +346,6 @@ export class ContextTypesClient {
         id: ct.id,
         type: "context_type" as const,
         attributes: {
-          id: ct.id,
           name: ct.name,
           attributes: ct.attributes,
         },
