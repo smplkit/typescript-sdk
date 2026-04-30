@@ -324,7 +324,7 @@ export interface components {
         FlagEnvironment: {
             /**
              * Enabled
-             * @default false
+             * @default true
              */
             enabled: boolean;
             /** Default */
