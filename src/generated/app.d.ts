@@ -187,7 +187,7 @@ export interface paths {
         put?: never;
         /**
          * Wipe Account Data
-         * @description Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400. Returns 204 on success; if any sub-delete fails the response is 500.
+         * @description Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400. Pass ``"generate_sample_data": true`` to re-seed the account with the standard sample dataset after the wipe completes (best-effort; seed failures are logged but do not fail the wipe). Returns 204 on success; if any sub-delete fails the response is 500.
          */
         post: operations["wipe_account_data"];
         delete?: never;
@@ -1217,7 +1217,8 @@ export interface components {
          * AccountWipeRequest
          * @description Confirmation envelope for ``POST /accounts/current/actions/wipe``.
          * @example {
-         *       "confirm": true
+         *       "confirm": true,
+         *       "generate_sample_data": false
          *     }
          */
         AccountWipeRequest: {
@@ -1226,6 +1227,12 @@ export interface components {
              * @description Must be ``true`` to proceed. Anything else returns 400. The frontend gates the call behind a confirmation dialog; this field is the server-side seatbelt.
              */
             confirm: boolean;
+            /**
+             * Generate Sample Data
+             * @description When ``true``, the wipe re-seeds the account with the same Acme Commerce sample dataset that new accounts are bootstrapped with. Best-effort: any seeding failures are logged but do not fail the wipe.
+             * @default false
+             */
+            generate_sample_data: boolean;
         };
         /**
          * AddPaymentMethodAttributes
