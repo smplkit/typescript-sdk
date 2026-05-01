@@ -2662,6 +2662,11 @@ export interface components {
             display_name: string;
             /** Profile Pic */
             profile_pic?: string | null;
+            /**
+             * Avatar Url
+             * @description Server-computed ``data:`` URL when an OIDC provider supplied a profile picture. Null otherwise — callers should fall back to Gravatar or initials.
+             */
+            readonly avatar_url?: string | null;
             /** Auth Provider */
             readonly auth_provider?: string | null;
             /**
