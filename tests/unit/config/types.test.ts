@@ -296,6 +296,78 @@ describe("Config", () => {
     });
   });
 
+  describe("save() — runtime client (no CRUD methods)", () => {
+    it("create flow throws when _createConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _createConfig — runtime client surface
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, { id: "new", createdAt: null });
+      await expect(config.save()).rejects.toThrow(/cannot be saved/);
+    });
+
+    it("update flow throws when _updateConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _updateConfig
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, {
+        id: "existing",
+        createdAt: "2024-01-01T00:00:00Z",
+      });
+      await expect(config.save()).rejects.toThrow(/cannot be saved/);
+    });
+  });
+
+  describe("delete() — runtime client (no _deleteConfig)", () => {
+    it("throws when _deleteConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _deleteConfig
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, { id: "existing" });
+      await expect(config.delete()).rejects.toThrow(/cannot be deleted/);
+    });
+  });
+
+  describe("convertEnvironments edge cases", () => {
+    it("preserves entries that don't have a values key (treats whole entry as values)", () => {
+      const client = makeMockClient();
+      // Entry without `values` key — convertEnvironments uses the whole entry as raw values.
+      const cfg = new Config(client, {
+        id: "x",
+        name: "X",
+        description: null,
+        parent: null,
+        items: {},
+        environments: { staging: { metadata: "x" } },
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(cfg.environments.staging).toBeInstanceOf(ConfigEnvironment);
+    });
+
+    it("handles primitive (non-object) entries gracefully", () => {
+      const client = makeMockClient();
+      const cfg = new Config(client, {
+        id: "x",
+        name: "X",
+        description: null,
+        parent: null,
+        items: {},
+        // primitive — outer-else branch: produces empty ConfigEnvironment
+        environments: { staging: "scalar-value" as unknown as Record<string, unknown> },
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(cfg.environments.staging).toBeInstanceOf(ConfigEnvironment);
+      expect(cfg.environments.staging.values).toEqual({});
+    });
+  });
+
   describe("save", () => {
     it("should call _createConfig when createdAt is null and apply result", async () => {
       const client = makeMockClient();

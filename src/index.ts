@@ -11,7 +11,7 @@ export { SmplManagementClient } from "./management/client.js";
 export type { SmplManagementClientOptions } from "./management/client.js";
 
 // Config
-export { ConfigClient, ConfigManagement } from "./config/client.js";
+export { ConfigClient } from "./config/client.js";
 export type { ConfigChangeEvent } from "./config/client.js";
 export { Config, ConfigItem, ConfigEnvironment, ItemType } from "./config/types.js";
 export { LiveConfigProxy } from "./config/proxy.js";
@@ -19,8 +19,8 @@ export { LiveConfigProxy } from "./config/proxy.js";
 // Flags — public types
 export { Context, Op, Rule, FlagDeclaration } from "./flags/types.js";
 
-// Flags — management + runtime
-export { FlagsClient, FlagsManagement } from "./flags/client.js";
+// Flags — runtime client + models
+export { FlagsClient } from "./flags/client.js";
 export {
   Flag,
   BooleanFlag,
@@ -34,7 +34,7 @@ export {
 export { FlagChangeEvent, FlagStats } from "./flags/client.js";
 
 // Logging
-export { LoggingClient, LoggingManagement } from "./logging/client.js";
+export { LoggingClient } from "./logging/client.js";
 export { Logger, LogGroup } from "./logging/models.js";
 export { LogLevel, LoggerEnvironment, LoggerChangeEvent, LoggerSource } from "./logging/types.js";
 export type { LoggingAdapter } from "./logging/adapters/base.js";

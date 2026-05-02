@@ -265,6 +265,23 @@ describe("Logger", () => {
       });
       await expect(logger.save()).rejects.toThrow("cannot save");
     });
+
+    it("should throw on runtime client (no _saveLogger)", async () => {
+      // Runtime LoggingClient does not implement _saveLogger.
+      const runtimeClient = {} as never;
+      const logger = new Logger(runtimeClient, {
+        id: "test",
+        name: "Test",
+        level: null,
+        group: null,
+        managed: false,
+        sources: [],
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(logger.save()).rejects.toThrow(/cannot be saved/);
+    });
   });
 
   describe("delete()", () => {
@@ -315,6 +332,22 @@ describe("Logger", () => {
         updatedAt: null,
       });
       await expect(logger.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw on runtime client (no _deleteLogger)", async () => {
+      const runtimeClient = {} as never;
+      const logger = new Logger(runtimeClient, {
+        id: "test",
+        name: "Test",
+        level: null,
+        group: null,
+        managed: false,
+        sources: [],
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(logger.delete()).rejects.toThrow(/cannot be deleted/);
     });
   });
 
@@ -502,6 +535,20 @@ describe("LogGroup", () => {
       });
       await expect(group.save()).rejects.toThrow("cannot save");
     });
+
+    it("should throw on runtime client (no _saveGroup)", async () => {
+      const runtimeClient = {} as never;
+      const group = new LogGroup(runtimeClient, {
+        id: "test-group",
+        name: "Test Group",
+        level: null,
+        group: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(group.save()).rejects.toThrow(/cannot be saved/);
+    });
   });
 
   describe("delete()", () => {
@@ -548,6 +595,20 @@ describe("LogGroup", () => {
         updatedAt: null,
       });
       await expect(group.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw on runtime client (no _deleteGroup)", async () => {
+      const runtimeClient = {} as never;
+      const group = new LogGroup(runtimeClient, {
+        id: "test-group",
+        name: "Test Group",
+        level: null,
+        group: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(group.delete()).rejects.toThrow(/cannot be deleted/);
     });
   });
 

@@ -36,11 +36,12 @@ export class LoggerChangeEvent {
 }
 
 /**
- * Describes a logger to register via `client.logging.management.registerSources()`.
+ * Describes a logger to register via `mgmt.loggers.register([source, ...])`.
  *
- * Unlike auto-discovery (which reads the current process's logging framework),
- * `registerSources` accepts explicit `service` and `environment` overrides —
- * useful for sample-data seeding, cross-tenant migration, and test fixtures.
+ * Unlike runtime auto-discovery (which reads the current process's logging
+ * framework), `mgmt.loggers.register` accepts explicit `service` and
+ * `environment` overrides — useful for sample-data seeding, cross-tenant
+ * migration, and test fixtures.
  *
  * Frozen.
  */

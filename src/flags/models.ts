@@ -9,9 +9,9 @@ import type { Context } from "./types.js";
 
 /** @internal Flag client surface needed by the model (covers both runtime + management). */
 export interface FlagModelClient {
-  _createFlag(flag: Flag): Promise<Flag>;
-  _updateFlag(flag: Flag): Promise<Flag>;
-  _deleteFlag(id: string): Promise<void>;
+  _createFlag?: (flag: Flag) => Promise<Flag>;
+  _updateFlag?: (flag: Flag) => Promise<Flag>;
+  _deleteFlag?: (id: string) => Promise<void>;
   _evaluateHandle(id: string, defaultValue: unknown, context: Context[] | null): unknown;
 }
 
@@ -181,9 +181,21 @@ export class Flag {
       throw new Error("Flag was constructed without a client; cannot save");
     }
     if (this.createdAt === null) {
+      if (!this._client._createFlag) {
+        throw new Error(
+          "Flag handles obtained from the runtime FlagsClient cannot be saved. " +
+            "Use mgmt.flags.newBooleanFlag(...) etc. (or client.manage.flags.*) to author flags.",
+        );
+      }
       const created = await this._client._createFlag(this);
       this._apply(created);
     } else {
+      if (!this._client._updateFlag) {
+        throw new Error(
+          "Flag handles obtained from the runtime FlagsClient cannot be saved. " +
+            "Use mgmt.flags.newBooleanFlag(...) etc. (or client.manage.flags.*) to author flags.",
+        );
+      }
       const updated = await this._client._updateFlag(this);
       this._apply(updated);
     }
@@ -193,6 +205,12 @@ export class Flag {
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Flag was constructed without a client or id; cannot delete");
+    }
+    if (!this._client._deleteFlag) {
+      throw new Error(
+        "Flag handles obtained from the runtime FlagsClient cannot be deleted. " +
+          "Use client.manage.flags.delete(id) instead.",
+      );
     }
     await this._client._deleteFlag(this.id);
   }

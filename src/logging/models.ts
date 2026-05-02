@@ -8,14 +8,14 @@ import { LogLevel, LoggerEnvironment, convertLoggerEnvironments } from "./types.
 
 /** @internal */
 export interface LoggerModelClient {
-  _saveLogger(logger: Logger): Promise<Logger>;
-  _deleteLogger(id: string): Promise<void>;
+  _saveLogger?: (logger: Logger) => Promise<Logger>;
+  _deleteLogger?: (id: string) => Promise<void>;
 }
 
 /** @internal */
 export interface LogGroupModelClient {
-  _saveGroup(group: LogGroup): Promise<LogGroup>;
-  _deleteGroup(id: string): Promise<void>;
+  _saveGroup?: (group: LogGroup) => Promise<LogGroup>;
+  _deleteGroup?: (id: string) => Promise<void>;
 }
 
 /**
@@ -96,6 +96,12 @@ export class Logger {
     if (this._client === null) {
       throw new Error("Logger was constructed without a client; cannot save");
     }
+    if (!this._client._saveLogger) {
+      throw new Error(
+        "Logger models obtained from the runtime LoggingClient cannot be saved. " +
+          "Use mgmt.loggers.new(...) (or client.manage.loggers.*) to author loggers.",
+      );
+    }
     const saved = await this._client._saveLogger(this);
     this._apply(saved);
   }
@@ -104,6 +110,12 @@ export class Logger {
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Logger was constructed without a client or id; cannot delete");
+    }
+    if (!this._client._deleteLogger) {
+      throw new Error(
+        "Logger models obtained from the runtime LoggingClient cannot be deleted. " +
+          "Use client.manage.loggers.delete(id) instead.",
+      );
     }
     await this._client._deleteLogger(this.id);
   }
@@ -219,6 +231,12 @@ export class LogGroup {
     if (this._client === null) {
       throw new Error("LogGroup was constructed without a client; cannot save");
     }
+    if (!this._client._saveGroup) {
+      throw new Error(
+        "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
+          "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
+      );
+    }
     const saved = await this._client._saveGroup(this);
     this._apply(saved);
   }
@@ -226,6 +244,12 @@ export class LogGroup {
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("LogGroup was constructed without a client or id; cannot delete");
+    }
+    if (!this._client._deleteGroup) {
+      throw new Error(
+        "LogGroup models obtained from the runtime LoggingClient cannot be deleted. " +
+          "Use client.manage.logGroups.delete(id) instead.",
+      );
     }
     await this._client._deleteGroup(this.id);
   }

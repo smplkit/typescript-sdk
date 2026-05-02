@@ -217,6 +217,11 @@ export class SmplClient {
     this.config._parent = this;
     this.logging._parent = this;
 
+    // Wire the management plane resolver — runtime sub-clients delegate
+    // CRUD/bulk-fetch to `client.manage.*` instead of duplicating it.
+    this.config._resolveManagement = () => this.manage;
+    this.logging._resolveManagement = () => this.manage;
+
     // Fire-and-forget: register service context
     void this._registerServiceContext();
   }
