@@ -1,5 +1,6 @@
 /**
- * FlagsClient — management and runtime for Smpl Flags.
+ * FlagsClient — runtime client for Smpl Flags (handle declaration, evaluation,
+ * live updates). Management/CRUD lives on `mgmt.flags.*`.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -19,7 +20,6 @@ import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "./models.js
 import type { Context } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { keyToDisplayName } from "../helpers.js";
 import { debug } from "../_debug.js";
 
 // Use require-style import for json-logic-js (no TS types)
@@ -29,7 +29,6 @@ import jsonLogic from "json-logic-js";
 const FLAGS_BASE_URL = "https://flags.smplkit.com";
 const APP_BASE_URL = "https://app.smplkit.com";
 const CACHE_MAX_SIZE = 10_000;
-const CONTEXT_REGISTRATION_LRU_SIZE = 10_000;
 const CONTEXT_BATCH_FLUSH_SIZE = 100;
 const FLAG_REGISTRATION_FLUSH_SIZE = 50;
 const FLAG_REGISTRATION_FLUSH_INTERVAL_MS = 30_000;
@@ -223,45 +222,14 @@ export class FlagStats {
 }
 
 // ---------------------------------------------------------------------------
-// Context registration buffer
+// Context registration buffer — re-exported from management/client.ts
+// (single canonical implementation shared across runtime + management
+// so observations from `flag.get()` evaluation and from
+// `client.manage.contexts.register(...)` dedupe through one LRU).
 // ---------------------------------------------------------------------------
 
-/** @internal — exported so ManagementClient.contexts can share the same buffer. */
-export class ContextRegistrationBuffer {
-  private _seen = new Map<string, Record<string, any>>();
-  private _pending: Array<Record<string, any>> = [];
-
-  observe(contexts: Context[]): void {
-    for (const ctx of contexts) {
-      const cacheKey = `${ctx.type}:${ctx.key}`;
-      if (!this._seen.has(cacheKey)) {
-        if (this._seen.size >= CONTEXT_REGISTRATION_LRU_SIZE) {
-          // Remove oldest entry
-          const firstKey = this._seen.keys().next().value;
-          if (firstKey !== undefined) {
-            this._seen.delete(firstKey);
-          }
-        }
-        this._seen.set(cacheKey, ctx.attributes);
-        this._pending.push({
-          type: ctx.type,
-          key: ctx.key,
-          attributes: { ...ctx.attributes },
-        });
-      }
-    }
-  }
-
-  drain(): Array<Record<string, any>> {
-    const batch = this._pending;
-    this._pending = [];
-    return batch;
-  }
-
-  get pendingCount(): number {
-    return this._pending.length;
-  }
-}
+export { ContextRegistrationBuffer } from "../management/client.js";
+import { ContextRegistrationBuffer } from "../management/client.js";
 
 // ---------------------------------------------------------------------------
 // Flag registration buffer
@@ -307,80 +275,11 @@ class FlagRegistrationBuffer {
 // ---------------------------------------------------------------------------
 
 /**
- * Management API for smplkit Flags — CRUD operations on Flag models.
+ * Runtime client for the smplkit Flags service.
  *
- * Access via `SmplClient.flags.management`.
- */
-export class FlagsManagement {
-  constructor(private readonly _client: FlagsClient) {}
-
-  /** Create an unsaved boolean flag. Call `.save()` to persist. */
-  newBooleanFlag(
-    id: string,
-    options: { default: boolean; name?: string; description?: string },
-  ): BooleanFlag {
-    return this._client._mgNewBooleanFlag(id, options);
-  }
-
-  /** Create an unsaved string flag. Call `.save()` to persist. */
-  newStringFlag(
-    id: string,
-    options: {
-      default: string;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): StringFlag {
-    return this._client._mgNewStringFlag(id, options);
-  }
-
-  /** Create an unsaved number flag. Call `.save()` to persist. */
-  newNumberFlag(
-    id: string,
-    options: {
-      default: number;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): NumberFlag {
-    return this._client._mgNewNumberFlag(id, options);
-  }
-
-  /** Create an unsaved JSON flag. Call `.save()` to persist. */
-  newJsonFlag(
-    id: string,
-    options: {
-      default: Record<string, any>;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): JsonFlag {
-    return this._client._mgNewJsonFlag(id, options);
-  }
-
-  /** Fetch a flag by id. */
-  async get(id: string): Promise<Flag> {
-    return this._client._mgGet(id);
-  }
-
-  /** List all flags. */
-  async list(): Promise<Flag[]> {
-    return this._client._mgList();
-  }
-
-  /** Delete a flag by id. */
-  async delete(id: string): Promise<void> {
-    return this._client._mgDelete(id);
-  }
-}
-
-/**
- * Client for the smplkit Flags API.
- *
- * Obtained via `SmplClient.flags`.
+ * Obtained via `SmplClient.flags`. Provides flag handle declaration,
+ * evaluation, and live-updates. Management/CRUD lives on
+ * `SmplClient.manage.flags` (or use a standalone {@link SmplManagementClient}).
  */
 export class FlagsClient {
   /** @internal */
@@ -416,9 +315,6 @@ export class FlagsClient {
     readonly _service: string | null;
     readonly _metrics: MetricsReporter | null;
   } | null = null;
-
-  /** Management API — CRUD operations on Flag models. */
-  readonly management: FlagsManagement;
 
   /** @internal */
   constructor(
@@ -471,210 +367,6 @@ export class FlagsClient {
     if (contextBuffer !== undefined) {
       this._contextBuffer = contextBuffer;
     }
-    this.management = new FlagsManagement(this);
-  }
-
-  // ------------------------------------------------------------------
-  // Management: internal implementations (delegated from FlagsManagement)
-  // ------------------------------------------------------------------
-
-  /** @internal */
-  _mgNewBooleanFlag(
-    id: string,
-    options: { default: boolean; name?: string; description?: string },
-  ): BooleanFlag {
-    return new BooleanFlag(this, {
-      id,
-      name: options.name ?? keyToDisplayName(id),
-      type: "BOOLEAN",
-      default: options.default,
-      values: [
-        { name: "True", value: true },
-        { name: "False", value: false },
-      ],
-      description: options.description ?? null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  _mgNewStringFlag(
-    id: string,
-    options: {
-      default: string;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): StringFlag {
-    return new StringFlag(this, {
-      id,
-      name: options.name ?? keyToDisplayName(id),
-      type: "STRING",
-      default: options.default,
-      values: options.values ?? null,
-      description: options.description ?? null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  _mgNewNumberFlag(
-    id: string,
-    options: {
-      default: number;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): NumberFlag {
-    return new NumberFlag(this, {
-      id,
-      name: options.name ?? keyToDisplayName(id),
-      type: "NUMERIC",
-      default: options.default,
-      values: options.values ?? null,
-      description: options.description ?? null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  _mgNewJsonFlag(
-    id: string,
-    options: {
-      default: Record<string, any>;
-      name?: string;
-      description?: string;
-      values?: Array<{ name: string; value: unknown }>;
-    },
-  ): JsonFlag {
-    return new JsonFlag(this, {
-      id,
-      name: options.name ?? keyToDisplayName(id),
-      type: "JSON",
-      default: options.default,
-      values: options.values ?? null,
-      description: options.description ?? null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  async _mgGet(id: string): Promise<Flag> {
-    let data: components["schemas"]["FlagResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/flags/{id}", {
-        params: { path: { id } },
-      });
-      if (!result.response.ok) await checkError(result.response, `Flag with id '${id}' not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) {
-      throw new SmplNotFoundError(`Flag with id '${id}' not found`);
-    }
-    return this._resourceToModel(data.data);
-  }
-
-  /** @internal */
-  async _mgList(): Promise<Flag[]> {
-    let data: components["schemas"]["FlagListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/flags", {});
-      if (!result.response.ok) await checkError(result.response, "Failed to list flags");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data) return [];
-    return data.data.map((r) => this._resourceToModel(r));
-  }
-
-  /** @internal */
-  async _mgDelete(id: string): Promise<void> {
-    try {
-      const result = await this._http.DELETE("/api/v1/flags/{id}", {
-        params: { path: { id } },
-      });
-      if (!result.response.ok) await checkError(result.response, `Failed to delete flag '${id}'`);
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Management: internal save methods (called by Flag.save())
-  // ------------------------------------------------------------------
-
-  /** @internal — POST a new flag. */
-  async _createFlag(flag: Flag): Promise<Flag> {
-    const body = {
-      data: {
-        id: flag.id,
-        type: "flag" as const,
-        attributes: {
-          name: flag.name,
-          description: flag.description ?? "",
-          type: flag.type,
-          default: flag.default,
-          values: flag.values as any,
-          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
-        },
-      },
-    };
-
-    let data: components["schemas"]["FlagResponse"] | undefined;
-    try {
-      const result = await this._http.POST("/api/v1/flags", { body });
-      if (!result.response.ok) await checkError(result.response, "Failed to create flag");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError("Failed to create flag");
-    return this._resourceToModel(data.data);
-  }
-
-  /** @internal — PUT a flag update. */
-  async _updateFlag(flag: Flag): Promise<Flag> {
-    const body = {
-      data: {
-        type: "flag" as const,
-        attributes: {
-          name: flag.name,
-          type: flag.type,
-          default: flag.default,
-          values: flag.values as any,
-          description: flag.description ?? "",
-          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
-        },
-      },
-    };
-
-    let data: components["schemas"]["FlagResponse"] | undefined;
-    try {
-      const result = await this._http.PUT("/api/v1/flags/{id}", {
-        params: { path: { id: flag.id! } },
-        body,
-      });
-      if (!result.response.ok)
-        await checkError(result.response, `Failed to update flag ${flag.id}`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError(`Failed to update flag ${flag.id}`);
-    return this._resourceToModel(data.data);
   }
 
   // ------------------------------------------------------------------
@@ -1260,22 +952,6 @@ export class FlagsClient {
   // ------------------------------------------------------------------
   // Internal: model conversion
   // ------------------------------------------------------------------
-
-  /** @internal */
-  _resourceToModel(resource: FlagResource): Flag {
-    const attrs = resource.attributes;
-    return new Flag(this, {
-      id: resource.id ?? null,
-      name: attrs.name,
-      type: attrs.type,
-      default: attrs.default,
-      values: attrs.values ? attrs.values.map((v) => ({ name: v.name, value: v.value })) : null,
-      description: attrs.description ?? null,
-      environments: attrs.environments ?? {},
-      createdAt: attrs.created_at ?? null,
-      updatedAt: attrs.updated_at ?? null,
-    });
-  }
 
   private _resourceToPlainDict(resource: FlagResource): Record<string, any> {
     const attrs = resource.attributes;

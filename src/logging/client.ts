@@ -1,25 +1,18 @@
 /**
- * LoggingClient — management and runtime for Smpl Logging.
+ * LoggingClient — runtime client for Smpl Logging (level resolution, adapter
+ * integration, live-updates). Management/CRUD lives on `mgmt.loggers.*` and
+ * `mgmt.logGroups.*`.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
 import type { components } from "../generated/logging.d.ts";
-import {
-  SmplConflictError,
-  SmplNotFoundError,
-  SmplValidationError,
-  SmplError,
-  SmplConnectionError,
-  SmplTimeoutError,
-  throwForStatus,
-} from "../errors.js";
+import { SmplError, SmplTimeoutError } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
-import { LogLevel, LoggerSource, type LoggerChangeEvent } from "./types.js";
+import { LogLevel, LoggerChangeEvent } from "./types.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { keyToDisplayName } from "../helpers.js";
 import type { SharedWebSocket } from "../ws.js";
 import { debug } from "../_debug.js";
 
@@ -77,94 +70,13 @@ export class LoggerRegistrationBuffer {
 type LoggerResource = components["schemas"]["LoggerResource"];
 type LogGroupResource = components["schemas"]["LogGroupResource"];
 
-/** @internal */
-async function checkError(response: Response, _context: string): Promise<never> {
-  const body = await response.text().catch(() => "");
-  throwForStatus(response.status, body);
-}
-
-/** @internal */
-function wrapFetchError(err: unknown): never {
-  if (
-    err instanceof SmplNotFoundError ||
-    err instanceof SmplConflictError ||
-    err instanceof SmplValidationError ||
-    err instanceof SmplError
-  ) {
-    throw err;
-  }
-  if (err instanceof TypeError) {
-    throw new SmplConnectionError(`Network error: ${err.message}`);
-  }
-  throw new SmplConnectionError(
-    `Request failed: ${err instanceof Error ? err.message : String(err)}`,
-  );
-}
-
 /**
- * Management API for smplkit Logging — CRUD operations on Logger and LogGroup models.
+ * Runtime client for the smplkit Logging service.
  *
- * Access via `SmplClient.logging.management`.
- */
-export class LoggingManagement {
-  constructor(private readonly _client: LoggingClient) {}
-
-  /** Create an unsaved logger. Call `.save()` to persist. */
-  new(id: string, options?: { name?: string; managed?: boolean }): Logger {
-    return this._client._mgNew(id, options);
-  }
-
-  /** Fetch a logger by id. */
-  async get(id: string): Promise<Logger> {
-    return this._client._mgGet(id);
-  }
-
-  /** List all loggers. */
-  async list(): Promise<Logger[]> {
-    return this._client._mgList();
-  }
-
-  /** Delete a logger by id. */
-  async delete(id: string): Promise<void> {
-    return this._client._mgDelete(id);
-  }
-
-  /** Create an unsaved log group. Call `.save()` to persist. */
-  newGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
-    return this._client._mgNewGroup(id, options);
-  }
-
-  /** Fetch a log group by id. */
-  async getGroup(id: string): Promise<LogGroup> {
-    return this._client._mgGetGroup(id);
-  }
-
-  /** List all log groups. */
-  async listGroups(): Promise<LogGroup[]> {
-    return this._client._mgListGroups();
-  }
-
-  /** Delete a log group by id. */
-  async deleteGroup(id: string): Promise<void> {
-    return this._client._mgDeleteGroup(id);
-  }
-
-  /**
-   * Bulk-register explicit logger sources with the logging service.
-   *
-   * Unlike `start()`, which auto-discovers loggers from the current
-   * process, this method accepts explicit `service` and `environment`
-   * overrides — useful for sample-data seeding and test fixtures.
-   */
-  async registerSources(sources: LoggerSource[]): Promise<void> {
-    return this._client._mgRegisterSources(sources);
-  }
-}
-
-/**
- * Client for the smplkit Logging API.
- *
- * Obtained via `SmplClient.logging`.
+ * Obtained via `SmplClient.logging`. Provides adapter integration, level
+ * resolution, and live-updates for logger/group changes. Management/CRUD
+ * lives on `SmplClient.manage.loggers` / `SmplClient.manage.logGroups` (or
+ * use a standalone {@link SmplManagementClient}).
  */
 export class LoggingClient {
   /** @internal */
@@ -184,8 +96,8 @@ export class LoggingClient {
     readonly _metrics: MetricsReporter | null;
   } | null = null;
 
-  /** Management API — CRUD operations on Logger and LogGroup models. */
-  readonly management: LoggingManagement;
+  /** @internal — resolves the management plane sub-clients used by install/refresh. */
+  _resolveManagement?: () => import("../management/client.js").SmplManagementClient;
 
   private readonly _ensureWs: () => SharedWebSocket;
   private _wsManager: SharedWebSocket | null = null;
@@ -231,7 +143,6 @@ export class LoggingClient {
         }
       },
     });
-    this.management = new LoggingManagement(this);
   }
 
   // ------------------------------------------------------------------
@@ -253,249 +164,69 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Management: internal implementations (delegated from LoggingManagement)
-  // ------------------------------------------------------------------
-
-  /** @internal */
-  _mgNew(id: string, options?: { name?: string; managed?: boolean }): Logger {
-    return new Logger(this, {
-      id,
-      name: options?.name ?? keyToDisplayName(id),
-      level: null,
-      group: null,
-      managed: options?.managed ?? false,
-      sources: [],
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  async _mgGet(id: string): Promise<Logger> {
-    let data: components["schemas"]["LoggerResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/loggers/{id}", {
-        params: { path: { id } },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Logger with id '${id}' not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) {
-      throw new SmplNotFoundError(`Logger with id '${id}' not found`);
-    }
-    return this._loggerToModel(data.data);
-  }
-
-  /** @internal */
-  async _mgList(): Promise<Logger[]> {
-    let data: components["schemas"]["LoggerListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/loggers", {});
-      if (result.error !== undefined) await checkError(result.response, "Failed to list loggers");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data) return [];
-    return data.data.map((r) => this._loggerToModel(r));
-  }
-
-  /** @internal */
-  async _mgDelete(id: string): Promise<void> {
-    try {
-      const result = await this._http.DELETE("/api/v1/loggers/{id}", {
-        params: { path: { id } },
-      });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete logger '${id}'`);
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  /** @internal */
-  _mgNewGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
-    return new LogGroup(this, {
-      id,
-      key: null,
-      name: options?.name ?? keyToDisplayName(id),
-      level: null,
-      group: options?.group ?? null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  async _mgGetGroup(id: string): Promise<LogGroup> {
-    let data: components["schemas"]["LogGroupResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/log_groups/{id}", {
-        params: { path: { id } },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `LogGroup with id '${id}' not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) {
-      throw new SmplNotFoundError(`LogGroup with id '${id}' not found`);
-    }
-    return this._groupToModel(data.data);
-  }
-
-  /** @internal */
-  async _mgListGroups(): Promise<LogGroup[]> {
-    let data: components["schemas"]["LogGroupListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/log_groups", {});
-      if (result.error !== undefined)
-        await checkError(result.response, "Failed to list log groups");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data) return [];
-    return data.data.map((r) => this._groupToModel(r));
-  }
-
-  /** @internal */
-  async _mgRegisterSources(sources: LoggerSource[]): Promise<void> {
-    if (sources.length === 0) return;
-    const loggers = sources.map((src) => ({
-      id: src.name,
-      level: src.level ?? undefined,
-      resolved_level: src.resolvedLevel,
-      service: src.service,
-      environment: src.environment,
-    }));
-    try {
-      const result = await this._http.POST("/api/v1/loggers/bulk", {
-        body: { loggers },
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, "Failed to register sources");
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  /** @internal */
-  async _mgDeleteGroup(id: string): Promise<void> {
-    const group = await this.management.getGroup(id);
-    try {
-      const result = await this._http.DELETE("/api/v1/log_groups/{id}", {
-        params: { path: { id: group.id! } },
-      });
-      if (result.error !== undefined && result.response.status !== 204)
-        await checkError(result.response, `Failed to delete log group '${id}'`);
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Management: internal save methods
-  // ------------------------------------------------------------------
-
-  /** @internal — PUT a logger (upsert: server creates if not found). */
-  async _saveLogger(logger: Logger): Promise<Logger> {
-    const body = {
-      data: {
-        id: logger.id,
-        type: "logger" as const,
-        attributes: {
-          name: logger.name,
-          level: logger.level,
-          group: logger.group,
-          managed: logger.managed,
-          environments: logger.environments,
-        },
-      },
-    };
-
-    let data: components["schemas"]["LoggerResponse"] | undefined;
-    try {
-      const result = await this._http.PUT("/api/v1/loggers/{id}", {
-        params: { path: { id: logger.id! } },
-        body,
-      });
-      if (result.error !== undefined)
-        await checkError(result.response, `Failed to save logger ${logger.id}`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError(`Failed to save logger ${logger.id}`);
-    return this._loggerToModel(data.data);
-  }
-
-  /** @internal — POST or PUT a log group. */
-  async _saveLogGroup(group: LogGroup): Promise<LogGroup> {
-    const body = {
-      data: {
-        id: group.id,
-        type: "log_group" as const,
-        attributes: {
-          name: group.name,
-          level: group.level,
-          group: group.group,
-          environments: group.environments,
-        },
-      },
-    };
-
-    if (group.createdAt === null) {
-      // POST — create
-      let data: components["schemas"]["LogGroupResponse"] | undefined;
-      try {
-        const result = await this._http.POST("/api/v1/log_groups", { body });
-        if (result.error !== undefined)
-          await checkError(result.response, "Failed to create log group");
-        data = result.data;
-      } catch (err) {
-        wrapFetchError(err);
-      }
-      if (!data || !data.data) throw new SmplValidationError("Failed to create log group");
-      return this._groupToModel(data.data);
-    } else {
-      // PUT — update
-      let data: components["schemas"]["LogGroupResponse"] | undefined;
-      try {
-        const result = await this._http.PUT("/api/v1/log_groups/{id}", {
-          params: { path: { id: group.id! } },
-          body,
-        });
-        if (result.error !== undefined)
-          await checkError(result.response, `Failed to update log group ${group.id}`);
-        data = result.data;
-      } catch (err) {
-        wrapFetchError(err);
-      }
-      if (!data || !data.data)
-        throw new SmplValidationError(`Failed to update log group ${group.id}`);
-      return this._groupToModel(data.data);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Runtime: start (scaffolded)
+  // Internal: management-plane delegation (with HTTP fallback)
   // ------------------------------------------------------------------
 
   /**
-   * Start the logging runtime.
+   * @internal — fetch the full logger list. Prefers the management plane
+   * (set via `_resolveManagement`); falls back to a direct GET when running
+   * without `SmplClient` bootstrap (e.g. unit tests that construct
+   * `LoggingClient` directly).
+   */
+  private async _listLoggers(): Promise<Logger[]> {
+    if (this._resolveManagement) {
+      return this._resolveManagement().loggers.list();
+    }
+    const result = await this._http.GET("/api/v1/loggers", {});
+    if (result.error !== undefined) {
+      throw new SmplError(`Failed to list loggers: ${result.response.status}`);
+    }
+    if (!result.data) return [];
+    return result.data.data.map((r) => this._loggerToModel(r));
+  }
+
+  /** @internal — see {@link _listLoggers}. */
+  private async _listLogGroups(): Promise<LogGroup[]> {
+    if (this._resolveManagement) {
+      return this._resolveManagement().logGroups.list();
+    }
+    const result = await this._http.GET("/api/v1/log_groups", {});
+    if (result.error !== undefined) {
+      throw new SmplError(`Failed to list log groups: ${result.response.status}`);
+    }
+    if (!result.data) return [];
+    return result.data.data.map((r) => this._groupToModel(r));
+  }
+
+  // ------------------------------------------------------------------
+  // Runtime: install
+  // ------------------------------------------------------------------
+
+  /**
+   * Install the smplkit logging integration into the running process.
    *
-   * Synchronizes loggers with the server and subscribes to live level
-   * updates. Idempotent — safe to call multiple times.
-   * Management methods work without calling `start()`.
+   * Loads any adapters that haven't been registered explicitly, discovers
+   * existing loggers from each adapter, hooks new-logger creation, and
+   * subscribes to live level updates over the shared WebSocket. Idempotent —
+   * safe to call multiple times. Management methods work without calling
+   * `install()`.
+   *
+   * Mirrors Python's `client.logging.install()`. There is no `stop()`.
+   */
+  async install(): Promise<void> {
+    return this._installInternal();
+  }
+
+  /**
+   * @deprecated Use {@link LoggingClient.install}. Retained as a backwards-
+   * compatible alias.
    */
   async start(): Promise<void> {
+    return this._installInternal();
+  }
+
+  /** @internal — shared body of install()/start(). */
+  async _installInternal(): Promise<void> {
     if (this._started) return;
     debug("lifecycle", "LoggingClient.start() called");
 
@@ -548,8 +279,8 @@ export class LoggingClient {
     debug("resolution", `starting resolution pass (trigger: start())`);
     try {
       const [serverLoggers, serverGroups] = await Promise.all([
-        this.management.list(),
-        this.management.listGroups(),
+        this._listLoggers(),
+        this._listLogGroups(),
       ]);
       debug(
         "api",
@@ -764,11 +495,11 @@ export class LoggingClient {
         if (logger) {
           this._applyLevels([logger]);
         }
-        const event: LoggerChangeEvent = {
+        const event = new LoggerChangeEvent({
           id,
           level: newLevel as LogLevel | null,
           source: "websocket",
-        };
+        });
         for (const cb of this._globalListeners) {
           try {
             cb(event);
@@ -801,12 +532,12 @@ export class LoggingClient {
     if (!id) return;
     // Remove from store — no HTTP fetch
     delete this._loggerStore[id];
-    const event: LoggerChangeEvent & { deleted: true } = {
+    const event = new LoggerChangeEvent({
       id,
       level: null,
       source: "websocket",
       deleted: true,
-    };
+    });
     for (const cb of this._globalListeners) {
       try {
         cb(event);
@@ -844,8 +575,7 @@ export class LoggingClient {
         if (oldLevel === newLevel) return; // no change
         this._groupStore[id] = newLevel;
         // Group level change means re-apply to all loggers in this group
-        void this.management
-          .list()
+        void this._listLoggers()
           .then((loggers) => {
             this._applyLevels(loggers);
           })
@@ -865,12 +595,12 @@ export class LoggingClient {
     if (!id) return;
     // Remove from store — no HTTP fetch
     delete this._groupStore[id];
-    const event: LoggerChangeEvent & { deleted: true } = {
+    const event = new LoggerChangeEvent({
       id,
       level: null,
       source: "websocket",
       deleted: true,
-    };
+    });
     for (const cb of this._globalListeners) {
       try {
         cb(event);
@@ -899,7 +629,7 @@ export class LoggingClient {
   private _handleLoggersChanged = (_data: Record<string, any>): void => {
     debug("websocket", `loggers_changed event received`);
     // Full refetch of both loggers AND log_groups, diff-based firing
-    void Promise.all([this.management.list(), this.management.listGroups()])
+    void Promise.all([this._listLoggers(), this._listLogGroups()])
       .then(([serverLoggers, serverGroups]) => {
         debug("resolution", `resolution pass (trigger: loggers_changed event)`);
         // Diff loggers
@@ -932,11 +662,11 @@ export class LoggingClient {
         // Fire global listener ONCE
         const [firstKey] = changedLoggerIds;
         const firstLogger = serverLoggers.find((l) => l.id === firstKey);
-        const globalEvent: LoggerChangeEvent = {
+        const globalEvent = new LoggerChangeEvent({
           id: firstKey,
           level: (firstLogger?.level ?? null) as LogLevel | null,
           source: "websocket",
-        };
+        });
         for (const cb of this._globalListeners) {
           try {
             cb(globalEvent);
@@ -949,11 +679,11 @@ export class LoggingClient {
           const keyCallbacks = this._keyListeners.get(key);
           if (keyCallbacks) {
             const l = serverLoggers.find((x) => x.id === key);
-            const keyEvent: LoggerChangeEvent = {
+            const keyEvent = new LoggerChangeEvent({
               id: key,
               level: (l?.level ?? null) as LogLevel | null,
               source: "websocket",
-            };
+            });
             for (const cb of keyCallbacks) {
               try {
                 cb(keyEvent);
@@ -1007,10 +737,11 @@ export class LoggingClient {
   // Internal: model conversion
   // ------------------------------------------------------------------
 
+  /** @internal — runtime models are read-only (no save/delete). */
   private _loggerToModel(resource: LoggerResource): Logger {
     const attrs = resource.attributes;
     const rawLevel = attrs.level ?? null;
-    return new Logger(this, {
+    return new Logger(null, {
       id: resource.id ?? null,
       name: attrs.name,
       level: rawLevel as LogLevel | null,
@@ -1023,12 +754,12 @@ export class LoggingClient {
     });
   }
 
+  /** @internal — runtime models are read-only (no save/delete). */
   private _groupToModel(resource: LogGroupResource): LogGroup {
     const attrs = resource.attributes;
     const rawLevel = attrs.level ?? null;
-    return new LogGroup(this, {
+    return new LogGroup(null, {
       id: resource.id ?? null,
-      key: resource.id ?? null,
       name: attrs.name,
       level: rawLevel as LogLevel | null,
       group: attrs.parent_id ?? null,

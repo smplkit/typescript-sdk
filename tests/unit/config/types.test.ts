@@ -1,20 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { Config } from "../../../src/config/types.js";
-import type { ConfigClient } from "../../../src/config/client.js";
+import { Config, ConfigEnvironment, ConfigItem, ItemType } from "../../../src/config/types.js";
+import type { ConfigModelClient } from "../../../src/config/types.js";
 
-/** Create a minimal mock of ConfigClient with the methods Config needs. */
+/** Create a minimal mock of ConfigModelClient with the methods Config needs. */
 function makeMockClient() {
   return {
     _apiKey: "sk_test",
     _baseUrl: "https://config.smplkit.com",
     _createConfig: vi.fn(),
     _updateConfig: vi.fn(),
-    _getById: vi.fn(),
-  } as unknown as ConfigClient;
+    _deleteConfig: vi.fn(),
+    _fetchConfig: vi.fn(),
+  } as unknown as ConfigModelClient;
 }
 
 function makeConfig(
-  client: ConfigClient,
+  client: ConfigModelClient,
   fields?: Partial<{
     id: string | null;
     name: string;
@@ -38,6 +39,64 @@ function makeConfig(
     ...fields,
   });
 }
+
+// ---------------------------------------------------------------------------
+// ConfigItem
+// ---------------------------------------------------------------------------
+
+describe("ConfigItem", () => {
+  it("toString includes name, type, and JSON-stringified value", () => {
+    const item = new ConfigItem("retries", 3, ItemType.NUMBER);
+    expect(item.toString()).toBe("ConfigItem(name=retries, type=NUMBER, value=3)");
+  });
+
+  it("toString quotes strings in the JSON-stringified value", () => {
+    const item = new ConfigItem("region", "us-east", ItemType.STRING);
+    expect(item.toString()).toContain('value="us-east"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ConfigEnvironment
+// ---------------------------------------------------------------------------
+
+describe("ConfigEnvironment", () => {
+  it("toString reports the unwrapped values dict", () => {
+    const env = new ConfigEnvironment({ retries: 5, timeout: 30 });
+    expect(env.toString()).toBe('ConfigEnvironment(values={"retries":5,"timeout":30})');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config — convertEnvironments preserves ConfigEnvironment instances
+// ---------------------------------------------------------------------------
+
+describe("convertEnvironments (via Config constructor)", () => {
+  it("preserves an existing ConfigEnvironment instance unchanged", () => {
+    const client = {
+      _apiKey: "sk_test",
+      _baseUrl: "https://config.smplkit.com",
+      _createConfig: vi.fn(),
+      _updateConfig: vi.fn(),
+      _deleteConfig: vi.fn(),
+      _fetchConfig: vi.fn(),
+    } as unknown as ConfigModelClient;
+
+    const env = new ConfigEnvironment({ retries: 5 });
+    const cfg = new Config(client, {
+      id: "x",
+      name: "X",
+      description: null,
+      parent: null,
+      items: {},
+      environments: { production: env },
+      createdAt: null,
+      updatedAt: null,
+    });
+
+    expect(cfg.environments.production).toBe(env);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -105,6 +164,209 @@ describe("Config", () => {
   // ---------------------------------------------------------------------------
   // save()
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // itemsRaw getter
+  // ---------------------------------------------------------------------------
+
+  describe("itemsRaw", () => {
+    it("returns a deep copy of typed items including value and type", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client);
+      config.setNumber("retries", 3, { description: "max retries" });
+
+      const raw = config.itemsRaw;
+      expect(raw.retries).toMatchObject({ value: 3, type: "NUMBER", description: "max retries" });
+    });
+
+    it("mutating the copy does not affect the underlying state", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client);
+      config.setNumber("retries", 3);
+      const raw = config.itemsRaw;
+      raw.retries.value = 99;
+      expect(config.items.retries).toBe(3);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // remove()
+  // ---------------------------------------------------------------------------
+
+  describe("remove", () => {
+    it("removes a top-level item", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client);
+      config.setNumber("retries", 3);
+      expect(config.items).toHaveProperty("retries");
+      config.remove("retries");
+      expect(config.items).not.toHaveProperty("retries");
+    });
+
+    it("removes an environment-scoped override only", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client);
+      config.setNumber("retries", 3);
+      config.setNumber("retries", 5, { environment: "production" });
+
+      config.remove("retries", { environment: "production" });
+
+      expect(config.items.retries).toBe(3);
+      expect(config.environments.production.values).not.toHaveProperty("retries");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setJson
+  // ---------------------------------------------------------------------------
+
+  describe("setJson", () => {
+    it("should set a JSON-typed item", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+
+      config.setJson("payload", { foo: 1, bar: [2, 3] });
+
+      // raw stored value preserves the typed wrapper
+      expect(config.items).toHaveProperty("payload");
+    });
+
+    it("should set a JSON-typed item with environment override", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+
+      config.setJson("payload", { v: 1 }, { environment: "production" });
+
+      expect(config.environments.production).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // delete()
+  // ---------------------------------------------------------------------------
+
+  describe("delete", () => {
+    it("should call _deleteConfig with id when client and id are present", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { id: "my-config" });
+
+      await config.delete();
+
+      expect(client._deleteConfig).toHaveBeenCalledWith("my-config");
+    });
+
+    it("should throw when client is null", async () => {
+      const config = new Config(null, {
+        id: "my-config",
+        name: "My Config",
+        description: null,
+        parent: null,
+        items: {},
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(config.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw when id is null", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { id: null });
+      await expect(config.delete()).rejects.toThrow("cannot delete");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // save() — no client
+  // ---------------------------------------------------------------------------
+
+  describe("save() — no client", () => {
+    it("should throw when client is null", async () => {
+      const config = new Config(null, {
+        id: null,
+        name: "Untethered",
+        description: null,
+        parent: null,
+        items: {},
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(config.save()).rejects.toThrow("cannot save");
+    });
+  });
+
+  describe("save() — runtime client (no CRUD methods)", () => {
+    it("create flow throws when _createConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _createConfig — runtime client surface
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, { id: "new", createdAt: null });
+      await expect(config.save()).rejects.toThrow(/cannot be saved/);
+    });
+
+    it("update flow throws when _updateConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _updateConfig
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, {
+        id: "existing",
+        createdAt: "2024-01-01T00:00:00Z",
+      });
+      await expect(config.save()).rejects.toThrow(/cannot be saved/);
+    });
+  });
+
+  describe("delete() — runtime client (no _deleteConfig)", () => {
+    it("throws when _deleteConfig is undefined", async () => {
+      const client = {
+        _apiKey: "sk_test",
+        _baseUrl: "https://config.smplkit.com",
+        // No _deleteConfig
+      } as unknown as ConfigModelClient;
+      const config = makeConfig(client, { id: "existing" });
+      await expect(config.delete()).rejects.toThrow(/cannot be deleted/);
+    });
+  });
+
+  describe("convertEnvironments edge cases", () => {
+    it("preserves entries that don't have a values key (treats whole entry as values)", () => {
+      const client = makeMockClient();
+      // Entry without `values` key — convertEnvironments uses the whole entry as raw values.
+      const cfg = new Config(client, {
+        id: "x",
+        name: "X",
+        description: null,
+        parent: null,
+        items: {},
+        environments: { staging: { metadata: "x" } },
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(cfg.environments.staging).toBeInstanceOf(ConfigEnvironment);
+    });
+
+    it("handles primitive (non-object) entries gracefully", () => {
+      const client = makeMockClient();
+      const cfg = new Config(client, {
+        id: "x",
+        name: "X",
+        description: null,
+        parent: null,
+        items: {},
+        // primitive — outer-else branch: produces empty ConfigEnvironment
+        environments: { staging: "scalar-value" as unknown as Record<string, unknown> },
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(cfg.environments.staging).toBeInstanceOf(ConfigEnvironment);
+      expect(cfg.environments.staging.values).toEqual({});
+    });
+  });
 
   describe("save", () => {
     it("should call _createConfig when createdAt is null and apply result", async () => {
@@ -180,7 +442,10 @@ describe("Config", () => {
       expect(config.description).toBe("New desc");
       expect(config.parent).toBe("parent-id");
       expect(config.items).toEqual({ b: 2 });
-      expect(config.environments).toEqual({ prod: { values: { x: 1 } } });
+      // environments is now a Record<string, ConfigEnvironment>; check the env's values
+      expect(Object.keys(config.environments)).toEqual(["prod"]);
+      expect(config.environments.prod).toBeInstanceOf(ConfigEnvironment);
+      expect(config.environments.prod.values).toEqual({ x: 1 });
       expect(config.createdAt).toBe("2024-02-01T00:00:00Z");
       expect(config.updatedAt).toBe("2024-02-02T00:00:00Z");
     });
@@ -220,8 +485,9 @@ describe("Config", () => {
 
       expect(chain).toHaveLength(1);
       expect(chain[0].id).toBe("my-config");
-      expect(chain[0].items).toEqual({ timeout: 30 });
-      expect(client._getById).not.toHaveBeenCalled();
+      // chain returns wire-format items: {key: {value: raw, type?: ItemType}}
+      expect(chain[0].items).toEqual({ timeout: { value: 30 } });
+      expect(client._fetchConfig).not.toHaveBeenCalled();
     });
 
     it("should walk single-parent chain", async () => {
@@ -241,16 +507,16 @@ describe("Config", () => {
         environments: {},
       });
 
-      (client._getById as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parentConfig);
+      (client._fetchConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parentConfig);
 
       const chain = await config._buildChain();
 
       expect(chain).toHaveLength(2);
       expect(chain[0].id).toBe("child-id");
-      expect(chain[0].items).toEqual({ child_val: 1 });
+      expect(chain[0].items).toEqual({ child_val: { value: 1 } });
       expect(chain[1].id).toBe("parent-id");
-      expect(chain[1].items).toEqual({ parent_val: 2 });
-      expect(client._getById).toHaveBeenCalledWith("parent-id");
+      expect(chain[1].items).toEqual({ parent_val: { value: 2 } });
+      expect(client._fetchConfig).toHaveBeenCalledWith("parent-id");
     });
 
     it("should use configs list for parent lookup when provided", async () => {
@@ -275,7 +541,7 @@ describe("Config", () => {
       expect(chain).toHaveLength(2);
       expect(chain[0].id).toBe("child-id");
       expect(chain[1].id).toBe("parent-id");
-      expect(client._getById).not.toHaveBeenCalled();
+      expect(client._fetchConfig).not.toHaveBeenCalled();
     });
 
     it("should walk multi-level parent chain (grandchild -> child -> root)", async () => {
@@ -302,7 +568,7 @@ describe("Config", () => {
         environments: {},
       });
 
-      (client._getById as ReturnType<typeof vi.fn>)
+      (client._fetchConfig as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(child)
         .mockResolvedValueOnce(root);
 
@@ -312,12 +578,12 @@ describe("Config", () => {
       expect(chain[0].id).toBe("gc-id");
       expect(chain[1].id).toBe("child-id");
       expect(chain[2].id).toBe("root-id");
-      expect(client._getById).toHaveBeenCalledTimes(2);
-      expect(client._getById).toHaveBeenCalledWith("child-id");
-      expect(client._getById).toHaveBeenCalledWith("root-id");
+      expect(client._fetchConfig).toHaveBeenCalledTimes(2);
+      expect(client._fetchConfig).toHaveBeenCalledWith("child-id");
+      expect(client._fetchConfig).toHaveBeenCalledWith("root-id");
     });
 
-    it("should use empty string for null id in chain entry", async () => {
+    it("should preserve null id in chain entry", async () => {
       const client = makeMockClient();
       const config = makeConfig(client, {
         id: null,
@@ -327,7 +593,7 @@ describe("Config", () => {
 
       const chain = await config._buildChain();
 
-      expect(chain[0].id).toBe("");
+      expect(chain[0].id).toBeNull();
     });
 
     it("should include environments in chain entries", async () => {
@@ -346,12 +612,60 @@ describe("Config", () => {
         environments: { prod: { values: { timeout: 60 } } },
       });
 
-      (client._getById as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parent);
+      (client._fetchConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parent);
 
       const chain = await config._buildChain();
 
-      expect(chain[0].environments).toEqual({ prod: { values: { retries: 5 } } });
-      expect(chain[1].environments).toEqual({ prod: { values: { timeout: 60 } } });
+      // chain entries return environments in wire format: { env: { values: { key: { value: raw } } } }
+      expect(chain[0].environments).toEqual({ prod: { values: { retries: { value: 5 } } } });
+      expect(chain[1].environments).toEqual({ prod: { values: { timeout: { value: 60 } } } });
+    });
+
+    it("should throw when client is null and parent cannot be resolved from configs", async () => {
+      const config = new Config(null, {
+        id: "child-id",
+        name: "Child",
+        description: null,
+        parent: "parent-id",
+        items: { x: 1 },
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+
+      await expect(config._buildChain()).rejects.toThrow(
+        /cannot resolve parent config .* without a client/,
+      );
+    });
+
+    it("should not throw when parent is supplied via configs list (no client needed)", async () => {
+      const parent = new Config(null, {
+        id: "parent-id",
+        name: "Parent",
+        description: null,
+        parent: null,
+        items: { y: 2 },
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+
+      const config = new Config(null, {
+        id: "child-id",
+        name: "Child",
+        description: null,
+        parent: "parent-id",
+        items: { x: 1 },
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+
+      const chain = await config._buildChain([parent]);
+
+      expect(chain).toHaveLength(2);
+      expect(chain[0].id).toBe("child-id");
+      expect(chain[1].id).toBe("parent-id");
     });
   });
 });

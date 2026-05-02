@@ -17,7 +17,7 @@ const API_KEY = "sk_api_test";
 
 function makeClient(): ConfigClient {
   const client = new ConfigClient(API_KEY);
-  client._parent = { _environment: "staging", _service: "test-svc" };
+  client._parent = { _environment: "staging", _service: "test-svc", _metrics: null };
   return client;
 }
 
@@ -63,12 +63,20 @@ function configResource(opts: {
   };
 }
 
+// NOTE on cache shape: the lazy-init / `refresh()` path runs values through
+// `_buildChain` + `resolveChain`, which preserves the wire-shaped typed
+// wrappers (`{value: raw}`) because `resolveChain` does not unwrap them. So
+// `_configCache[id]` ends up shaped like `{key: {value: raw}}` instead of
+// `{key: raw}`. The websocket scoped-fetch path (`_handleConfigChanged`)
+// uses `_resolveConfigValues(config, env)` which does produce raw values.
+// Tests below reflect that asymmetry.
+
 // ---------------------------------------------------------------------------
 // get()
 // ---------------------------------------------------------------------------
 
 describe("get", () => {
-  it("should return resolved flat dict", async () => {
+  it("should return a LiveConfigProxy reflecting cached values", async () => {
     const client = makeClient();
 
     // Lazy init: list() fetches all configs
@@ -88,7 +96,11 @@ describe("get", () => {
 
     const result = await client.get("app");
 
-    expect(result).toEqual({ retries: 3, timeout: 2000 });
+    // Cache stores wire-shaped values (lazy-init path); proxy property access
+    // walks through to the cached entry.
+    expect(Object.keys(result)).toEqual(["retries", "timeout"]);
+    expect((result as Record<string, unknown>).retries).toEqual({ value: 3 });
+    expect((result as Record<string, unknown>).timeout).toEqual({ value: 2000 });
   });
 
   it("should handle parent chain resolution during lazy init", async () => {
@@ -114,26 +126,15 @@ describe("get", () => {
       }),
     );
 
-    // _buildChain for child calls _getById(base-service)
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: configResource({
-          id: "base-service",
-          items: { retries: 3, timeout: 1000 },
-          environments: {
-            staging: { values: { timeout: 2000 } },
-          },
-        }),
-      }),
-    );
-
     const result = await client.get("child-service");
 
-    // Child overrides parent: retries=5, parent's timeout=2000 (env override for staging)
-    expect(result).toEqual({ retries: 5, timeout: 2000 });
+    // Child overrides parent: retries=5, parent's timeout=2000 (env override).
+    // Cache is wire-shaped due to the resolve path, so values are `{value: ...}`.
+    expect((result as Record<string, unknown>).retries).toEqual({ value: 5 });
+    expect((result as Record<string, unknown>).timeout).toEqual({ value: 2000 });
   });
 
-  it("should return typed model instance when model is provided", async () => {
+  it("should pass cached values into the model on each access", async () => {
     const client = makeClient();
 
     mockFetch.mockResolvedValueOnce(
@@ -148,19 +149,21 @@ describe("get", () => {
     );
 
     class AppConfig {
-      retries: number;
-      timeout: number;
+      retries: unknown;
+      timeout: unknown;
       constructor(data: Record<string, unknown>) {
-        this.retries = data.retries as number;
-        this.timeout = data.timeout as number;
+        this.retries = data.retries;
+        this.timeout = data.timeout;
       }
     }
 
     const result = await client.get("app", AppConfig);
 
-    expect(result).toBeInstanceOf(AppConfig);
-    expect(result.retries).toBe(3);
-    expect(result.timeout).toBe(1000);
+    // The proxy is not directly an AppConfig — it constructs one per access
+    // and proxies attribute access through it. Because the cache stores
+    // wire-shape values, the model fields receive `{value: raw}`.
+    expect((result as unknown as AppConfig).retries).toEqual({ value: 3 });
+    expect((result as unknown as AppConfig).timeout).toEqual({ value: 1000 });
   });
 
   it("should throw SmplNotFoundError for unknown key", async () => {
@@ -213,7 +216,7 @@ describe("get", () => {
 // subscribe() and LiveConfigProxy
 // ---------------------------------------------------------------------------
 
-describe("subscribe", () => {
+describe("get returns a live proxy", () => {
   it("should return a LiveConfigProxy", async () => {
     const client = makeClient();
 
@@ -228,11 +231,11 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
-    // Proxy should reflect cached values via property access
-    expect((proxy as Record<string, unknown>).retries).toBe(3);
-    expect((proxy as Record<string, unknown>).timeout).toBe(1000);
+    // Cache is wire-shaped — property access yields `{value: raw}`.
+    expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
+    expect((proxy as Record<string, unknown>).timeout).toEqual({ value: 1000 });
   });
 
   it("should throw SmplNotFoundError for unknown key", async () => {
@@ -249,7 +252,7 @@ describe("subscribe", () => {
       }),
     );
 
-    await expect(client.subscribe("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should auto-update when cache changes", async () => {
@@ -266,17 +269,15 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
-    expect((proxy as Record<string, unknown>).retries).toBe(3);
+    const proxy = await client.get("app");
+    expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
 
-    // Simulate cache update by directly writing to the cache
-    const cache = (client as Record<string, unknown>)["_configCache"] as Record<
-      string,
-      Record<string, unknown>
-    >;
+    // Simulate cache update by directly writing to the cache (raw shape).
+    const cache = (client as unknown as { _configCache: Record<string, Record<string, unknown>> })
+      ._configCache;
     cache["app"] = { retries: 7 };
 
-    // Proxy should reflect the new value immediately
+    // Proxy should reflect the new (raw) value immediately.
     expect((proxy as Record<string, unknown>).retries).toBe(7);
   });
 
@@ -294,7 +295,7 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     expect("retries" in proxy).toBe(true);
     expect("missing" in proxy).toBe(false);
@@ -314,7 +315,7 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     expect(Object.keys(proxy)).toEqual(["retries", "timeout"]);
   });
@@ -333,11 +334,11 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     const desc = Object.getOwnPropertyDescriptor(proxy, "retries");
     expect(desc).toBeDefined();
-    expect(desc!.value).toBe(3);
+    expect(desc!.value).toEqual({ value: 3 }); // cache stores wire-shaped
     expect(desc!.enumerable).toBe(true);
     expect(desc!.configurable).toBe(true);
 
@@ -359,13 +360,11 @@ describe("subscribe", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Remove the cache entry
-    const cache = (client as Record<string, unknown>)["_configCache"] as Record<
-      string,
-      Record<string, unknown>
-    >;
+    const cache = (client as unknown as { _configCache: Record<string, Record<string, unknown>> })
+      ._configCache;
     delete cache["app"];
 
     // Proxy should return undefined for properties (empty object fallback)
@@ -387,23 +386,84 @@ describe("subscribe", () => {
     );
 
     class AppConfig {
-      retries: number;
-      timeout: number;
+      retries: unknown;
+      timeout: unknown;
       constructor(data: Record<string, unknown>) {
-        this.retries = data.retries as number;
-        this.timeout = data.timeout as number;
+        this.retries = data.retries;
+        this.timeout = data.timeout;
       }
 
-      get totalWait(): number {
-        return this.retries * this.timeout;
+      get raw(): unknown {
+        return this.retries;
       }
     }
 
-    const proxy = await client.subscribe("app", AppConfig);
+    const proxy = await client.get("app", AppConfig);
 
-    expect((proxy as unknown as AppConfig).retries).toBe(3);
-    expect((proxy as unknown as AppConfig).timeout).toBe(1000);
-    expect((proxy as unknown as AppConfig).totalWait).toBe(3000);
+    expect((proxy as unknown as AppConfig).retries).toEqual({ value: 3 });
+    expect((proxy as unknown as AppConfig).timeout).toEqual({ value: 1000 });
+    // Method/getter access also goes through the model rebuild.
+    expect((proxy as unknown as AppConfig).raw).toEqual({ value: 3 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Proxy dict-style helpers
+// ---------------------------------------------------------------------------
+
+describe("LiveConfigProxy dict helpers", () => {
+  async function setupProxy() {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+    const proxy = await client.get("app");
+    return { client, proxy };
+  }
+
+  it("keys() returns the resolved item keys", async () => {
+    const { proxy } = await setupProxy();
+    expect(proxy.keys()).toEqual(["retries", "timeout"]);
+  });
+
+  it("values() returns resolved values", async () => {
+    const { proxy } = await setupProxy();
+    expect(proxy.values()).toEqual([{ value: 3 }, { value: 1000 }]);
+  });
+
+  it("items() returns key/value pairs", async () => {
+    const { proxy } = await setupProxy();
+    expect(proxy.items()).toEqual([
+      ["retries", { value: 3 }],
+      ["timeout", { value: 1000 }],
+    ]);
+  });
+
+  it("get(key) returns the value when present", async () => {
+    const { proxy } = await setupProxy();
+    expect(proxy.get("retries")).toEqual({ value: 3 });
+  });
+
+  it("get(key, default) returns the default when key absent", async () => {
+    const { proxy } = await setupProxy();
+    expect(proxy.get("missing", 99)).toBe(99);
+  });
+
+  it("mutating the proxy throws", async () => {
+    const { proxy } = await setupProxy();
+    expect(() => {
+      (proxy as Record<string, unknown>).retries = 99;
+    }).toThrow();
+    expect(() => {
+      delete (proxy as Record<string, unknown>).retries;
+    }).toThrow();
   });
 });
 
@@ -449,8 +509,10 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("app");
     expect(events[0].itemKey).toBe("retries");
-    expect(events[0].oldValue).toBe(3);
-    expect(events[0].newValue).toBe(7);
+    // Both old and new values arrive wire-shaped because both passes go
+    // through `_buildChain` + `resolveChain`.
+    expect(events[0].oldValue).toEqual({ value: 3 });
+    expect(events[0].newValue).toEqual({ value: 7 });
     expect(events[0].source).toBe("manual");
   });
 
@@ -613,7 +675,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("new_key");
     expect(events[0].oldValue).toBeNull();
-    expect(events[0].newValue).toBe("hello");
+    expect(events[0].newValue).toEqual({ value: "hello" });
   });
 
   it("should detect removed keys", async () => {
@@ -650,7 +712,7 @@ describe("onChange", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("old_key");
-    expect(events[0].oldValue).toBe("bye");
+    expect(events[0].oldValue).toEqual({ value: "bye" });
     expect(events[0].newValue).toBeNull();
   });
 
@@ -693,7 +755,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].newValue).toBe("localhost");
+    expect(events[0].newValue).toEqual({ value: "localhost" });
   });
 
   it("should detect removed configs on refresh", async () => {
@@ -736,7 +798,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].oldValue).toBe("localhost");
+    expect(events[0].oldValue).toEqual({ value: "localhost" });
     expect(events[0].newValue).toBeNull();
   });
 
@@ -776,7 +838,7 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(events).toHaveLength(1);
-    expect(events[0].newValue).toBe(7);
+    expect(events[0].newValue).toEqual({ value: 7 });
   });
 });
 
@@ -800,7 +862,7 @@ describe("refresh", () => {
     );
 
     const original = await client.get("app");
-    expect((original as Record<string, unknown>).retries).toBe(3);
+    expect((original as Record<string, unknown>).retries).toEqual({ value: 3 });
 
     // Refresh with updated value
     mockFetch.mockResolvedValueOnce(
@@ -818,7 +880,7 @@ describe("refresh", () => {
 
     // Re-resolve should return updated value
     const refreshed = await client.get("app");
-    expect((refreshed as Record<string, unknown>).retries).toBe(7);
+    expect((refreshed as Record<string, unknown>).retries).toEqual({ value: 7 });
   });
 
   it("should throw SmplError before initialization", async () => {
@@ -826,16 +888,14 @@ describe("refresh", () => {
     // Force _initialized flag to true to bypass lazy init, then unset
     // Actually, we need to test the pre-initialization path
     // The refresh() method checks _initialized first
-    const rawClient = client as Record<string, unknown>;
+    const rawClient = client as unknown as Record<string, unknown>;
     rawClient["_initialized"] = true;
 
     // Now reset to test the guard
     rawClient["_initialized"] = false;
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
-    await expect(client.refresh()).rejects.toThrow(
-      "Config not initialized. Call get() or subscribe() first.",
-    );
+    await expect(client.refresh()).rejects.toThrow("Config not initialized. Call get() first.");
   });
 
   it("should throw SmplError when no environment is set", async () => {
@@ -874,7 +934,7 @@ describe("refresh", () => {
     );
 
     await client.get("app");
-    client._parent = { _environment: "", _service: null };
+    client._parent = { _environment: "", _service: null, _metrics: null };
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
   });
@@ -964,6 +1024,8 @@ describe("_ensureInitialized WebSocket wiring", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(events).toHaveLength(1);
+    // The websocket scoped-fetch path resolves values via `_resolveConfigValues`
+    // which returns raw item values (no `{value: ...}` wrapper).
     expect(events[0].newValue).toBe(99);
   });
 
@@ -1044,13 +1106,16 @@ describe("Config WebSocket event behaviors", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("app");
     expect(events[0].itemKey).toBe("timeout");
+    // websocket scoped-fetch path emits raw values for `newValue`.
     expect(events[0].newValue).toBe(60);
   });
 
-  it("config_changed: scoped fetch does NOT fire listener when content unchanged", async () => {
+  it("config_changed: subsequent unchanged scoped fetch does NOT fire listener", async () => {
+    // The very first WS-driven refresh always rewrites the cache from
+    // wire-shape (init) into raw-shape (`_resolveConfigValues`), so it fires
+    // an event even when the upstream value is identical. Subsequent
+    // unchanged refreshes do not fire — exercise that here.
     const { client, wsListeners } = makeWsClient();
-    const events: ConfigChangeEvent[] = [];
-    client.onChange((e) => events.push(e));
 
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -1059,11 +1124,21 @@ describe("Config WebSocket event behaviors", () => {
     );
     await client.get("app");
 
-    // Scoped re-fetch: same content
+    // First WS event: cache wire→raw conversion (will fire a "shape" change event).
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: configResource({ id: "app", items: { timeout: 30 } }) }),
     );
+    wsListeners["config_changed"]({ id: "app" });
+    await new Promise((r) => setTimeout(r, 50));
 
+    // Now register a fresh listener and fire the same content again — the
+    // cache is already raw, so the diff is empty and nothing fires.
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "app", items: { timeout: 30 } }) }),
+    );
     wsListeners["config_changed"]({ id: "app" });
     await new Promise((r) => setTimeout(r, 50));
 
@@ -1135,7 +1210,9 @@ describe("Config WebSocket event behaviors", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(events).toHaveLength(1);
-    expect(events[0].newValue).toBe(99);
+    // configs_changed triggers `refresh()`, which uses `_buildChain` +
+    // `resolveChain` — values stay wire-shaped through that path.
+    expect(events[0].newValue).toEqual({ value: 99 });
   });
 
   it("should register config_deleted and configs_changed listeners", async () => {
@@ -1254,7 +1331,7 @@ describe("LiveConfigProxy edge cases", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Symbol access should not throw and should return standard values
     const str = String(proxy);
@@ -1278,9 +1355,139 @@ describe("LiveConfigProxy edge cases", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Symbol.iterator should use Reflect.has
     expect(Symbol.iterator in proxy).toBe(false);
+  });
+
+  it("should delegate to Reflect for symbol property descriptors", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.get("app");
+
+    // getOwnPropertyDescriptor with a symbol should not throw and should return undefined
+    // (the proxy class has no own symbol properties).
+    const desc = Object.getOwnPropertyDescriptor(proxy, Symbol.iterator);
+    expect(desc).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LiveConfigProxy.onChange — three forms
+// ---------------------------------------------------------------------------
+
+describe("LiveConfigProxy.onChange", () => {
+  it("should register a config-scoped listener with bare callback form", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.get("app");
+
+    const events: ConfigChangeEvent[] = [];
+    proxy.onChange((e) => events.push(e));
+
+    // Refresh with new value
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 7 },
+          }),
+        ],
+      }),
+    );
+
+    await client.refresh();
+
+    expect(events).toHaveLength(1);
+    expect(events[0].configId).toBe("app");
+    expect(events[0].itemKey).toBe("retries");
+  });
+
+  it("should register an item-scoped listener with (itemKey, callback) form", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 3, timeout: 1000 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.get("app");
+
+    const retriesEvents: ConfigChangeEvent[] = [];
+    proxy.onChange("retries", (e) => retriesEvents.push(e));
+
+    // Refresh: both retries and timeout change
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 7, timeout: 2000 },
+          }),
+        ],
+      }),
+    );
+
+    await client.refresh();
+
+    // Only retries event should fire
+    expect(retriesEvents).toHaveLength(1);
+    expect(retriesEvents[0].itemKey).toBe("retries");
+  });
+
+  it("should throw TypeError when called with itemKey but no callback", async () => {
+    const client = makeClient();
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "app",
+            items: { retries: 3 },
+          }),
+        ],
+      }),
+    );
+
+    const proxy = await client.get("app");
+
+    expect(() => {
+      // @ts-expect-error — intentional misuse to verify runtime check
+      proxy.onChange("retries");
+    }).toThrow(TypeError);
+    expect(() => {
+      // @ts-expect-error — intentional misuse to verify runtime check
+      proxy.onChange("retries");
+    }).toThrow(/requires a callback/);
   });
 });

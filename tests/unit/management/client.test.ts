@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ManagementClient } from "../../../src/management/client.js";
-import { ContextRegistrationBuffer } from "../../../src/flags/client.js";
-import {
-  Environment,
-  ContextType,
-  ContextEntity,
-  AccountSettings,
-} from "../../../src/management/models.js";
+import { SmplManagementClient } from "../../../src/management/client.js";
+import { Environment, ContextType, AccountSettings } from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
 import { Context } from "../../../src/flags/types.js";
 import {
@@ -29,12 +23,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const APP_BASE_URL = "http://test";
 const API_KEY = "sk_test";
 
-function makeClient(): ManagementClient {
-  const buffer = new ContextRegistrationBuffer();
-  return new ManagementClient({ appBaseUrl: APP_BASE_URL, apiKey: API_KEY, buffer });
+function makeClient(): SmplManagementClient {
+  return new SmplManagementClient({
+    apiKey: API_KEY,
+    baseDomain: "test",
+    scheme: "http",
+  });
 }
 
 function jsonResponse(body: object, status = 200): Response {
@@ -141,7 +137,7 @@ describe("EnvironmentsClient", () => {
     it("should accept color", () => {
       const client = makeClient();
       const env = client.environments.new("production", { name: "Production", color: "#ff0000" });
-      expect(env.color).toBe("#ff0000");
+      expect(env.color?.hex).toBe("#ff0000");
     });
   });
 
@@ -198,7 +194,7 @@ describe("EnvironmentsClient", () => {
 
       expect(env).toBeInstanceOf(Environment);
       expect(env.id).toBe("production");
-      expect(env.color).toBe("#ff0000");
+      expect(env.color?.hex).toBe("#ff0000");
     });
 
     it("should throw SmplNotFoundError on 404", async () => {
@@ -211,6 +207,26 @@ describe("EnvironmentsClient", () => {
       const client = makeClient();
       mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
       await expect(client.environments.get("production")).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("should silently fall back to null color when the wire color string is invalid", async () => {
+      const client = makeClient();
+      const malformedEnv = {
+        id: "broken-color",
+        type: "environment",
+        attributes: {
+          name: "Broken Color",
+          color: "not-a-valid-hex",
+          classification: "STANDARD",
+          created_at: "2026-04-01T10:00:00Z",
+          updated_at: "2026-04-01T10:00:00Z",
+        },
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: malformedEnv }));
+
+      const env = await client.environments.get("broken-color");
+
+      expect(env.color).toBeNull();
     });
   });
 
@@ -323,7 +339,7 @@ describe("ContextTypesClient", () => {
   describe("new()", () => {
     it("should return a ContextType with createdAt: null", () => {
       const client = makeClient();
-      const ct = client.context_types.new("user");
+      const ct = client.contextTypes.new("user");
       expect(ct).toBeInstanceOf(ContextType);
       expect(ct.id).toBe("user");
       expect(ct.createdAt).toBeNull();
@@ -331,19 +347,19 @@ describe("ContextTypesClient", () => {
 
     it("should default name to id when not provided", () => {
       const client = makeClient();
-      const ct = client.context_types.new("user");
+      const ct = client.contextTypes.new("user");
       expect(ct.name).toBe("user");
     });
 
     it("should accept custom name", () => {
       const client = makeClient();
-      const ct = client.context_types.new("user", { name: "Platform User" });
+      const ct = client.contextTypes.new("user", { name: "Platform User" });
       expect(ct.name).toBe("Platform User");
     });
 
     it("should default attributes to empty object", () => {
       const client = makeClient();
-      const ct = client.context_types.new("user");
+      const ct = client.contextTypes.new("user");
       expect(ct.attributes).toEqual({});
     });
   });
@@ -353,7 +369,7 @@ describe("ContextTypesClient", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_CT] }));
 
-      const cts = await client.context_types.list();
+      const cts = await client.contextTypes.list();
 
       expect(cts).toHaveLength(1);
       expect(cts[0]).toBeInstanceOf(ContextType);
@@ -364,7 +380,7 @@ describe("ContextTypesClient", () => {
     it("should throw SmplConnectionError on network failure", async () => {
       const client = makeClient();
       mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
-      await expect(client.context_types.list()).rejects.toThrow(SmplConnectionError);
+      await expect(client.contextTypes.list()).rejects.toThrow(SmplConnectionError);
     });
   });
 
@@ -373,7 +389,7 @@ describe("ContextTypesClient", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
 
-      const ct = await client.context_types.get("user");
+      const ct = await client.contextTypes.get("user");
 
       expect(ct).toBeInstanceOf(ContextType);
       expect(ct.id).toBe("user");
@@ -383,7 +399,7 @@ describe("ContextTypesClient", () => {
     it("should throw SmplNotFoundError on 404", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
-      await expect(client.context_types.get("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.contextTypes.get("missing")).rejects.toThrow(SmplNotFoundError);
     });
   });
 
@@ -391,20 +407,20 @@ describe("ContextTypesClient", () => {
     it("should resolve on 204", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
-      await expect(client.context_types.delete("user")).resolves.toBeUndefined();
+      await expect(client.contextTypes.delete("user")).resolves.toBeUndefined();
     });
 
     it("should throw SmplNotFoundError on 404", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
-      await expect(client.context_types.delete("missing")).rejects.toThrow(SmplNotFoundError);
+      await expect(client.contextTypes.delete("missing")).rejects.toThrow(SmplNotFoundError);
     });
   });
 
   describe("ContextType.save() — create", () => {
     it("should POST to /api/v1/context_types", async () => {
       const client = makeClient();
-      const ct = client.context_types.new("account", { name: "Account" });
+      const ct = client.contextTypes.new("account", { name: "Account" });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
       await ct.save();
@@ -416,14 +432,14 @@ describe("ContextTypesClient", () => {
 
     it("should throw SmplConnectionError on network failure during create", async () => {
       const client = makeClient();
-      const ct = client.context_types.new("account", { name: "Account" });
+      const ct = client.contextTypes.new("account", { name: "Account" });
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(ct.save()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should send JSON:API body with attributes", async () => {
       const client = makeClient();
-      const ct = client.context_types.new("user", { name: "User" });
+      const ct = client.contextTypes.new("user", { name: "User" });
       ct.addAttribute("plan", { label: "Plan" });
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
@@ -441,7 +457,7 @@ describe("ContextTypesClient", () => {
     it("should PUT to /api/v1/context_types/{id}", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
-      const ct = await client.context_types.get("user");
+      const ct = await client.contextTypes.get("user");
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
       await ct.save();
@@ -454,7 +470,7 @@ describe("ContextTypesClient", () => {
     it("should throw SmplConnectionError on network failure during update", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CT }));
-      const ct = await client.context_types.get("user");
+      const ct = await client.contextTypes.get("user");
 
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(ct.save()).rejects.toThrow(SmplConnectionError);
@@ -549,19 +565,119 @@ describe("ContextsClient", () => {
     });
   });
 
+  describe("pendingCount", () => {
+    it("reflects the buffer's pending size", async () => {
+      const client = makeClient();
+      expect(client.contexts.pendingCount).toBe(0);
+      await client.contexts.register(new Context("user", "u-1", {}));
+      expect(client.contexts.pendingCount).toBe(1);
+      await client.contexts.register(new Context("account", "a-1", {}));
+      expect(client.contexts.pendingCount).toBe(2);
+    });
+
+    it("auto-flushes when the pending count crosses the batch threshold", async () => {
+      const client = makeClient();
+      // Use mockImplementation so each fetch call returns a fresh response.
+      mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+      // 100 unique contexts triggers the auto-flush branch in register().
+      const ctxs = Array.from(
+        { length: 100 },
+        (_, i) => new Context("user", `u-${i}`, { plan: "free" }),
+      );
+
+      await client.contexts.register(ctxs);
+
+      // wait for the fire-and-forget flush to settle
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockFetch).toHaveBeenCalled();
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).toContain("/api/v1/contexts/bulk");
+    });
+  });
+
+  describe("_saveContext (Context.save() flow)", () => {
+    it("uses bulk endpoint then GET when context has no createdAt (create)", async () => {
+      const client = makeClient();
+      // register([ctx], { flush: true }) does a POST to /contexts/bulk.
+      mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+      // The follow-up GET fetches the freshly-saved context.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CONTEXT }));
+
+      const ctx = new Context("user", "u-123", { plan: "free" });
+      // Wire the context to the management client so save() can route through.
+      // @ts-expect-error — internal wiring for the test
+      ctx._client = client.contexts;
+
+      await ctx.save();
+
+      // Two HTTP calls: bulk POST + GET
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const bulkReq: Request = mockFetch.mock.calls[0][0];
+      expect(bulkReq.method).toBe("POST");
+      expect(bulkReq.url).toContain("/api/v1/contexts/bulk");
+
+      const getReq: Request = mockFetch.mock.calls[1][0];
+      expect(getReq.method).toBe("GET");
+      expect(getReq.url).toContain("/api/v1/contexts/user%3Au-123");
+    });
+
+    it("uses PUT when context has createdAt (update)", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_CONTEXT }));
+
+      const ctx = new Context(
+        "user",
+        "u-123",
+        { plan: "enterprise" },
+        { name: "Alice", createdAt: "2026-04-01T10:00:00Z" },
+      );
+      // @ts-expect-error — internal wiring for the test
+      ctx._client = client.contexts;
+
+      await ctx.save();
+
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.method).toBe("PUT");
+      expect(req.url).toContain("/api/v1/contexts/user%3Au-123");
+    });
+
+    it("throws SmplValidationError when the PUT response has no data", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+
+      const ctx = new Context("user", "u-123", {}, { createdAt: "2026-04-01T10:00:00Z" });
+      // @ts-expect-error — internal wiring for the test
+      ctx._client = client.contexts;
+
+      await expect(ctx.save()).rejects.toThrow(SmplValidationError);
+    });
+
+    it("throws SmplConnectionError on network failure during PUT", async () => {
+      const client = makeClient();
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      const ctx = new Context("user", "u-123", {}, { createdAt: "2026-04-01T10:00:00Z" });
+      // @ts-expect-error — internal wiring for the test
+      ctx._client = client.contexts;
+
+      await expect(ctx.save()).rejects.toThrow(SmplConnectionError);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // list()
   // -----------------------------------------------------------------------
 
   describe("list()", () => {
-    it("should return list of ContextEntities filtered by type", async () => {
+    it("should return list of Contexts filtered by type", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_CONTEXT] }));
 
       const entities = await client.contexts.list("user");
 
       expect(entities).toHaveLength(1);
-      expect(entities[0]).toBeInstanceOf(ContextEntity);
+      expect(entities[0]).toBeInstanceOf(Context);
       expect(entities[0].type).toBe("user");
       expect(entities[0].key).toBe("u-123");
       expect(entities[0].name).toBe("Alice");
@@ -596,7 +712,7 @@ describe("ContextsClient", () => {
 
       const entity = await client.contexts.get("user:u-123");
 
-      expect(entity).toBeInstanceOf(ContextEntity);
+      expect(entity).toBeInstanceOf(Context);
       expect(entity.type).toBe("user");
       expect(entity.key).toBe("u-123");
     });
@@ -676,7 +792,7 @@ describe("AccountSettingsClient", () => {
         jsonResponse({ environment_order: ["production", "staging"] }),
       );
 
-      const settings = await client.account_settings.get();
+      const settings = await client.accountSettings.get();
 
       expect(settings).toBeInstanceOf(AccountSettings);
       expect(settings.environmentOrder).toEqual(["production", "staging"]);
@@ -686,7 +802,7 @@ describe("AccountSettingsClient", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
-      await client.account_settings.get();
+      await client.accountSettings.get();
 
       const [url] = mockFetch.mock.calls[0];
       expect(typeof url).toBe("string");
@@ -697,7 +813,7 @@ describe("AccountSettingsClient", () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
-      await client.account_settings.get();
+      await client.accountSettings.get();
 
       const [, init] = mockFetch.mock.calls[0];
       expect(init.headers["Authorization"]).toBe(`Bearer ${API_KEY}`);
@@ -706,13 +822,13 @@ describe("AccountSettingsClient", () => {
     it("should throw SmplConnectionError on network failure", async () => {
       const client = makeClient();
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-      await expect(client.account_settings.get()).rejects.toThrow(SmplConnectionError);
+      await expect(client.accountSettings.get()).rejects.toThrow(SmplConnectionError);
     });
 
     it("should throw SmplValidationError on 422", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(textResponse("Unprocessable", 422));
-      await expect(client.account_settings.get()).rejects.toThrow(SmplValidationError);
+      await expect(client.accountSettings.get()).rejects.toThrow(SmplValidationError);
     });
   });
 
@@ -720,7 +836,7 @@ describe("AccountSettingsClient", () => {
     it("should throw SmplConnectionError on network failure during save", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
-      const settings = await client.account_settings.get();
+      const settings = await client.accountSettings.get();
 
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(settings.save()).rejects.toThrow(SmplConnectionError);
@@ -729,7 +845,7 @@ describe("AccountSettingsClient", () => {
     it("should throw SmplValidationError on 422 during save", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
-      const settings = await client.account_settings.get();
+      const settings = await client.accountSettings.get();
 
       mockFetch.mockResolvedValueOnce(textResponse("Unprocessable", 422));
       await expect(settings.save()).rejects.toThrow(SmplValidationError);
@@ -740,7 +856,7 @@ describe("AccountSettingsClient", () => {
     it("should PUT updated data back to server", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({ environment_order: ["production"] }));
-      const settings = await client.account_settings.get();
+      const settings = await client.accountSettings.get();
 
       settings.environmentOrder = ["production", "staging"];
       mockFetch.mockResolvedValueOnce(
@@ -759,7 +875,7 @@ describe("AccountSettingsClient", () => {
     it("should apply response data after save", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(jsonResponse({}));
-      const settings = await client.account_settings.get();
+      const settings = await client.accountSettings.get();
 
       settings.environmentOrder = ["development"];
       mockFetch.mockResolvedValueOnce(
@@ -773,15 +889,15 @@ describe("AccountSettingsClient", () => {
 });
 
 // ===========================================================================
-// ManagementClient construction
+// SmplManagementClient construction
 // ===========================================================================
 
-describe("ManagementClient", () => {
-  it("should expose environments, contexts, context_types, account_settings", () => {
+describe("SmplManagementClient", () => {
+  it("should expose environments, contexts, contextTypes, accountSettings", () => {
     const client = makeClient();
     expect(client.environments).toBeDefined();
     expect(client.contexts).toBeDefined();
-    expect(client.context_types).toBeDefined();
-    expect(client.account_settings).toBeDefined();
+    expect(client.contextTypes).toBeDefined();
+    expect(client.accountSettings).toBeDefined();
   });
 });
