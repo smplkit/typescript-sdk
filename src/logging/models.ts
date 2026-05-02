@@ -4,13 +4,26 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { LoggingClient } from "./client.js";
-import { LogLevel } from "./types.js";
+import { LogLevel, LoggerEnvironment, convertLoggerEnvironments } from "./types.js";
+
+/** @internal */
+export interface LoggerModelClient {
+  _saveLogger(logger: Logger): Promise<Logger>;
+  _deleteLogger(id: string): Promise<void>;
+}
+
+/** @internal */
+export interface LogGroupModelClient {
+  _saveGroup(group: LogGroup): Promise<LogGroup>;
+  _deleteGroup(id: string): Promise<void>;
+}
 
 /**
  * A logger resource managed by the smplkit platform.
  *
- * Mutate properties or use convenience methods, then call `save()` to persist.
+ * Mutate via {@link setLevel} / {@link clearLevel} /
+ * {@link clearAllEnvironmentLevels} (with `environment` option for per-env
+ * overrides), then call {@link save} to persist.
  */
 export class Logger {
   /** Unique identifier (dot-separated hierarchy, e.g. `"sqlalchemy.engine"`). */
@@ -22,90 +35,115 @@ export class Logger {
   /** Id of the parent log group, or null. */
   group: string | null;
   /** Whether this logger is managed by the platform. */
-  managed: boolean;
+  managed: boolean | null;
   /** Observed sources (services that report this logger). */
   sources: Array<Record<string, any>>;
-  /** Per-environment level overrides. */
-  environments: Record<string, any>;
   /** When the logger was created. */
   createdAt: string | null;
   /** When the logger was last updated. */
   updatedAt: string | null;
 
   /** @internal */
-  readonly _client: LoggingClient;
+  protected _environments: Record<string, LoggerEnvironment>;
+
+  /** @internal */
+  readonly _client: LoggerModelClient | null;
 
   /** @internal */
   constructor(
-    client: LoggingClient,
+    client: LoggerModelClient | null,
     fields: {
       id: string | null;
       name: string;
-      level: LogLevel | null;
-      group: string | null;
-      managed: boolean;
-      sources: Array<Record<string, any>>;
-      environments: Record<string, any>;
-      createdAt: string | null;
-      updatedAt: string | null;
+      level?: LogLevel | null;
+      group?: string | null;
+      managed?: boolean | null;
+      sources?: Array<Record<string, any>>;
+      environments?: Record<string, unknown> | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
     },
   ) {
     this._client = client;
     this.id = fields.id;
     this.name = fields.name;
-    this.level = fields.level;
-    this.group = fields.group;
-    this.managed = fields.managed;
-    this.sources = fields.sources;
-    this.environments = fields.environments;
-    this.createdAt = fields.createdAt;
-    this.updatedAt = fields.updatedAt;
+    this.level = fields.level ?? null;
+    this.group = fields.group ?? null;
+    this.managed = fields.managed ?? null;
+    this.sources = fields.sources ?? [];
+    this._environments = convertLoggerEnvironments(fields.environments);
+    this.createdAt = fields.createdAt ?? null;
+    this.updatedAt = fields.updatedAt ?? null;
   }
 
   /**
-   * Persist this logger to the server.
+   * Read-only view of per-environment level overrides.
    *
-   * Creates if new, updates if existing.
+   * Mutate via {@link setLevel} / {@link clearLevel} /
+   * {@link clearAllEnvironmentLevels} (with `environment` option).
    */
+  get environments(): Record<string, LoggerEnvironment> {
+    return { ...this._environments };
+  }
+
+  /** @internal — direct typed environments dict for serialization. */
+  get _environmentsDirect(): Record<string, LoggerEnvironment> {
+    return this._environments;
+  }
+
+  /** Persist this logger to the server (create or update). */
   async save(): Promise<void> {
+    if (this._client === null) {
+      throw new Error("Logger was constructed without a client; cannot save");
+    }
     const saved = await this._client._saveLogger(this);
     this._apply(saved);
   }
 
-  /** Set the base log level. Call `save()` to persist. */
-  setLevel(level: LogLevel): void {
-    this.level = level;
+  /** Delete this logger from the server. */
+  async delete(): Promise<void> {
+    if (this._client === null || this.id === null) {
+      throw new Error("Logger was constructed without a client or id; cannot delete");
+    }
+    await this._client._deleteLogger(this.id);
   }
 
-  /** Clear the base log level. Call `save()` to persist. */
-  clearLevel(): void {
-    this.level = null;
-  }
-
-  /** Set an environment-specific log level. Call `save()` to persist. */
-  setEnvironmentLevel(env: string, level: LogLevel): void {
-    const envs = { ...this.environments };
-    envs[env] = { ...(envs[env] ?? {}), level: level };
-    this.environments = envs;
-  }
-
-  /** Clear an environment-specific log level. Call `save()` to persist. */
-  clearEnvironmentLevel(env: string): void {
-    const envs = { ...this.environments };
-    if (envs[env]) {
-      const entry = { ...envs[env] };
-      delete entry.level;
-      envs[env] = entry;
-      this.environments = envs;
+  /**
+   * Set the log level.
+   *
+   * With `environment` undefined (the default), sets the base log level
+   * used when no environment-specific override applies. With `environment`,
+   * sets the per-environment override.
+   */
+  setLevel(level: LogLevel, options: { environment?: string } = {}): void {
+    if (options.environment === undefined) {
+      this.level = level;
+    } else {
+      this._environments[options.environment] = new LoggerEnvironment({ level });
     }
   }
 
-  /** Clear all environment-specific log levels. Call `save()` to persist. */
-  clearAllEnvironmentLevels(): void {
-    this.environments = {};
+  /**
+   * Remove a log level.
+   *
+   * With `environment` undefined (the default), removes the base log level
+   * (the logger then inherits from its group / dot-notation ancestor /
+   * system default). With `environment`, removes only that env's override.
+   */
+  clearLevel(options: { environment?: string } = {}): void {
+    if (options.environment === undefined) {
+      this.level = null;
+    } else {
+      delete this._environments[options.environment];
+    }
   }
 
-  /** @internal — copy all fields from another Logger instance. */
+  /** Remove all per-environment level overrides. */
+  clearAllEnvironmentLevels(): void {
+    this._environments = {};
+  }
+
+  /** @internal */
   _apply(other: Logger): void {
     this.id = other.id;
     this.name = other.name;
@@ -113,7 +151,7 @@ export class Logger {
     this.group = other.group;
     this.managed = other.managed;
     this.sources = other.sources;
-    this.environments = other.environments;
+    this._environments = { ...other._environments };
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
   }
@@ -126,105 +164,99 @@ export class Logger {
 /**
  * A log group resource for organizing loggers.
  *
- * Management: mutate properties and call `save()` to persist.
+ * Mutate via {@link setLevel} / {@link clearLevel} /
+ * {@link clearAllEnvironmentLevels} (with `environment` option), then
+ * call {@link save} to persist.
  */
 export class LogGroup {
-  /** Unique identifier (slug), or `null` if unsaved. */
   id: string | null;
-  /** Human-readable key (slug), or `null` if not set. */
-  key: string | null;
-  /** Human-readable display name. */
   name: string;
-  /** Base log level, or null if inherited. */
   level: LogLevel | null;
-  /** Id of the parent log group, or null. */
   group: string | null;
-  /** Per-environment level overrides. */
-  environments: Record<string, any>;
-  /** When the log group was created. */
   createdAt: string | null;
-  /** When the log group was last updated. */
   updatedAt: string | null;
 
   /** @internal */
-  readonly _client: LoggingClient;
+  protected _environments: Record<string, LoggerEnvironment>;
+
+  /** @internal */
+  readonly _client: LogGroupModelClient | null;
 
   /** @internal */
   constructor(
-    client: LoggingClient,
+    client: LogGroupModelClient | null,
     fields: {
       id: string | null;
-      key: string | null;
       name: string;
-      level: LogLevel | null;
-      group: string | null;
-      environments: Record<string, any>;
-      createdAt: string | null;
-      updatedAt: string | null;
+      level?: LogLevel | null;
+      group?: string | null;
+      environments?: Record<string, unknown> | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
     },
   ) {
     this._client = client;
     this.id = fields.id;
-    this.key = fields.key;
     this.name = fields.name;
-    this.level = fields.level;
-    this.group = fields.group;
-    this.environments = fields.environments;
-    this.createdAt = fields.createdAt;
-    this.updatedAt = fields.updatedAt;
+    this.level = fields.level ?? null;
+    this.group = fields.group ?? null;
+    this._environments = convertLoggerEnvironments(fields.environments);
+    this.createdAt = fields.createdAt ?? null;
+    this.updatedAt = fields.updatedAt ?? null;
   }
 
-  /**
-   * Persist this log group to the server.
-   *
-   * Creates if new, updates if existing.
-   */
+  /** Read-only view of per-environment level overrides. */
+  get environments(): Record<string, LoggerEnvironment> {
+    return { ...this._environments };
+  }
+
+  /** @internal */
+  get _environmentsDirect(): Record<string, LoggerEnvironment> {
+    return this._environments;
+  }
+
   async save(): Promise<void> {
-    const saved = await this._client._saveLogGroup(this);
+    if (this._client === null) {
+      throw new Error("LogGroup was constructed without a client; cannot save");
+    }
+    const saved = await this._client._saveGroup(this);
     this._apply(saved);
   }
 
-  /** Set the base log level. Call `save()` to persist. */
-  setLevel(level: LogLevel): void {
-    this.level = level;
+  async delete(): Promise<void> {
+    if (this._client === null || this.id === null) {
+      throw new Error("LogGroup was constructed without a client or id; cannot delete");
+    }
+    await this._client._deleteGroup(this.id);
   }
 
-  /** Clear the base log level. Call `save()` to persist. */
-  clearLevel(): void {
-    this.level = null;
-  }
-
-  /** Set an environment-specific log level. Call `save()` to persist. */
-  setEnvironmentLevel(env: string, level: LogLevel): void {
-    const envs = { ...this.environments };
-    envs[env] = { ...(envs[env] ?? {}), level: level };
-    this.environments = envs;
-  }
-
-  /** Clear an environment-specific log level. Call `save()` to persist. */
-  clearEnvironmentLevel(env: string): void {
-    const envs = { ...this.environments };
-    if (envs[env]) {
-      const entry = { ...envs[env] };
-      delete entry.level;
-      envs[env] = entry;
-      this.environments = envs;
+  setLevel(level: LogLevel, options: { environment?: string } = {}): void {
+    if (options.environment === undefined) {
+      this.level = level;
+    } else {
+      this._environments[options.environment] = new LoggerEnvironment({ level });
     }
   }
 
-  /** Clear all environment-specific log levels. Call `save()` to persist. */
-  clearAllEnvironmentLevels(): void {
-    this.environments = {};
+  clearLevel(options: { environment?: string } = {}): void {
+    if (options.environment === undefined) {
+      this.level = null;
+    } else {
+      delete this._environments[options.environment];
+    }
   }
 
-  /** @internal — copy all fields from another LogGroup instance. */
+  clearAllEnvironmentLevels(): void {
+    this._environments = {};
+  }
+
+  /** @internal */
   _apply(other: LogGroup): void {
     this.id = other.id;
-    this.key = other.key;
     this.name = other.name;
     this.level = other.level;
     this.group = other.group;
-    this.environments = other.environments;
+    this._environments = { ...other._environments };
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
   }

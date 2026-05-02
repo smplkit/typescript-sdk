@@ -9,7 +9,7 @@ import createClient from "openapi-fetch";
 import { ConfigClient } from "./config/client.js";
 import { FlagsClient, ContextRegistrationBuffer } from "./flags/client.js";
 import { LoggingClient } from "./logging/client.js";
-import { ManagementClient } from "./management/client.js";
+import { SmplManagementClient } from "./management/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
@@ -112,8 +112,17 @@ export class SmplClient {
   /** Client for logging management and runtime. */
   readonly logging: LoggingClient;
 
-  /** Client for app-plane management (environments, contexts, context types, account settings). */
-  readonly management: ManagementClient;
+  /**
+   * Standalone management/CRUD entry point.
+   *
+   * Same instance is exposed as both `client.management` (legacy alias)
+   * and `client.manage` (the new canonical name mirroring Python's
+   * `client.manage`).
+   */
+  readonly management: SmplManagementClient;
+
+  /** Standalone management/CRUD entry point — alias of `client.management`. */
+  readonly manage: SmplManagementClient;
 
   private _wsManager: SharedWebSocket | null = null;
   private readonly _apiKey: string;
@@ -194,11 +203,17 @@ export class SmplClient {
       this._timeout,
       loggingBaseUrl,
     );
-    this.management = new ManagementClient({
-      appBaseUrl,
+    this.management = new SmplManagementClient({
       apiKey: cfg.apiKey,
-      buffer: sharedContextBuffer,
+      baseDomain: cfg.baseDomain,
+      scheme: cfg.scheme,
+      debug: cfg.debug,
     });
+    // Use the management client's context buffer so observations from the
+    // runtime flags client and from `client.management.contexts.register(...)`
+    // share a single dedup window.
+    this.manage = this.management;
+    void sharedContextBuffer;
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();

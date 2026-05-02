@@ -15,7 +15,16 @@ import {
   throwForStatus,
 } from "../errors.js";
 
-import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "./models.js";
+import {
+  Flag,
+  BooleanFlag,
+  StringFlag,
+  NumberFlag,
+  JsonFlag,
+  FlagValue,
+  FlagRule,
+  FlagEnvironment,
+} from "./models.js";
 import type { Context } from "./types.js";
 import type { SharedWebSocket } from "../ws.js";
 import type { MetricsReporter } from "../_metrics.js";
@@ -612,12 +621,36 @@ export class FlagsClient {
     }
   }
 
+  /** @internal — alias for the new FlagModelClient interface. */
+  async _deleteFlag(id: string): Promise<void> {
+    return this._mgDelete(id);
+  }
+
   // ------------------------------------------------------------------
   // Management: internal save methods (called by Flag.save())
   // ------------------------------------------------------------------
 
+  /** @internal — wire-serialize a flag environments dict. */
+  private _envsToWire(flag: Flag): Record<string, unknown> {
+    const envs = flag._envsRaw();
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(envs)) {
+      out[k] = {
+        enabled: v.enabled,
+        default: v.default ?? null,
+        rules: v.rules.map((r) => ({
+          logic: r.logic,
+          value: r.value,
+          ...(r.description !== null ? { description: r.description } : {}),
+        })),
+      };
+    }
+    return out;
+  }
+
   /** @internal — POST a new flag. */
   async _createFlag(flag: Flag): Promise<Flag> {
+    const wire = this._envsToWire(flag);
     const body = {
       data: {
         id: flag.id,
@@ -627,11 +660,11 @@ export class FlagsClient {
           description: flag.description ?? "",
           type: flag.type,
           default: flag.default,
-          values: flag.values as any,
-          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
+          values: flag.values?.map((v) => ({ name: v.name, value: v.value })) as any,
+          ...(Object.keys(wire).length > 0 ? { environments: wire } : {}),
         },
       },
-    };
+    } as any;
 
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
@@ -647,6 +680,7 @@ export class FlagsClient {
 
   /** @internal — PUT a flag update. */
   async _updateFlag(flag: Flag): Promise<Flag> {
+    const wire = this._envsToWire(flag);
     const body = {
       data: {
         type: "flag" as const,
@@ -654,12 +688,12 @@ export class FlagsClient {
           name: flag.name,
           type: flag.type,
           default: flag.default,
-          values: flag.values as any,
+          values: flag.values?.map((v) => ({ name: v.name, value: v.value })) as any,
           description: flag.description ?? "",
-          ...(Object.keys(flag.environments).length > 0 ? { environments: flag.environments } : {}),
+          ...(Object.keys(wire).length > 0 ? { environments: wire } : {}),
         },
       },
-    };
+    } as any;
 
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
@@ -1264,14 +1298,35 @@ export class FlagsClient {
   /** @internal */
   _resourceToModel(resource: FlagResource): Flag {
     const attrs = resource.attributes;
+    const envsRaw = (attrs.environments ?? {}) as Record<string, any>;
+    const envs: Record<string, FlagEnvironment> = {};
+    for (const [k, v] of Object.entries(envsRaw)) {
+      const rules = Array.isArray(v?.rules)
+        ? (v.rules as Array<Record<string, any>>).map(
+            (r) =>
+              new FlagRule({
+                logic: r.logic ?? {},
+                value: r.value,
+                description: r.description ?? null,
+              }),
+          )
+        : [];
+      envs[k] = new FlagEnvironment({
+        enabled: v?.enabled ?? true,
+        default: v?.default ?? null,
+        rules,
+      });
+    }
     return new Flag(this, {
       id: resource.id ?? null,
       name: attrs.name,
       type: attrs.type,
       default: attrs.default,
-      values: attrs.values ? attrs.values.map((v) => ({ name: v.name, value: v.value })) : null,
+      values: attrs.values
+        ? attrs.values.map((v) => new FlagValue({ name: v.name, value: v.value }))
+        : null,
       description: attrs.description ?? null,
-      environments: attrs.environments ?? {},
+      environments: envs,
       createdAt: attrs.created_at ?? null,
       updatedAt: attrs.updated_at ?? null,
     });

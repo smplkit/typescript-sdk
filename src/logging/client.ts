@@ -16,7 +16,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
-import { LogLevel, LoggerSource, type LoggerChangeEvent } from "./types.js";
+import { LogLevel, LoggerSource, LoggerChangeEvent } from "./types.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
@@ -321,7 +321,6 @@ export class LoggingClient {
   _mgNewGroup(id: string, options?: { name?: string; group?: string }): LogGroup {
     return new LogGroup(this, {
       id,
-      key: null,
       name: options?.name ?? keyToDisplayName(id),
       level: null,
       group: options?.group ?? null,
@@ -405,6 +404,21 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   /** @internal — PUT a logger (upsert: server creates if not found). */
+  /** @internal — alias for the new LoggerModelClient interface. */
+  async _deleteLogger(id: string): Promise<void> {
+    return this._mgDelete(id);
+  }
+
+  /** @internal — alias for the new LogGroupModelClient interface. */
+  async _deleteGroup(id: string): Promise<void> {
+    return this._mgDeleteGroup(id);
+  }
+
+  /** @internal — alias for the new LogGroupModelClient interface. */
+  async _saveGroup(group: LogGroup): Promise<LogGroup> {
+    return this._saveLogGroup(group);
+  }
+
   async _saveLogger(logger: Logger): Promise<Logger> {
     const body = {
       data: {
@@ -485,17 +499,34 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Runtime: start (scaffolded)
+  // Runtime: install
   // ------------------------------------------------------------------
 
   /**
-   * Start the logging runtime.
+   * Install the smplkit logging integration into the running process.
    *
-   * Synchronizes loggers with the server and subscribes to live level
-   * updates. Idempotent — safe to call multiple times.
-   * Management methods work without calling `start()`.
+   * Loads any adapters that haven't been registered explicitly, discovers
+   * existing loggers from each adapter, hooks new-logger creation, and
+   * subscribes to live level updates over the shared WebSocket. Idempotent —
+   * safe to call multiple times. Management methods work without calling
+   * `install()`.
+   *
+   * Mirrors Python's `client.logging.install()`. There is no `stop()`.
+   */
+  async install(): Promise<void> {
+    return this._installInternal();
+  }
+
+  /**
+   * @deprecated Use {@link LoggingClient.install}. Retained as a backwards-
+   * compatible alias.
    */
   async start(): Promise<void> {
+    return this._installInternal();
+  }
+
+  /** @internal — shared body of install()/start(). */
+  async _installInternal(): Promise<void> {
     if (this._started) return;
     debug("lifecycle", "LoggingClient.start() called");
 
@@ -764,11 +795,11 @@ export class LoggingClient {
         if (logger) {
           this._applyLevels([logger]);
         }
-        const event: LoggerChangeEvent = {
+        const event = new LoggerChangeEvent({
           id,
           level: newLevel as LogLevel | null,
           source: "websocket",
-        };
+        });
         for (const cb of this._globalListeners) {
           try {
             cb(event);
@@ -801,12 +832,12 @@ export class LoggingClient {
     if (!id) return;
     // Remove from store — no HTTP fetch
     delete this._loggerStore[id];
-    const event: LoggerChangeEvent & { deleted: true } = {
+    const event = new LoggerChangeEvent({
       id,
       level: null,
       source: "websocket",
       deleted: true,
-    };
+    });
     for (const cb of this._globalListeners) {
       try {
         cb(event);
@@ -865,12 +896,12 @@ export class LoggingClient {
     if (!id) return;
     // Remove from store — no HTTP fetch
     delete this._groupStore[id];
-    const event: LoggerChangeEvent & { deleted: true } = {
+    const event = new LoggerChangeEvent({
       id,
       level: null,
       source: "websocket",
       deleted: true,
-    };
+    });
     for (const cb of this._globalListeners) {
       try {
         cb(event);
@@ -932,11 +963,11 @@ export class LoggingClient {
         // Fire global listener ONCE
         const [firstKey] = changedLoggerIds;
         const firstLogger = serverLoggers.find((l) => l.id === firstKey);
-        const globalEvent: LoggerChangeEvent = {
+        const globalEvent = new LoggerChangeEvent({
           id: firstKey,
           level: (firstLogger?.level ?? null) as LogLevel | null,
           source: "websocket",
-        };
+        });
         for (const cb of this._globalListeners) {
           try {
             cb(globalEvent);
@@ -949,11 +980,11 @@ export class LoggingClient {
           const keyCallbacks = this._keyListeners.get(key);
           if (keyCallbacks) {
             const l = serverLoggers.find((x) => x.id === key);
-            const keyEvent: LoggerChangeEvent = {
+            const keyEvent = new LoggerChangeEvent({
               id: key,
               level: (l?.level ?? null) as LogLevel | null,
               source: "websocket",
-            };
+            });
             for (const cb of keyCallbacks) {
               try {
                 cb(keyEvent);
@@ -1028,7 +1059,6 @@ export class LoggingClient {
     const rawLevel = attrs.level ?? null;
     return new LogGroup(this, {
       id: resource.id ?? null,
-      key: attrs.key ?? null,
       name: attrs.name,
       level: rawLevel as LogLevel | null,
       group: attrs.parent_id ?? null,

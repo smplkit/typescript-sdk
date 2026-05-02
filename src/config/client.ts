@@ -22,18 +22,36 @@ import type { MetricsReporter } from "../_metrics.js";
 import { keyToDisplayName } from "../helpers.js";
 import { debug } from "../_debug.js";
 
-/** Describes a single config value change detected on refresh. */
-export interface ConfigChangeEvent {
+/**
+ * Describes a single config value change detected on refresh. Frozen —
+ * fields are set at construction and cannot be mutated afterward.
+ */
+export class ConfigChangeEvent {
   /** The config id that changed. */
-  configId: string;
+  readonly configId: string;
   /** The item key within the config that changed. */
-  itemKey: string;
+  readonly itemKey: string;
   /** The previous value (null if the key was absent). */
-  oldValue: unknown;
+  readonly oldValue: unknown;
   /** The updated value (null if the key was removed). */
-  newValue: unknown;
+  readonly newValue: unknown;
   /** How the change was delivered. */
-  source: "websocket" | "manual";
+  readonly source: "websocket" | "manual";
+
+  constructor(fields: {
+    configId: string;
+    itemKey: string;
+    oldValue: unknown;
+    newValue: unknown;
+    source: "websocket" | "manual";
+  }) {
+    this.configId = fields.configId;
+    this.itemKey = fields.itemKey;
+    this.oldValue = fields.oldValue;
+    this.newValue = fields.newValue;
+    this.source = fields.source;
+    Object.freeze(this);
+  }
 }
 
 /** @internal */
@@ -350,6 +368,16 @@ export class ConfigClient {
   // Management: internal save methods (called by Config.save())
   // ------------------------------------------------------------------
 
+  /** @internal — alias for the new ConfigModelClient interface. */
+  async _deleteConfig(id: string): Promise<void> {
+    return this._mgDelete(id);
+  }
+
+  /** @internal — alias for the new ConfigModelClient interface. */
+  async _fetchConfig(id: string): Promise<Config> {
+    return this._getById(id);
+  }
+
   /** @internal — POST a new config. */
   async _createConfig(config: Config): Promise<Config> {
     const body = buildRequestBody({
@@ -422,34 +450,22 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /**
-   * Get a config's resolved values for the current environment.
+   * Return a live, dict-like view of the resolved values for *id*.
    *
-   * Returns the resolved key-value pairs for the given config.
-   * Optionally pass a model class to map the resolved values.
-   */
-  async get<T = Record<string, unknown>>(id: string, model?: new (data: any) => T): Promise<T> {
-    await this._ensureInitialized();
-    const values = this._configCache[id];
-    if (values === undefined) {
-      throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
-    }
-    const metrics = this._parent?._metrics;
-    if (metrics) {
-      metrics.record("config.resolutions", 1, "resolutions", { config: id });
-    }
-    if (model) {
-      return new model(values);
-    }
-    return values as T;
-  }
-
-  /**
-   * Subscribe to a config's values. Returns a proxy whose properties
-   * always reflect the latest resolved values.
+   * Without `model`, returns a {@link LiveConfigProxy} that behaves like a
+   * `Record<string, unknown>` (`proxy["key"]`, iteration, `proxy.items()`,
+   * `Object.keys(proxy)`) and updates automatically as the server pushes
+   * changes.
    *
-   * Optionally pass a model class to map the resolved values.
+   * With `model`, the return value type-checks as `model` — attribute
+   * access (`cfg.database.host`) walks a model rebuilt from the current
+   * values on each read, so the customer sees the model's type signature
+   * in their IDE while still tracking live data.
+   *
+   * Mirrors Python's `client.config.get(id)` / `client.config.get(id, ModelCls)`.
+   * There is no `subscribe()` — it was unified into `get()`.
    */
-  async subscribe<T = Record<string, unknown>>(
+  async get<T = Record<string, unknown>>(
     id: string,
     model?: new (data: any) => T,
   ): Promise<LiveConfigProxy<T>> {
@@ -457,7 +473,21 @@ export class ConfigClient {
     if (!(id in this._configCache)) {
       throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
     }
+    const metrics = this._parent?._metrics;
+    if (metrics) {
+      metrics.record("config.resolutions", 1, "resolutions", { config: id });
+    }
     return new LiveConfigProxy<T>(this, id, model);
+  }
+
+  /**
+   * @deprecated Use {@link ConfigClient.get}, which now returns a {@link LiveConfigProxy}.
+   */
+  async subscribe<T = Record<string, unknown>>(
+    id: string,
+    model?: new (data: any) => T,
+  ): Promise<LiveConfigProxy<T>> {
+    return this.get(id, model);
   }
 
   // ------------------------------------------------------------------
@@ -681,13 +711,13 @@ export class ConfigClient {
           if (metrics) {
             metrics.record("config.changes", 1, "changes", { config: cfgKey });
           }
-          const event: ConfigChangeEvent = {
+          const event = new ConfigChangeEvent({
             configId: cfgKey,
             itemKey: iKey,
             oldValue: oldVal,
             newValue: newVal,
             source,
-          };
+          });
           for (const listener of this._listeners) {
             if (listener.configId !== null && listener.configId !== cfgKey) continue;
             if (listener.itemKey !== null && listener.itemKey !== iKey) continue;
