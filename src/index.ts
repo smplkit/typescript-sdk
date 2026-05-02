@@ -56,21 +56,22 @@ export { EnvironmentClassification, Color } from "./management/types.js";
 // Shared WebSocket
 export { SharedWebSocket } from "./ws.js";
 
-// Error hierarchy — canonical names (Smplkit prefix). Old `Smpl*` names
-// remain exported as deprecated aliases for backwards compatibility.
+// Error hierarchy. `Smpl*` are the canonical class names (TypeScript can't
+// use bare `Error`/`TypeError`/etc. — those are JS built-ins). The
+// `Smplkit*` aliases are also exported for callers that prefer the longer
+// prefix matching the package name (`@smplkit/sdk`).
 export {
-  SmplkitError,
-  SmplkitConnectionError,
-  SmplkitTimeoutError,
-  SmplkitNotFoundError,
-  SmplkitConflictError,
-  SmplkitValidationError,
-  // Deprecated aliases — to be removed.
   SmplError,
   SmplConnectionError,
   SmplTimeoutError,
   SmplNotFoundError,
   SmplConflictError,
   SmplValidationError,
+  SmplkitError,
+  SmplkitConnectionError,
+  SmplkitTimeoutError,
+  SmplkitNotFoundError,
+  SmplkitConflictError,
+  SmplkitValidationError,
 } from "./errors.js";
 export type { ApiErrorDetail, ApiErrorObject } from "./errors.js";

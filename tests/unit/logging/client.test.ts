@@ -385,10 +385,10 @@ describe("LoggingClient — log group management", () => {
       expect(group.group).toBeNull();
     });
 
-    it("should have key: null for new groups", () => {
+    it("should have id set for new groups (key field removed)", () => {
       const client = makeClient();
       const group = client.management.newGroup("database-loggers");
-      expect(group.key).toBeNull();
+      expect(group.id).toBe("database-loggers");
     });
   });
 
@@ -471,19 +471,19 @@ describe("LoggingClient — log group management", () => {
       expect(req.url).toContain("/api/v1/log_groups/database-loggers");
     });
 
-    it("should map key from attributes", async () => {
+    it("should map id from response", async () => {
       const client = makeClient();
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
           data: {
             ...SAMPLE_GROUP,
-            attributes: { ...SAMPLE_GROUP.attributes, key: "database-loggers" },
+            id: "database-loggers",
           },
         }),
       );
 
       const group = await client.management.getGroup("database-loggers");
-      expect(group.key).toBe("database-loggers");
+      expect(group.id).toBe("database-loggers");
     });
 
     it("should throw SmplNotFoundError on 404", async () => {
@@ -2209,13 +2209,13 @@ describe("LoggingClient — registerSources", () => {
       new LoggerSource("sqlalchemy.engine", {
         service: "api",
         environment: "production",
-        resolved_level: LogLevel.WARN,
+        resolvedLevel: LogLevel.WARN,
         level: LogLevel.ERROR,
       }),
       new LoggerSource("app.payments", {
         service: "api",
         environment: "production",
-        resolved_level: LogLevel.INFO,
+        resolvedLevel: LogLevel.INFO,
       }),
     ];
 
@@ -2248,8 +2248,81 @@ describe("LoggingClient — registerSources", () => {
     const src = new LoggerSource("app", {
       service: "api",
       environment: "production",
-      resolved_level: LogLevel.INFO,
+      resolvedLevel: LogLevel.INFO,
     });
     await expect(client.management.registerSources([src])).rejects.toThrow(SmplConnectionError);
+  });
+});
+
+// ===========================================================================
+// Internal model-client aliases & install()
+// ===========================================================================
+
+describe("LoggingClient — internal aliases & install()", () => {
+  it("install() should be an alias of start() and idempotent", async () => {
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+
+    await client.install();
+    await client.install();
+
+    // Should wire WebSocket listeners exactly once across repeated install() calls.
+    expect(lastMockWs.on).toHaveBeenCalledTimes(5);
+  });
+
+  it("_deleteLogger() should issue DELETE on /loggers/{id}", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await client._deleteLogger("sqlalchemy.engine");
+
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.method).toBe("DELETE");
+    expect(req.url).toContain("/api/v1/loggers/sqlalchemy.engine");
+  });
+
+  it("_deleteGroup() should issue DELETE on /log_groups/{id}", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await client._deleteGroup("database-loggers");
+
+    // The first call is the GET issued by management.deleteGroup() to look up the group;
+    // the second is the actual DELETE.
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const deleteRequest: Request = mockFetch.mock.calls[1][0];
+    expect(deleteRequest.method).toBe("DELETE");
+    expect(deleteRequest.url).toContain("/api/v1/log_groups/database-loggers");
+  });
+
+  it("_saveGroup() should be an alias for _saveLogGroup()", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_GROUP }));
+
+    const group = new LogGroup(client, {
+      id: "database-loggers",
+      name: "Database Loggers",
+      level: LogLevel.WARN,
+      group: null,
+      environments: {},
+      createdAt: "2026-04-01T10:00:00Z",
+      updatedAt: "2026-04-01T10:00:00Z",
+    });
+
+    const saved = await client._saveGroup(group);
+
+    expect(saved).toBeInstanceOf(LogGroup);
+    expect(saved.id).toBe("database-loggers");
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.method).toBe("PUT");
+    expect(req.url).toContain("/api/v1/log_groups/database-loggers");
   });
 });

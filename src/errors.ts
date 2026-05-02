@@ -1,12 +1,13 @@
 /**
  * Structured SDK error types.
  *
- * All smplkit errors extend {@link SmplkitError}, allowing callers to catch
- * the base class for generic handling or specific subclasses for
- * fine-grained control. The TypeScript SDK uses a "Smplkit" prefix to
- * disambiguate from JavaScript's built-in `Error`/`TypeError`/etc.; the
- * names line up 1:1 with Python's flat hierarchy (`Error`, `NotFoundError`,
- * `ConflictError`, `ConnectionError`, `TimeoutError`, `ValidationError`).
+ * All smplkit errors extend {@link SmplError}. The TypeScript SDK keeps
+ * the `Smpl` prefix on its public error names because TypeScript's
+ * built-in `Error`/`TypeError`/etc. preclude bare names. The Python
+ * canonical names (`Error`, `NotFoundError`, ...) line up via
+ * `Smpl{X}Error` ↔ Python `{X}Error`. The `Smplkit{X}Error` names are
+ * exported as aliases (introduced in PR #103) for callers that prefer
+ * the longer prefix.
  */
 
 /** A single error object from a JSON:API error response. */
@@ -18,7 +19,7 @@ export interface ApiErrorDetail {
 }
 
 /** Base exception for all smplkit SDK errors. */
-export class SmplkitError extends Error {
+export class SmplError extends Error {
   /** The HTTP status code, if the error originated from an HTTP response. */
   public readonly statusCode?: number;
 
@@ -35,7 +36,7 @@ export class SmplkitError extends Error {
     errors?: ApiErrorDetail[],
   ) {
     super(message);
-    this.name = "SmplkitError";
+    this.name = "SmplError";
     this.statusCode = statusCode;
     this.responseBody = responseBody;
     this.errors = errors ?? [];
@@ -55,7 +56,7 @@ export class SmplkitError extends Error {
 }
 
 /** Raised when a network request fails (e.g., DNS resolution, connection refused). */
-export class SmplkitConnectionError extends SmplkitError {
+export class SmplConnectionError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
@@ -63,13 +64,13 @@ export class SmplkitConnectionError extends SmplkitError {
     errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode, responseBody, errors);
-    this.name = "SmplkitConnectionError";
+    this.name = "SmplConnectionError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 /** Raised when an operation exceeds its timeout. */
-export class SmplkitTimeoutError extends SmplkitError {
+export class SmplTimeoutError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
@@ -77,13 +78,13 @@ export class SmplkitTimeoutError extends SmplkitError {
     errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode, responseBody, errors);
-    this.name = "SmplkitTimeoutError";
+    this.name = "SmplTimeoutError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 /** Raised when a requested resource does not exist (HTTP 404). */
-export class SmplkitNotFoundError extends SmplkitError {
+export class SmplNotFoundError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
@@ -91,13 +92,13 @@ export class SmplkitNotFoundError extends SmplkitError {
     errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 404, responseBody, errors);
-    this.name = "SmplkitNotFoundError";
+    this.name = "SmplNotFoundError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 /** Raised when an operation conflicts with current state (HTTP 409). */
-export class SmplkitConflictError extends SmplkitError {
+export class SmplConflictError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
@@ -105,13 +106,13 @@ export class SmplkitConflictError extends SmplkitError {
     errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 409, responseBody, errors);
-    this.name = "SmplkitConflictError";
+    this.name = "SmplConflictError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 /** Raised when the server rejects a request due to validation errors (HTTP 400/422). */
-export class SmplkitValidationError extends SmplkitError {
+export class SmplValidationError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
@@ -119,10 +120,26 @@ export class SmplkitValidationError extends SmplkitError {
     errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 422, responseBody, errors);
-    this.name = "SmplkitValidationError";
+    this.name = "SmplValidationError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+// ---------------------------------------------------------------------------
+// `Smplkit*` aliases — added in PR #103 for callers that prefer the
+// longer prefix (matches the package name `@smplkit/sdk`). They are
+// the same classes; `Smpl*` remains the canonical export.
+// ---------------------------------------------------------------------------
+
+export { SmplError as SmplkitError };
+export { SmplConnectionError as SmplkitConnectionError };
+export { SmplTimeoutError as SmplkitTimeoutError };
+export { SmplNotFoundError as SmplkitNotFoundError };
+export { SmplConflictError as SmplkitConflictError };
+export { SmplValidationError as SmplkitValidationError };
+
+/** @deprecated Use {@link ApiErrorDetail}. */
+export type ApiErrorObject = ApiErrorDetail;
 
 // ---------------------------------------------------------------------------
 // Shared helper: parse JSON:API error body and throw the right exception
@@ -169,26 +186,6 @@ function deriveMessage(errors: ApiErrorDetail[], statusCode: number, body?: stri
   return base;
 }
 
-// ---------------------------------------------------------------------------
-// Backwards-compat aliases — to be removed once all runtime callers migrate.
-// @internal
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use {@link SmplkitError}. */
-export const SmplError = SmplkitError;
-/** @deprecated Use {@link SmplkitConnectionError}. */
-export const SmplConnectionError = SmplkitConnectionError;
-/** @deprecated Use {@link SmplkitTimeoutError}. */
-export const SmplTimeoutError = SmplkitTimeoutError;
-/** @deprecated Use {@link SmplkitNotFoundError}. */
-export const SmplNotFoundError = SmplkitNotFoundError;
-/** @deprecated Use {@link SmplkitConflictError}. */
-export const SmplConflictError = SmplkitConflictError;
-/** @deprecated Use {@link SmplkitValidationError}. */
-export const SmplValidationError = SmplkitValidationError;
-/** @deprecated Use {@link ApiErrorDetail}. */
-export type ApiErrorObject = ApiErrorDetail;
-
 /**
  * Parse an HTTP error response and throw the appropriate typed SDK exception.
  *
@@ -201,12 +198,12 @@ export function throwForStatus(statusCode: number, body: string): never {
   switch (statusCode) {
     case 400:
     case 422:
-      throw new SmplkitValidationError(message, statusCode, body, errors);
+      throw new SmplValidationError(message, statusCode, body, errors);
     case 404:
-      throw new SmplkitNotFoundError(message, statusCode, body, errors);
+      throw new SmplNotFoundError(message, statusCode, body, errors);
     case 409:
-      throw new SmplkitConflictError(message, statusCode, body, errors);
+      throw new SmplConflictError(message, statusCode, body, errors);
     default:
-      throw new SmplkitError(message, statusCode, body, errors);
+      throw new SmplError(message, statusCode, body, errors);
   }
 }

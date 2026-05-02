@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Color } from "../../../src/index.js";
+import { coerceColor } from "../../../src/management/types.js";
 
 describe("Color", () => {
   describe("constructor", () => {
@@ -37,6 +38,11 @@ describe("Color", () => {
     it("rejects non-string input", () => {
       // @ts-expect-error — runtime validation
       expect(() => new Color(0xef4444)).toThrow(TypeError);
+    });
+
+    it("rejects null input with a 'got null' message", () => {
+      // @ts-expect-error — runtime validation
+      expect(() => new Color(null)).toThrow(/got null/);
     });
 
     it("rejects malformed hex", () => {
@@ -90,5 +96,47 @@ describe("Color", () => {
     it("does not equal a plain string", () => {
       expect(new Color("#000").equals("#000")).toBe(false);
     });
+  });
+
+  describe("toString", () => {
+    it("returns the hex string", () => {
+      const c = new Color("#ef4444");
+      expect(c.toString()).toBe("#ef4444");
+    });
+
+    it("returns a normalized lowercase hex", () => {
+      const c = new Color("#FFFFFF");
+      expect(c.toString()).toBe("#ffffff");
+    });
+  });
+});
+
+describe("coerceColor", () => {
+  it("returns null for null input", () => {
+    expect(coerceColor(null)).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    expect(coerceColor(undefined)).toBeNull();
+  });
+
+  it("returns the same Color when given a Color instance", () => {
+    const c = new Color("#ef4444");
+    expect(coerceColor(c)).toBe(c);
+  });
+
+  it("constructs a Color from a hex string", () => {
+    const c = coerceColor("#ef4444");
+    expect(c).toBeInstanceOf(Color);
+    expect(c?.hex).toBe("#ef4444");
+  });
+
+  it("throws TypeError for non-Color, non-string input", () => {
+    // @ts-expect-error — runtime validation
+    expect(() => coerceColor(0xef4444)).toThrow(TypeError);
+    // @ts-expect-error — runtime validation
+    expect(() => coerceColor({})).toThrow(TypeError);
+    // @ts-expect-error — runtime validation
+    expect(() => coerceColor(true)).toThrow(TypeError);
   });
 });

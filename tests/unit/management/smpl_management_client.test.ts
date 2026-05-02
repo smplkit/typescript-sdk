@@ -8,7 +8,7 @@
  *   - close() is idempotent.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AccountSettingsClient,
@@ -17,6 +17,7 @@ import {
   EnvironmentsClient,
   SmplManagementClient,
 } from "../../../src/index.js";
+import { ContextRegistrationBuffer } from "../../../src/management/client.js";
 
 describe("SmplManagementClient", () => {
   const originalKey = process.env.SMPLKIT_API_KEY;
@@ -36,7 +37,7 @@ describe("SmplManagementClient", () => {
     const fetchSpy: string[] = [];
     const origFetch = globalThis.fetch;
     globalThis.fetch = ((input: any) => {
-      fetchSpy.push(typeof input === "string" ? input : input.url ?? String(input));
+      fetchSpy.push(typeof input === "string" ? input : (input.url ?? String(input)));
       return Promise.reject(new Error("no network in test"));
     }) as typeof fetch;
     try {
@@ -64,5 +65,23 @@ describe("SmplManagementClient", () => {
     const mgmt = new SmplManagementClient();
     await expect(mgmt.close()).resolves.toBeUndefined();
     await expect(mgmt.close()).resolves.toBeUndefined();
+  });
+
+  it("_contextBuffer getter exposes the shared ContextRegistrationBuffer", () => {
+    const mgmt = new SmplManagementClient();
+    expect(mgmt._contextBuffer).toBeInstanceOf(ContextRegistrationBuffer);
+  });
+
+  it("close() swallows errors raised by inner flush calls (best-effort)", async () => {
+    const mgmt = new SmplManagementClient();
+
+    // Inject a flush that throws on each namespace; close() should still resolve.
+    const boom = vi.fn().mockRejectedValue(new Error("boom"));
+    (mgmt.contexts as unknown as { flush: typeof boom }).flush = boom;
+    (mgmt.flags as unknown as { flush: typeof boom }).flush = boom;
+    (mgmt.loggers as unknown as { flush: typeof boom }).flush = boom;
+
+    await expect(mgmt.close()).resolves.toBeUndefined();
+    expect(boom).toHaveBeenCalled();
   });
 });

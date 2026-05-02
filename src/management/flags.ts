@@ -336,6 +336,7 @@ export class ManagementFlagsClient {
       });
       if (!result.response.ok && result.response.status !== 204) {
         await checkError(result.response);
+        /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
       }
     } catch (err) {
       wrapFetchError(err);
