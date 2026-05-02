@@ -89,7 +89,7 @@ export interface paths {
         put?: never;
         /**
          * Create Log Group
-         * @description Create a new log group. The caller provides the key in data.id or attributes.key.
+         * @description Create a new log group. The caller provides the key in data.id, or it is auto-generated from name.
          */
         post: operations["create_log_group"];
         delete?: never;
@@ -251,8 +251,6 @@ export interface components {
         LogGroup: {
             /** Name */
             name: string;
-            /** Key */
-            key?: string | null;
             /** Level */
             level?: string | null;
             /** Parent Id */

@@ -820,7 +820,7 @@
           "Account"
         ],
         "summary": "Wipe Account Data",
-        "description": "Delete every config, flag, logger, log group, context, context type (except the auto-managed ``service``), and customer API key (except the caller's current key) on the account. Environments are preserved. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{\"confirm\": true}`` body \u2014 anything else returns 400.",
+        "description": "Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{\"confirm\": true}`` body \u2014 anything else returns 400. Pass ``\"generate_sample_data\": true`` to re-seed the account with the standard sample dataset after the wipe completes (best-effort; seed failures are logged but do not fail the wipe). Returns 204 on success; if any sub-delete fails the response is 500.",
         "operationId": "wipe_account_data",
         "requestBody": {
           "content": {
@@ -833,15 +833,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/vnd.api+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountWipeResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "400": {
             "description": "Validation error or malformed request",
@@ -6139,6 +6132,12 @@
             "type": "boolean",
             "title": "Confirm",
             "description": "Must be ``true`` to proceed. Anything else returns 400. The frontend gates the call behind a confirmation dialog; this field is the server-side seatbelt."
+          },
+          "generate_sample_data": {
+            "type": "boolean",
+            "title": "Generate Sample Data",
+            "description": "When ``true``, the wipe re-seeds the account with the same Acme Commerce sample dataset that new accounts are bootstrapped with. Best-effort: any seeding failures are logged but do not fail the wipe.",
+            "default": false
           }
         },
         "type": "object",
@@ -6148,66 +6147,8 @@
         "title": "AccountWipeRequest",
         "description": "Confirmation envelope for ``POST /accounts/current/actions/wipe``.",
         "example": {
-          "confirm": true
-        }
-      },
-      "AccountWipeResponse": {
-        "properties": {
-          "configs_deleted": {
-            "type": "integer",
-            "title": "Configs Deleted",
-            "default": 0
-          },
-          "flags_deleted": {
-            "type": "integer",
-            "title": "Flags Deleted",
-            "default": 0
-          },
-          "loggers_deleted": {
-            "type": "integer",
-            "title": "Loggers Deleted",
-            "default": 0
-          },
-          "log_groups_deleted": {
-            "type": "integer",
-            "title": "Log Groups Deleted",
-            "default": 0
-          },
-          "contexts_deleted": {
-            "type": "integer",
-            "title": "Contexts Deleted",
-            "default": 0
-          },
-          "context_types_deleted": {
-            "type": "integer",
-            "title": "Context Types Deleted",
-            "default": 0
-          },
-          "api_keys_deleted": {
-            "type": "integer",
-            "title": "Api Keys Deleted",
-            "default": 0
-          },
-          "failures": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Failures"
-          }
-        },
-        "type": "object",
-        "title": "AccountWipeResponse",
-        "description": "Summary of resources removed by a wipe.",
-        "example": {
-          "api_keys_deleted": 1,
-          "configs_deleted": 9,
-          "context_types_deleted": 3,
-          "contexts_deleted": 30,
-          "failures": [],
-          "flags_deleted": 14,
-          "log_groups_deleted": 3,
-          "loggers_deleted": 10
+          "confirm": true,
+          "generate_sample_data": false
         }
       },
       "AddPaymentMethodAttributes": {
@@ -6810,13 +6751,6 @@
       },
       "ContextType": {
         "properties": {
-          "id": {
-            "type": "string",
-            "maxLength": 64,
-            "nullable": true,
-            "title": "Id",
-            "writeOnly": true
-          },
           "name": {
             "type": "string",
             "title": "Name",
@@ -8724,6 +8658,13 @@
             "maxLength": 2048,
             "nullable": true,
             "title": "Profile Pic"
+          },
+          "avatar_url": {
+            "type": "string",
+            "nullable": true,
+            "title": "Avatar Url",
+            "description": "Server-computed ``data:`` URL when an OIDC provider supplied a profile picture. Null otherwise \u2014 callers should fall back to Gravatar or initials.",
+            "readOnly": true
           },
           "auth_provider": {
             "type": "string",
