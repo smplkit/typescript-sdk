@@ -480,16 +480,6 @@ export class ConfigClient {
     return new LiveConfigProxy<T>(this, id, model);
   }
 
-  /**
-   * @deprecated Use {@link ConfigClient.get}, which now returns a {@link LiveConfigProxy}.
-   */
-  async subscribe<T = Record<string, unknown>>(
-    id: string,
-    model?: new (data: any) => T,
-  ): Promise<LiveConfigProxy<T>> {
-    return this.get(id, model);
-  }
-
   // ------------------------------------------------------------------
   // Runtime: change listeners (3-level overloads)
   // ------------------------------------------------------------------
@@ -540,7 +530,7 @@ export class ConfigClient {
    */
   async refresh(): Promise<void> {
     if (!this._initialized) {
-      throw new SmplError("Config not initialized. Call get() or subscribe() first.");
+      throw new SmplError("Config not initialized. Call get() first.");
     }
     const environment = this._parent?._environment;
     if (!environment) {
@@ -560,6 +550,16 @@ export class ConfigClient {
   // ------------------------------------------------------------------
   // Runtime: lazy initialization
   // ------------------------------------------------------------------
+
+  /**
+   * Eagerly initialize the config subclient — fetch all configs, resolve
+   * environment-scoped values into the local cache, and subscribe to the
+   * shared WebSocket for live updates. Idempotent. Called automatically
+   * on first `client.config.get(...)` if not invoked manually.
+   */
+  async start(): Promise<void> {
+    return this._ensureInitialized();
+  }
 
   /** @internal */
   private async _ensureInitialized(): Promise<void> {

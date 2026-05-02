@@ -392,8 +392,15 @@ export class ContextTypesClient {
 // ---------------------------------------------------------------------------
 
 const CONTEXT_BATCH_FLUSH_SIZE = 100;
+const CONTEXT_REGISTRATION_LRU_SIZE = 10_000;
 
-/** Buffer pending context observations for bulk registration. @internal */
+/**
+ * Buffer pending context observations for bulk registration.
+ *
+ * Backed by an LRU of size {@link CONTEXT_REGISTRATION_LRU_SIZE} so the
+ * dedup window doesn't grow unbounded for long-lived processes.
+ * @internal
+ */
 export class ContextRegistrationBuffer {
   private _seen = new Map<string, Record<string, unknown>>();
   private _pending: Array<{ type: string; key: string; attributes: Record<string, unknown> }> = [];
@@ -402,6 +409,11 @@ export class ContextRegistrationBuffer {
     for (const ctx of contexts) {
       const cacheKey = `${ctx.type}:${ctx.key}`;
       if (!this._seen.has(cacheKey)) {
+        if (this._seen.size >= CONTEXT_REGISTRATION_LRU_SIZE) {
+          const firstKey = this._seen.keys().next().value;
+          /* v8 ignore next */
+          if (firstKey !== undefined) this._seen.delete(firstKey);
+        }
         this._seen.set(cacheKey, ctx.attributes);
         this._pending.push({
           type: ctx.type,

@@ -216,7 +216,7 @@ describe("get", () => {
 // subscribe() and LiveConfigProxy
 // ---------------------------------------------------------------------------
 
-describe("subscribe (deprecated alias of get)", () => {
+describe("get returns a live proxy", () => {
   it("should return a LiveConfigProxy", async () => {
     const client = makeClient();
 
@@ -231,7 +231,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Cache is wire-shaped — property access yields `{value: raw}`.
     expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
@@ -252,7 +252,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    await expect(client.subscribe("nonexistent")).rejects.toThrow(SmplNotFoundError);
+    await expect(client.get("nonexistent")).rejects.toThrow(SmplNotFoundError);
   });
 
   it("should auto-update when cache changes", async () => {
@@ -269,7 +269,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
     expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
 
     // Simulate cache update by directly writing to the cache (raw shape).
@@ -295,7 +295,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     expect("retries" in proxy).toBe(true);
     expect("missing" in proxy).toBe(false);
@@ -315,7 +315,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     expect(Object.keys(proxy)).toEqual(["retries", "timeout"]);
   });
@@ -334,7 +334,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     const desc = Object.getOwnPropertyDescriptor(proxy, "retries");
     expect(desc).toBeDefined();
@@ -360,7 +360,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Remove the cache entry
     const cache = (client as unknown as { _configCache: Record<string, Record<string, unknown>> })
@@ -398,7 +398,7 @@ describe("subscribe (deprecated alias of get)", () => {
       }
     }
 
-    const proxy = await client.subscribe("app", AppConfig);
+    const proxy = await client.get("app", AppConfig);
 
     expect((proxy as unknown as AppConfig).retries).toEqual({ value: 3 });
     expect((proxy as unknown as AppConfig).timeout).toEqual({ value: 1000 });
@@ -895,9 +895,7 @@ describe("refresh", () => {
     rawClient["_initialized"] = false;
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
-    await expect(client.refresh()).rejects.toThrow(
-      "Config not initialized. Call get() or subscribe() first.",
-    );
+    await expect(client.refresh()).rejects.toThrow("Config not initialized. Call get() first.");
   });
 
   it("should throw SmplError when no environment is set", async () => {
@@ -1333,7 +1331,7 @@ describe("LiveConfigProxy edge cases", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Symbol access should not throw and should return standard values
     const str = String(proxy);
@@ -1357,7 +1355,7 @@ describe("LiveConfigProxy edge cases", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // Symbol.iterator should use Reflect.has
     expect(Symbol.iterator in proxy).toBe(false);
@@ -1377,7 +1375,7 @@ describe("LiveConfigProxy edge cases", () => {
       }),
     );
 
-    const proxy = await client.subscribe("app");
+    const proxy = await client.get("app");
 
     // getOwnPropertyDescriptor with a symbol should not throw and should return undefined
     // (the proxy class has no own symbol properties).

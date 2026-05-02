@@ -38,7 +38,6 @@ import jsonLogic from "json-logic-js";
 const FLAGS_BASE_URL = "https://flags.smplkit.com";
 const APP_BASE_URL = "https://app.smplkit.com";
 const CACHE_MAX_SIZE = 10_000;
-const CONTEXT_REGISTRATION_LRU_SIZE = 10_000;
 const CONTEXT_BATCH_FLUSH_SIZE = 100;
 const FLAG_REGISTRATION_FLUSH_SIZE = 50;
 const FLAG_REGISTRATION_FLUSH_INTERVAL_MS = 30_000;
@@ -232,45 +231,14 @@ export class FlagStats {
 }
 
 // ---------------------------------------------------------------------------
-// Context registration buffer
+// Context registration buffer — re-exported from management/client.ts
+// (single canonical implementation shared across runtime + management
+// so observations from `flag.get()` evaluation and from
+// `client.manage.contexts.register(...)` dedupe through one LRU).
 // ---------------------------------------------------------------------------
 
-/** @internal — exported so ManagementClient.contexts can share the same buffer. */
-export class ContextRegistrationBuffer {
-  private _seen = new Map<string, Record<string, any>>();
-  private _pending: Array<Record<string, any>> = [];
-
-  observe(contexts: Context[]): void {
-    for (const ctx of contexts) {
-      const cacheKey = `${ctx.type}:${ctx.key}`;
-      if (!this._seen.has(cacheKey)) {
-        if (this._seen.size >= CONTEXT_REGISTRATION_LRU_SIZE) {
-          // Remove oldest entry
-          const firstKey = this._seen.keys().next().value;
-          if (firstKey !== undefined) {
-            this._seen.delete(firstKey);
-          }
-        }
-        this._seen.set(cacheKey, ctx.attributes);
-        this._pending.push({
-          type: ctx.type,
-          key: ctx.key,
-          attributes: { ...ctx.attributes },
-        });
-      }
-    }
-  }
-
-  drain(): Array<Record<string, any>> {
-    const batch = this._pending;
-    this._pending = [];
-    return batch;
-  }
-
-  get pendingCount(): number {
-    return this._pending.length;
-  }
-}
+export { ContextRegistrationBuffer } from "../management/client.js";
+import { ContextRegistrationBuffer } from "../management/client.js";
 
 // ---------------------------------------------------------------------------
 // Flag registration buffer
