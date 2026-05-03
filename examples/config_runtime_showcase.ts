@@ -67,8 +67,12 @@ async function main(): Promise<void> {
   });
   try {
     await setupRuntimeShowcase(client.manage);
-    // Wait until the runtime is ready (see SmplClient.waitUntilReady on Python).
-    await client.config.refresh();
+    // Block until the live-updates WebSocket subscription is registered
+    // server-side. Without this, writes fired immediately afterward can
+    // race the broadcast of their own change events (the SDK isn't in
+    // the subscriber registry yet) and silently miss them. Mirrors
+    // `await client.wait_until_ready()` in the Python showcase.
+    await client.waitUntilReady();
 
     // get a config as a plain dict
     const userSvcConfigDict = await client.config.get("showcase-user-service");

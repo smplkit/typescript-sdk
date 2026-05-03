@@ -82,7 +82,12 @@ async function main(): Promise<void> {
   });
   try {
     await setupRuntimeShowcase(client.manage);
-    await client.flags.initialize();
+    // Block until the live-updates WebSocket subscription is registered
+    // server-side. Without this, writes fired immediately afterward can
+    // race the broadcast of their own change events (the SDK isn't in
+    // the subscriber registry yet) and silently miss them. Mirrors
+    // `await client.wait_until_ready()` in the Python showcase.
+    await client.waitUntilReady();
 
     // declare flags - default values will be used if the flag does not
     // exist or smplkit is unreachable

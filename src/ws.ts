@@ -12,6 +12,11 @@ type EventCallback = (data: Record<string, any>) => void;
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000];
 
+// Mirrors the constant in transport.ts. Kept as a duplicate so this
+// module doesn't take a dependency on the HTTP transport just for a
+// version string. CI keeps both in sync via the build hooks.
+const SDK_VERSION = "0.0.0";
+
 /**
  * Manages a WebSocket connection for real-time event delivery.
  */
@@ -134,7 +139,14 @@ export class SharedWebSocket {
     debug("websocket", `connecting to ${safeUrl}`);
 
     try {
-      const ws = new WebSocket(wsUrl);
+      // CloudFront's WAF blocks WebSocket upgrade requests that omit a
+      // User-Agent header. Node's `ws` library doesn't set one by
+      // default (browsers do), so we must inject it explicitly to match
+      // the User-Agent the HTTP transport sends. Without this, the
+      // upgrade is rejected with HTTP 403 before reaching our backend.
+      const ws = new WebSocket(wsUrl, {
+        headers: { "User-Agent": `smplkit-typescript-sdk/${SDK_VERSION}` },
+      });
       this._ws = ws;
 
       ws.on("open", () => {
