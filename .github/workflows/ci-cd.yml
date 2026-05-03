@@ -92,11 +92,35 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Release
+      - name: Run semantic-release
+        if: github.event.inputs.manual_version == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FORCE_VERSION: ${{ github.event.inputs.manual_version }}
         run: npx semantic-release
+
+      - name: Manual release (override path)
+        if: github.event.inputs.manual_version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.manual_version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::manual_version '${VERSION}' is not a valid semver string."
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists. Refusing to overwrite."
+            exit 1
+          fi
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+          # publishConfig.provenance=true in package.json + id-token: write
+          # permission triggers OIDC trusted publishing automatically.
+          npm publish
+          gh release create "v${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --title "v${VERSION}" \
+            --notes "Manual release v${VERSION} dispatched via workflow_dispatch."
+          echo "Created release v${VERSION} at ${GITHUB_SHA}"
 
       - name: Summary
         run: |
