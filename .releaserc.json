@@ -2,7 +2,7 @@
   "branches": ["main"],
   "plugins": [
     "@semantic-release/commit-analyzer",
-    ["./scripts/release-force-version.cjs", { "version": "3.0.0" }],
+    "./scripts/release-force-version.cjs",
     "@semantic-release/release-notes-generator",
     "@semantic-release/npm",
     "@semantic-release/github"

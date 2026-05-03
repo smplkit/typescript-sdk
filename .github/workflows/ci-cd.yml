@@ -5,6 +5,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      manual_version:
+        description: "Force version"
+        required: false
+        default: ""
 
 jobs:
   lint:
@@ -57,7 +62,7 @@ jobs:
   release:
     name: Release
     needs: [ci-gate]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -90,6 +95,7 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_VERSION: ${{ github.event.inputs.manual_version }}
         run: npx semantic-release
 
       - name: Summary

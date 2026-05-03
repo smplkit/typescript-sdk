@@ -1,11 +1,35 @@
-// One-off semantic-release plugin that forces nextRelease.version to a fixed
-// value. Used a single time to align this SDK's major version with the other
-// SDKs (1.10.0 -> 3.0.0, skipping 2.x). Remove this file and its entry in
-// .releaserc.json immediately after the forced release publishes.
+// Semantic-release plugin that forces nextRelease.version to a fixed value
+// when the FORCE_VERSION env var is set (or when pluginConfig.version is set).
+//
+// Used for one-off corrections such as cross-SDK version alignment. Driven
+// via the workflow_dispatch "Force version" input in .github/workflows/ci-cd.yml,
+// which plumbs the input as the FORCE_VERSION env var. Leave the input empty
+// for the normal semantic-release flow.
+//
+// The analyzeCommits hook ensures the release lifecycle fires even if there
+// are no release-worthy commits since the last tag (otherwise semantic-release
+// would short-circuit before verifyRelease could override the version).
+
+function resolveTarget(pluginConfig) {
+  return pluginConfig.version || process.env.FORCE_VERSION || null;
+}
 
 module.exports = {
+  analyzeCommits(pluginConfig, context) {
+    const target = resolveTarget(pluginConfig);
+    if (target) {
+      context.logger.log(
+        `[force-version] forcing release because FORCE_VERSION=${target}`
+      );
+      // Any non-null release type triggers the downstream lifecycle. The
+      // verifyRelease hook below replaces the actual version string.
+      return "patch";
+    }
+    return null;
+  },
+
   verifyRelease(pluginConfig, context) {
-    const target = pluginConfig.version;
+    const target = resolveTarget(pluginConfig);
     if (!target) return;
 
     const { logger, nextRelease, options } = context;
