@@ -1,11 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  Environment,
-  ContextType,
-  ContextEntity,
-  AccountSettings,
-} from "../../../src/management/models.js";
+import { Environment, ContextType, AccountSettings } from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
+import { Context } from "../../../src/flags/types.js";
 import type {
   EnvironmentsClient,
   ContextTypesClient,
@@ -20,6 +16,7 @@ function mockEnvsClient(): EnvironmentsClient {
   return {
     _create: vi.fn(),
     _update: vi.fn(),
+    delete: vi.fn(),
   } as unknown as EnvironmentsClient;
 }
 
@@ -27,6 +24,7 @@ function mockCtClient(): ContextTypesClient {
   return {
     _create: vi.fn(),
     _update: vi.fn(),
+    delete: vi.fn(),
   } as unknown as ContextTypesClient;
 }
 
@@ -60,7 +58,7 @@ describe("Environment", () => {
       const env = makeEnv();
       expect(env.id).toBe("production");
       expect(env.name).toBe("Production");
-      expect(env.color).toBe("#ff0000");
+      expect(env.color?.hex).toBe("#ff0000");
       expect(env.classification).toBe(EnvironmentClassification.STANDARD);
       expect(env.createdAt).toBe("2026-04-01T10:00:00Z");
       expect(env.updatedAt).toBe("2026-04-01T10:00:00Z");
@@ -158,6 +156,47 @@ describe("Environment", () => {
     });
   });
 
+  describe("delete()", () => {
+    it("should call client.delete() with id when both present", async () => {
+      const client = mockEnvsClient();
+      const env = new Environment(client, {
+        id: "production",
+        name: "Production",
+        color: null,
+        classification: EnvironmentClassification.STANDARD,
+        createdAt: "2026-04-01T10:00:00Z",
+        updatedAt: "2026-04-01T10:00:00Z",
+      });
+      await env.delete();
+      expect(client.delete).toHaveBeenCalledWith("production");
+    });
+
+    it("should throw when client is null", async () => {
+      const env = new Environment(null, {
+        id: "x",
+        name: "X",
+        color: null,
+        classification: EnvironmentClassification.STANDARD,
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(env.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw when id is null", async () => {
+      const client = mockEnvsClient();
+      const env = new Environment(client, {
+        id: null,
+        name: "X",
+        color: null,
+        classification: EnvironmentClassification.STANDARD,
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(env.delete()).rejects.toThrow("cannot delete");
+    });
+  });
+
   describe("_apply()", () => {
     it("should copy all fields from another Environment", () => {
       const env = makeEnv({ id: "old" });
@@ -172,7 +211,7 @@ describe("Environment", () => {
       env._apply(other);
       expect(env.id).toBe("new-env");
       expect(env.name).toBe("New Name");
-      expect(env.color).toBe("#00ff00");
+      expect(env.color?.hex).toBe("#00ff00");
       expect(env.classification).toBe(EnvironmentClassification.AD_HOC);
       expect(env.createdAt).toBe("2026-05-01T00:00:00Z");
       expect(env.updatedAt).toBe("2026-05-01T00:00:00Z");
@@ -185,6 +224,20 @@ describe("Environment", () => {
       expect(env.toString()).toBe(
         "Environment(id=production, name=Production, classification=STANDARD)",
       );
+    });
+  });
+
+  describe("color setter", () => {
+    it("should accept a hex string and coerce to a Color instance", () => {
+      const env = makeEnv({ color: null });
+      env.color = "#00ff00";
+      expect(env.color?.hex).toBe("#00ff00");
+    });
+
+    it("should accept null", () => {
+      const env = makeEnv();
+      env.color = null;
+      expect(env.color).toBeNull();
     });
   });
 });
@@ -341,6 +394,44 @@ describe("ContextType", () => {
     });
   });
 
+  describe("delete()", () => {
+    it("should call client.delete() with id when both present", async () => {
+      const client = mockCtClient();
+      const ct = new ContextType(client, {
+        id: "user",
+        name: "User",
+        attributes: {},
+        createdAt: "2026-04-01T10:00:00Z",
+        updatedAt: "2026-04-01T10:00:00Z",
+      });
+      await ct.delete();
+      expect(client.delete).toHaveBeenCalledWith("user");
+    });
+
+    it("should throw when client is null", async () => {
+      const ct = new ContextType(null, {
+        id: "x",
+        name: "X",
+        attributes: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(ct.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw when id is null", async () => {
+      const client = mockCtClient();
+      const ct = new ContextType(client, {
+        id: null,
+        name: "X",
+        attributes: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(ct.delete()).rejects.toThrow("cannot delete");
+    });
+  });
+
   describe("_apply()", () => {
     it("should copy all fields from another ContextType", () => {
       const ct = makeCt({ id: "old" });
@@ -367,21 +458,32 @@ describe("ContextType", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ContextEntity
+// Context (returned by mgmt.contexts.list/get — replaces ContextEntity)
 // ---------------------------------------------------------------------------
 
-describe("ContextEntity", () => {
+describe("Context", () => {
   function makeEntity(
-    overrides: Partial<ConstructorParameters<typeof ContextEntity>[0]> = {},
-  ): ContextEntity {
-    return new ContextEntity({
-      type: "user",
-      key: "u-123",
-      name: "Alice",
-      attributes: { plan: "enterprise" },
-      createdAt: "2026-04-01T10:00:00Z",
-      updatedAt: "2026-04-01T10:00:00Z",
-      ...overrides,
+    overrides: {
+      type?: string;
+      key?: string;
+      name?: string | null;
+      attributes?: Record<string, unknown>;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    } = {},
+  ): Context {
+    const {
+      type = "user",
+      key = "u-123",
+      name = "Alice",
+      attributes = { plan: "enterprise" },
+      createdAt = "2026-04-01T10:00:00Z",
+      updatedAt = "2026-04-01T10:00:00Z",
+    } = overrides;
+    return new Context(type, key, attributes, {
+      name: name ?? undefined,
+      createdAt,
+      updatedAt,
     });
   }
 
@@ -397,7 +499,7 @@ describe("ContextEntity", () => {
     });
 
     it("should shallow-copy attributes", () => {
-      const attrs = { plan: "free" };
+      const attrs: Record<string, unknown> = { plan: "free" };
       const entity = makeEntity({ attributes: attrs });
       attrs["extra"] = "x";
       expect(entity.attributes).not.toHaveProperty("extra");
@@ -424,7 +526,7 @@ describe("ContextEntity", () => {
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
       const entity = makeEntity();
-      expect(entity.toString()).toBe("ContextEntity(type=user, key=u-123)");
+      expect(entity.toString()).toBe("Context(type=user, key=u-123, name=Alice)");
     });
   });
 });

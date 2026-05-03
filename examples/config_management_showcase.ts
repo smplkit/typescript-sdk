@@ -1,300 +1,100 @@
 /**
- * Smpl Config SDK Showcase — Management API
- * ============================================
- *
- * Demonstrates the smplkit TypeScript SDK's management plane for Smpl Config:
- *
- * - Client initialization (`SmplClient`)
- * - Factory method: `client.config.new()` for unsaved configs
- * - Direct mutation of items, environments, and metadata
- * - Persist via `save()` (POST if new, PUT if existing)
- * - Fetch by id: `client.config.get()`
- * - List all configs: `client.config.list()`
- * - Delete by id: `client.config.delete()`
- * - Multi-level inheritance via parent configs
- *
- * Most customers will create and configure configs via the Console UI.
- * This showcase demonstrates the programmatic equivalent — useful for
- * infrastructure-as-code, CI/CD pipelines, setup scripts, and automated
- * testing.
- *
- * For the runtime experience (resolve, subscribe, live proxy, change
- * listeners), see `config_runtime_showcase.ts`.
+ * Demonstrates the smplkit management SDK for Smpl Config.
  *
  * Prerequisites:
  *   - `npm install @smplkit/sdk`
  *   - A valid smplkit API key, provided via one of:
- *       - SMPLKIT_API_KEY environment variable
- *       - ~/.smplkit configuration file (see SDK docs)
+ *     - `SMPLKIT_API_KEY` environment variable
+ *     - `~/.smplkit` configuration file (see SDK docs)
  *   - The smplkit Config service running and reachable
  *
  * Usage:
- *   npx tsx examples/config_management_showcase.ts
+ *
+ *   tsx examples/config_management_showcase.ts
  */
 
-import { SmplClient } from "@smplkit/sdk";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function section(title: string): void {
-  console.log();
-  console.log("=".repeat(60));
-  console.log(`  ${title}`);
-  console.log("=".repeat(60));
-  console.log();
-}
-
-function step(description: string): void {
-  console.log(`  → ${description}`);
-}
+import { SmplManagementClient } from "../src/index.js";
+import {
+  cleanupManagementShowcase,
+  setupManagementShowcase,
+} from "./setup/config_management_setup.js";
 
 async function main(): Promise<void> {
-  // ======================================================================
-  // 1. SDK INITIALIZATION
-  // ======================================================================
-  section("1. SDK Initialization");
+  // create the client (TypeScript has a single Promise-based client)
+  const manage = new SmplManagementClient();
+  try {
+    await setupManagementShowcase(manage);
 
-  // The SmplClient constructor resolves three required parameters:
-  //
-  //   apiKey       — not passed here; resolved automatically from the
-  //                  SMPLKIT_API_KEY environment variable or the
-  //                  ~/.smplkit configuration file.
-  //
-  //   environment  — the target environment. Can also be resolved from
-  //                  SMPLKIT_ENVIRONMENT if not passed.
-  //
-  //   service      — identifies this SDK instance. Can also be resolved
-  //                  from SMPLKIT_SERVICE if not passed.
-  //
-  // To pass the API key explicitly:
-  //
-  //   const client = new SmplClient({
-  //       apiKey: "sk_api_...",
-  //       environment: "production",
-  //       service: "showcase-service",
-  //   });
-  //
-  const client = new SmplClient({
-    environment: "production",
-    service: "showcase-service",
-  });
-  step("SmplClient initialized (environment=production)");
+    // create a "parent" configuration that all other configs inherit from
+    const shared = manage.config.new("showcase-common", {
+      name: "Showcase Common",
+      description: "Showcase-only shared configuration.",
+    });
+    shared.setString("app_name", "Acme SaaS Platform");
+    shared.setString("support_email", "support@acme.dev");
+    shared.setNumber("max_retries", 3);
+    shared.setNumber("request_timeout_ms", 5000);
+    shared.setNumber("pagination_default_page_size", 25);
+    shared.setNumber("max_retries", 5, { environment: "production" });
+    shared.setNumber("request_timeout_ms", 10000, { environment: "production" });
+    shared.setNumber("max_retries", 2, { environment: "staging" });
+    await shared.save();
+    console.log(`Created config: ${shared.id}`);
 
-  // ======================================================================
-  // Pre-cleanup: delete any configs left over from a previous run.
-  // Children must be deleted before parents.
-  // ======================================================================
-  for (const id of ["auth_module", "user_service", "payment_service"]) {
-    try { await client.config.management.delete(id); } catch { /* not present — ignore */ }
-  }
+    // create a config (inherits from showcase-common)
+    const userService = manage.config.new("showcase-user-service", {
+      name: "Showcase User Service",
+      description: "Configuration for the user microservice.",
+      parent: shared,
+    });
+    userService.setString("database.host", "localhost");
+    userService.setNumber("database.port", 5432);
+    userService.setString("database.name", "users_dev");
+    userService.setNumber("database.pool_size", 5);
+    userService.setNumber("cache_ttl_seconds", 300);
+    userService.setBoolean("enable_signup", true);
+    userService.setNumber("pagination_default_page_size", 50);
+    await userService.save();
 
-  // ======================================================================
-  // 2. CREATE A CONFIG WITH new() + MUTATE + save()
-  // ======================================================================
-  //
-  // client.config.new(key, options) creates an unsaved Config object.
-  // Mutate its properties directly, then call save() to POST it to
-  // the server.
-  //
-  // This is the recommended pattern for programmatic config creation.
-  // ======================================================================
+    // update a config
+    userService.setString("database.host", "prod-users-rds.internal.acme.dev", {
+      environment: "production",
+    });
+    userService.setString("database.name", "users_prod", { environment: "production" });
+    userService.setNumber("database.pool_size", 20, { environment: "production" });
+    userService.setNumber("cache_ttl_seconds", 600, { environment: "production" });
+    userService.setBoolean("enable_signup", false, { environment: "production" });
+    await userService.save();
+    console.log(`Updated config: ${userService.id}`);
 
-  section("2. Create a Config (new → mutate → save)");
-
-  const paymentService = client.config.management.new("payment_service", {
-    name: "Payment Service",
-  });
-  step(`Created unsaved config: id=${paymentService.id}`);
-
-  // Direct mutation — set base items
-  paymentService.items = {
-    timeout: 30,
-    retries: 3,
-    currency: "USD",
-    gateway: "stripe",
-  };
-  step(`Set items: ${JSON.stringify(paymentService.items)}`);
-
-  // Direct mutation — set environment overrides
-  paymentService.environments = {
-    production: {
-      values: {
-        timeout: 60,
-        retries: 5,
-        gateway: "stripe-production",
-      },
-    },
-    staging: {
-      values: {
-        timeout: 15,
-      },
-    },
-  };
-  step("Set environment overrides for production and staging");
-
-  // Persist — POST (new config, id is null)
-  await paymentService.save();
-  step(`Saved: id=${paymentService.id} (POST — new config)`);
-
-  // ======================================================================
-  // 3. FETCH AND UPDATE A CONFIG
-  // ======================================================================
-
-  // ------------------------------------------------------------------
-  // 3a. Get Config by Id
-  // ------------------------------------------------------------------
-  section("3a. Get Config by Id");
-
-  const fetched = await client.config.management.get("payment_service");
-  step(`Fetched: id=${fetched.id}, name=${fetched.name}`);
-  step(`  id: ${fetched.id}`);
-  step(`  items: ${JSON.stringify(fetched.items)}`);
-  step(`  environments: ${JSON.stringify(fetched.environments)}`);
-
-  // ------------------------------------------------------------------
-  // 3b. Mutate and Save (Update)
-  // ------------------------------------------------------------------
-  section("3b. Update via Mutate + Save");
-
-  // Update description
-  fetched.description = "Configuration for the payment processing service.";
-  step(`Updated description: ${fetched.description}`);
-
-  // Add new items while keeping existing ones
-  fetched.items = {
-    ...fetched.items,
-    max_amount: 10000,
-    enable_3ds: true,
-  };
-  step(`Added new items: max_amount, enable_3ds`);
-
-  // Add environment overrides for the new items
-  const currentEnvs = fetched.environments as Record<string, { values: Record<string, unknown> }>;
-  fetched.environments = {
-    ...currentEnvs,
-    production: {
-      values: {
-        ...(currentEnvs.production?.values ?? {}),
-        max_amount: 50000,
-        enable_3ds: true,
-      },
-    },
-  };
-  step("Added production overrides for new items");
-
-  // Persist — PUT (existing config, id is set)
-  await fetched.save();
-  step(`Saved: id=${fetched.id} (PUT — existing config)`);
-
-  // ======================================================================
-  // 4. LIST ALL CONFIGS
-  // ======================================================================
-  section("4. List All Configs");
-
-  const configs = await client.config.management.list();
-  step(`Total configs: ${configs.length}`);
-  for (const cfg of configs) {
-    const parentInfo = cfg.parent ? ` (parent: ${cfg.parent})` : " (root)";
-    step(`  ${cfg.id}${parentInfo} — ${cfg.name}`);
-  }
-
-  // ======================================================================
-  // 5. PARENT-CHILD CONFIG CREATION
-  // ======================================================================
-  //
-  // Configs can have a parent, forming a hierarchy. Child configs
-  // inherit items from their parent (and grandparent, up to common).
-  // Environment overrides at any level take precedence.
-  // ======================================================================
-
-  section("5a. Create Parent: User Service Config");
-
-  const userService = client.config.management.new("user_service", {
-    name: "User Service",
-    description: "Configuration for the user microservice.",
-  });
-  userService.items = {
-    database_host: "localhost",
-    database_port: 5432,
-    pool_size: 5,
-    cache_ttl_seconds: 300,
-  };
-  userService.environments = {
-    production: {
-      values: {
-        database_host: "prod-users-rds.internal.acme.dev",
-        pool_size: 20,
-        cache_ttl_seconds: 600,
-      },
-    },
-  };
-  await userService.save();
-  step(`Created user-service: id=${userService.id}`);
-
-  // ------------------------------------------------------------------
-  section("5b. Create Child: Auth Module (child of User Service)");
-
-  const authModule = client.config.management.new("auth_module", {
-    name: "Auth Module",
-    description: "Authentication module within the user service.",
-  });
-  // Set parent to user-service — auth-module inherits its items
-  authModule.parent = userService.id;
-  authModule.items = {
-    session_ttl_minutes: 60,
-    mfa_enabled: false,
-  };
-  authModule.environments = {
-    production: {
-      values: {
-        session_ttl_minutes: 30,
-        mfa_enabled: true,
-      },
-    },
-  };
-  await authModule.save();
-  step(`Created auth-module: id=${authModule.id}, parent=${authModule.parent}`);
-
-  // Verify hierarchy
-  const allConfigs = await client.config.management.list();
-  for (const cfg of allConfigs) {
-    if (cfg.id === "auth_module") {
-      step(`  auth-module parent: ${cfg.parent}`);
+    // list configs
+    const configs = await manage.config.list();
+    for (const cfg of configs) {
+      const parentInfo = cfg.parent ? ` (parent: ${cfg.parent})` : " (root)";
+      console.log(`  ${cfg.id}${parentInfo}`);
     }
+
+    // get a config
+    const fetched = await manage.config.get("showcase-user-service");
+    console.log(`Fetched: id=${fetched.id}, name=${fetched.name}`);
+    console.log(`  description=${fetched.description}`);
+    console.log(`  parent=${fetched.parent ?? "(none)"}`);
+    console.log(`  items: ${Object.keys(fetched.items).join(", ")}`);
+
+    // delete configs
+    await userService.delete();
+    await shared.delete();
+    console.log("Deleted configs");
+
+    // cleanup
+    await cleanupManagementShowcase(manage);
+    console.log("Done!");
+  } finally {
+    await manage.close();
   }
-
-  // ======================================================================
-  // 6. DELETE CONFIGS
-  // ======================================================================
-  section("6. Cleanup — Delete Configs");
-
-  // Delete child first (children must be deleted before parents)
-  await client.config.management.delete("auth_module");
-  step("Deleted auth-module");
-
-  await client.config.management.delete("user_service");
-  step("Deleted user-service");
-
-  await client.config.management.delete("payment_service");
-  step("Deleted payment-service");
-
-  // Verify deletion
-  const remaining = await client.config.management.list();
-  step(`Remaining configs: ${remaining.length}`);
-
-  client.close();
-  step("SmplClient closed");
-
-  // ======================================================================
-  // DONE
-  // ======================================================================
-  section("ALL DONE");
-  console.log("  The Config Management showcase completed successfully.");
-  console.log("  All configs have been cleaned up.\n");
 }
 
-main()
-  .catch(console.error)
-  .finally(() => process.exit(0));
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

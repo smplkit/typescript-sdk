@@ -5,7 +5,7 @@
 /** A single entry in a config inheritance chain (child-to-root ordering). */
 export interface ChainConfig {
   /** Config UUID. */
-  id: string;
+  id: string | null;
   /** Base key-value pairs. */
   items: Record<string, unknown>;
   /** Per-environment overrides. */

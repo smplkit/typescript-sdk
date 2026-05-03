@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SmplError } from "./errors.js";
+import { SmplkitError } from "./errors.js";
 
 /** Config keys mapped to their environment variable names. */
 const CONFIG_KEYS = {
@@ -30,6 +30,17 @@ export interface ResolvedConfig {
   service: string;
   debug: boolean;
   disableTelemetry: boolean;
+}
+
+/**
+ * Subset of ResolvedConfig used by SmplManagementClient — environment,
+ * service, and telemetry are runtime-only concerns.
+ */
+export interface ResolvedManagementConfig {
+  apiKey: string;
+  baseDomain: string;
+  scheme: string;
+  debug: boolean;
 }
 
 /**
@@ -85,7 +96,7 @@ export function parseIniFile(content: string, profile: string): Record<string, s
     Object.keys(profileValues).length === 0
   ) {
     const available = [...sections].sort().join(", ");
-    throw new SmplError(
+    throw new SmplkitError(
       `Configuration profile "${profile}" not found in ~/.smplkit. ` +
         `Available profiles: ${available}`,
     );
@@ -98,13 +109,13 @@ export function parseIniFile(content: string, profile: string): Record<string, s
  * Parse a boolean string value.
  *
  * Accepts true/1/yes and false/0/no (case-insensitive).
- * Throws SmplError for unrecognised values.
+ * Throws SmplkitError for unrecognised values.
  */
 export function parseBool(value: string, key: string): boolean {
   const lower = value.toLowerCase();
   if (lower === "true" || lower === "1" || lower === "yes") return true;
   if (lower === "false" || lower === "0" || lower === "no") return false;
-  throw new SmplError(
+  throw new SmplkitError(
     `Invalid boolean value "${value}" for ${key}. Expected true/false, 1/0, or yes/no.`,
   );
 }
@@ -145,6 +156,31 @@ const NO_SERVICE_MESSAGE =
   "  2. Set the SMPLKIT_SERVICE environment variable\n" +
   "  3. Add service to your ~/.smplkit config file";
 
+/** @internal Read merged config (defaults + file + env). Used by both runtime + management. */
+function readMergedConfig(profile: string): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = {
+    scheme: "https",
+    base_domain: "smplkit.com",
+    debug: "false",
+    disable_telemetry: "false",
+  };
+  try {
+    const configPath = join(homedir(), ".smplkit");
+    const content = readFileSync(configPath, "utf-8");
+    const fileValues = parseIniFile(content, profile);
+    for (const key of Object.keys(CONFIG_KEYS)) {
+      if (fileValues[key]) merged[key] = fileValues[key];
+    }
+  } catch (e) {
+    if (e instanceof SmplkitError) throw e;
+  }
+  for (const [key, envVar] of Object.entries(CONFIG_KEYS)) {
+    const envVal = process.env[envVar];
+    if (envVal) merged[key] = envVal;
+  }
+  return merged;
+}
+
 /**
  * Resolve configuration using the 4-step algorithm:
  * 1. Defaults
@@ -153,40 +189,9 @@ const NO_SERVICE_MESSAGE =
  * 4. Constructor arguments
  */
 export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
-  // --- Step 1: Defaults ---
-  const merged: Record<string, string | undefined> = {
-    scheme: "https",
-    base_domain: "smplkit.com",
-    debug: "false",
-    disable_telemetry: "false",
-  };
-
-  // --- Step 2: Config file ---
   const profile = options.profile ?? process.env.SMPLKIT_PROFILE ?? "default";
-  try {
-    const configPath = join(homedir(), ".smplkit");
-    const content = readFileSync(configPath, "utf-8");
-    const fileValues = parseIniFile(content, profile);
-    for (const key of Object.keys(CONFIG_KEYS)) {
-      if (fileValues[key]) {
-        merged[key] = fileValues[key];
-      }
-    }
-  } catch (e) {
-    // Re-throw SmplError (e.g. missing profile)
-    if (e instanceof SmplError) throw e;
-    // File doesn't exist or isn't readable — skip
-  }
+  const merged = readMergedConfig(profile);
 
-  // --- Step 3: Environment variables ---
-  for (const [key, envVar] of Object.entries(CONFIG_KEYS)) {
-    const envVal = process.env[envVar];
-    if (envVal) {
-      merged[key] = envVal;
-    }
-  }
-
-  // --- Step 4: Constructor arguments ---
   if (options.apiKey !== undefined) merged.api_key = options.apiKey;
   if (options.baseDomain !== undefined) merged.base_domain = options.baseDomain;
   if (options.scheme !== undefined) merged.scheme = options.scheme;
@@ -196,10 +201,9 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
   if (options.disableTelemetry !== undefined)
     merged.disable_telemetry = String(options.disableTelemetry);
 
-  // --- Step 5: Validate required fields ---
-  if (!merged.api_key) throw new SmplError(NO_API_KEY_MESSAGE);
-  if (!merged.environment) throw new SmplError(NO_ENVIRONMENT_MESSAGE);
-  if (!merged.service) throw new SmplError(NO_SERVICE_MESSAGE);
+  if (!merged.api_key) throw new SmplkitError(NO_API_KEY_MESSAGE);
+  if (!merged.environment) throw new SmplkitError(NO_ENVIRONMENT_MESSAGE);
+  if (!merged.service) throw new SmplkitError(NO_SERVICE_MESSAGE);
 
   return {
     apiKey: merged.api_key,
@@ -209,5 +213,34 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
     service: merged.service,
     debug: parseBool(merged.debug!, "debug"),
     disableTelemetry: parseBool(merged.disable_telemetry!, "disable_telemetry"),
+  };
+}
+
+/**
+ * Resolve a {@link ResolvedManagementConfig} — the subset needed by
+ * {@link SmplManagementClient}. No `environment` or `service` required.
+ */
+export function resolveManagementConfig(options: {
+  apiKey?: string;
+  profile?: string;
+  baseDomain?: string;
+  scheme?: string;
+  debug?: boolean;
+}): ResolvedManagementConfig {
+  const profile = options.profile ?? process.env.SMPLKIT_PROFILE ?? "default";
+  const merged = readMergedConfig(profile);
+
+  if (options.apiKey !== undefined) merged.api_key = options.apiKey;
+  if (options.baseDomain !== undefined) merged.base_domain = options.baseDomain;
+  if (options.scheme !== undefined) merged.scheme = options.scheme;
+  if (options.debug !== undefined) merged.debug = String(options.debug);
+
+  if (!merged.api_key) throw new SmplkitError(NO_API_KEY_MESSAGE);
+
+  return {
+    apiKey: merged.api_key,
+    baseDomain: merged.base_domain!,
+    scheme: merged.scheme!,
+    debug: parseBool(merged.debug!, "debug"),
   };
 }

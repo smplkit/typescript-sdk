@@ -254,5 +254,36 @@ describe("Typed flag handles", () => {
       const handle = client.booleanFlag("nonexistent", false);
       expect(handle.get()).toBe(false);
     });
+
+    it("should throw when client is null", () => {
+      const flag = new Flag(null, {
+        id: "my-flag",
+        name: "My Flag",
+        type: "BOOLEAN",
+        default: false,
+        values: [],
+        description: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(() => flag.get()).toThrow("cannot evaluate");
+    });
+
+    it("should throw when id is null (unsaved flag)", () => {
+      const client = makeFlagsClient();
+      const flag = new Flag(client, {
+        id: null,
+        name: "Unsaved Flag",
+        type: "BOOLEAN",
+        default: false,
+        values: [],
+        description: null,
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(() => flag.get()).toThrow(/Flag has no id/);
+    });
   });
 });

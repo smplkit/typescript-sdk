@@ -1,13 +1,17 @@
 /**
  * Structured SDK error types.
  *
- * All smplkit errors extend {@link SmplError}, allowing callers to catch
- * the base class for generic handling or specific subclasses for
- * fine-grained control.
+ * All smplkit errors extend {@link SmplError}. The TypeScript SDK keeps
+ * the `Smpl` prefix on its public error names because TypeScript's
+ * built-in `Error`/`TypeError`/etc. preclude bare names. The Python
+ * canonical names (`Error`, `NotFoundError`, ...) line up via
+ * `Smpl{X}Error` ↔ Python `{X}Error`. The `Smplkit{X}Error` names are
+ * exported as aliases (introduced in PR #103) for callers that prefer
+ * the longer prefix.
  */
 
 /** A single error object from a JSON:API error response. */
-export interface ApiErrorObject {
+export interface ApiErrorDetail {
   status?: string;
   title?: string;
   detail?: string;
@@ -23,13 +27,13 @@ export class SmplError extends Error {
   public readonly responseBody?: string;
 
   /** Structured JSON:API error objects from the server response, if available. */
-  public readonly errors: ReadonlyArray<ApiErrorObject>;
+  public readonly errors: ReadonlyArray<ApiErrorDetail>;
 
   constructor(
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message);
     this.name = "SmplError";
@@ -57,7 +61,7 @@ export class SmplConnectionError extends SmplError {
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode, responseBody, errors);
     this.name = "SmplConnectionError";
@@ -71,7 +75,7 @@ export class SmplTimeoutError extends SmplError {
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode, responseBody, errors);
     this.name = "SmplTimeoutError";
@@ -85,7 +89,7 @@ export class SmplNotFoundError extends SmplError {
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 404, responseBody, errors);
     this.name = "SmplNotFoundError";
@@ -99,7 +103,7 @@ export class SmplConflictError extends SmplError {
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 409, responseBody, errors);
     this.name = "SmplConflictError";
@@ -107,19 +111,35 @@ export class SmplConflictError extends SmplError {
   }
 }
 
-/** Raised when the server rejects a request due to validation errors (HTTP 422). */
+/** Raised when the server rejects a request due to validation errors (HTTP 400/422). */
 export class SmplValidationError extends SmplError {
   constructor(
     message: string,
     statusCode?: number,
     responseBody?: string,
-    errors?: ApiErrorObject[],
+    errors?: ApiErrorDetail[],
   ) {
     super(message, statusCode ?? 422, responseBody, errors);
     this.name = "SmplValidationError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+// ---------------------------------------------------------------------------
+// `Smplkit*` aliases — added in PR #103 for callers that prefer the
+// longer prefix (matches the package name `@smplkit/sdk`). They are
+// the same classes; `Smpl*` remains the canonical export.
+// ---------------------------------------------------------------------------
+
+export { SmplError as SmplkitError };
+export { SmplConnectionError as SmplkitConnectionError };
+export { SmplTimeoutError as SmplkitTimeoutError };
+export { SmplNotFoundError as SmplkitNotFoundError };
+export { SmplConflictError as SmplkitConflictError };
+export { SmplValidationError as SmplkitValidationError };
+
+/** @deprecated Use {@link ApiErrorDetail}. */
+export type ApiErrorObject = ApiErrorDetail;
 
 // ---------------------------------------------------------------------------
 // Shared helper: parse JSON:API error body and throw the right exception
@@ -129,7 +149,7 @@ export class SmplValidationError extends SmplError {
  * Parse a JSON:API error response body into structured error objects.
  * @internal
  */
-function parseJsonApiErrors(body: string): ApiErrorObject[] {
+function parseJsonApiErrors(body: string): ApiErrorDetail[] {
   try {
     const parsed = JSON.parse(body);
     if (parsed && Array.isArray(parsed.errors)) {
@@ -153,7 +173,7 @@ function parseJsonApiErrors(body: string): ApiErrorObject[] {
  * Falls back to `HTTP {statusCode}` when no detail/title/status is available.
  * @internal
  */
-function deriveMessage(errors: ApiErrorObject[], statusCode: number, body?: string): string {
+function deriveMessage(errors: ApiErrorDetail[], statusCode: number, body?: string): string {
   if (errors.length === 0) {
     return body ? `HTTP ${statusCode}: ${body}` : `HTTP ${statusCode}`;
   }

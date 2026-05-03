@@ -1,458 +1,186 @@
 /**
- * Smpl Flags SDK Showcase — Runtime Evaluation
- * ==============================================
- *
- * Demonstrates the smplkit TypeScript SDK's runtime evaluation for Smpl Flags:
- *
- * - Typed flag handles: booleanFlag, stringFlag, numberFlag, jsonFlag
- * - Context providers and typed context entities
- * - `await client.flags.initialize()` for local evaluation
- * - Evaluating flags with `.get()` — local JSON Logic, no network per call
- * - Explicit context overrides via `.get({ context: [...] })`
- * - Scoped change listeners: `client.flags.onChange(key, callback)`
- * - Global change listeners: `client.flags.onChange(callback)`
- * - Cache statistics via `client.flags.stats()`
- * - Context registration: `register()` and `flushContexts()`
- *
- * This is the SDK experience that 99% of customers will use. Flags are
- * created and configured via the Console UI (or the management API shown
- * in `flags_management_showcase.ts`). This script focuses entirely on
- * the runtime: declaring, initializing, evaluating, and reacting to changes.
+ * Demonstrates the smplkit runtime SDK for Smpl Flags.
  *
  * Prerequisites:
  *   - `npm install @smplkit/sdk`
  *   - A valid smplkit API key, provided via one of:
- *       - SMPLKIT_API_KEY environment variable
- *       - ~/.smplkit configuration file (see SDK docs)
- *   - The smplkit Flags service running and reachable
- *   - At least two environments configured (e.g., `staging`, `production`)
+ *     - `SMPLKIT_API_KEY` environment variable
+ *     - `~/.smplkit` configuration file (see SDK docs)
  *
  * Usage:
- *   npx tsx examples/flags_runtime_showcase.ts
+ *
+ *   tsx examples/flags_runtime_showcase.ts
  */
 
-import { SmplClient, Context } from "@smplkit/sdk";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Demo scaffolding — creates flags so this showcase can run standalone.
-// In a real app, flags are created via the Console UI.
-import { setupDemoFlags, teardownDemoFlags } from "./flags_runtime_setup.js";
+import { strict as assert } from "node:assert";
+import { setTimeout as sleep } from "node:timers/promises";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function section(title: string): void {
-  console.log();
-  console.log("=".repeat(60));
-  console.log(`  ${title}`);
-  console.log("=".repeat(60));
-  console.log();
-}
-
-function step(description: string): void {
-  console.log(`  → ${description}`);
-}
+import { SmplClient, Context, Op, Rule } from "../src/index.js";
+import { cleanupRuntimeShowcase, setupRuntimeShowcase } from "./setup/flags_runtime_setup.js";
 
 // ---------------------------------------------------------------------------
-// Simulated request context
-// ---------------------------------------------------------------------------
-// In a real application, these would come from your web framework's
-// request object (Express, Fastify, Koa, etc.). For this showcase,
-// we simulate them with mutable objects that we swap mid-script to
-// demonstrate how the context provider drives flag evaluation.
+// Note: this showcase calls client.setContext(...) inline to demonstrate
+// context-driven flag evaluation.  In a real app (Express, Fastify, etc.),
+// setContext is called once per request from middleware — not scattered
+// through your handlers.
 // ---------------------------------------------------------------------------
 
-let currentUser = {
-  id: "user-001",
-  firstName: "Alice",
+const alice = {
+  beta_tester: true,
+  email: "alice.adams@acme.com",
+  first_name: "Alice",
+  last_name: "Adams",
   plan: "enterprise",
-  betaTester: true,
 };
 
-let currentAccount = {
-  id: "acme-corp",
+const bob = {
+  beta_tester: false,
+  email: "bob.jones@acme.com",
+  first_name: "Bob",
+  last_name: "Jones",
+  plan: "free",
+};
+
+const largeTechnologyAccount = {
+  employee_count: 500,
+  id: 1234,
   industry: "technology",
   region: "us",
-  employeeCount: 500,
 };
 
-function setSimulatedContext(opts: {
-  user?: typeof currentUser;
-  account?: typeof currentAccount;
-}): void {
-  if (opts.user !== undefined) currentUser = opts.user;
-  if (opts.account !== undefined) currentAccount = opts.account;
+const smallRetailAccount = {
+  employee_count: 10,
+  id: 5678,
+  industry: "retail",
+  region: "eu",
+};
+
+function createContext(user: any, account: any): Context[] {
+  // Create context within which flags will be evaluated.
+  return [
+    new Context("user", user.email, {
+      beta_tester: user.beta_tester,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      plan: user.plan,
+    }),
+    new Context("account", String(account.id), {
+      industry: account.industry,
+      region: account.region,
+      employee_count: account.employee_count,
+    }),
+  ];
 }
 
 async function main(): Promise<void> {
-  // ======================================================================
-  // SETUP
-  // ======================================================================
-
+  // create the client (TypeScript has a single Promise-based client)
   const client = new SmplClient({
     environment: "staging",
     service: "showcase-service",
   });
-
-  // Create demo flags (normally done via Console UI).
-  console.log("  Setting up demo flags...");
-  const demoFlagIds = await setupDemoFlags(client);
-  console.log("  Demo flags ready.\n");
-
   try {
-    // ==================================================================
-    // 1. DECLARE TYPED FLAG HANDLES
-    // ==================================================================
-    //
-    // Flag handles are local to the SDK. They do NOT create flags on
-    // the server. They serve three purposes:
-    //
-    //   1. Typed return — get() returns boolean, string, number, or
-    //      Record<string, any> depending on the handle type.
-    //   2. Code-level default — used if the server is unreachable
-    //      or the flag doesn't exist server-side.
-    //   3. Documentation — which flags this application depends on.
-    // ==================================================================
+    await setupRuntimeShowcase(client.manage);
+    await client.flags.initialize();
 
-    section("1. Declare Typed Flag Handles");
-
+    // declare flags - default values will be used if the flag does not
+    // exist or smplkit is unreachable
     const checkoutV2 = client.flags.booleanFlag("checkout-v2", false);
     const bannerColor = client.flags.stringFlag("banner-color", "red");
     const maxRetries = client.flags.numberFlag("max-retries", 3);
-    const uiTheme = client.flags.jsonFlag("ui-theme", { mode: "light", accent: "#0066cc" });
-
-    step(`checkout-v2:   type=boolean, code_default=${checkoutV2.default}`);
-    step(`banner-color:  type=string,  code_default=${bannerColor.default}`);
-    step(`max-retries:   type=number,  code_default=${maxRetries.default}`);
-    step(`ui-theme:      type=json,    code_default=${JSON.stringify(uiTheme.default)}`);
-
-    // ==================================================================
-    // 2. REGISTER A CONTEXT PROVIDER
-    // ==================================================================
-    //
-    // The context provider is a function called on every flag.get().
-    // It returns a list of Context objects describing the current
-    // evaluation context (user, account, device, etc.).
-    //
-    //   new Context(type, key, attributes, { name })
-    //
-    // In a real app, this pulls from the current request, session, etc.
-    // ==================================================================
-
-    section("2. Register Context Provider");
-
-    client.flags.setContextProvider(() => [
-      new Context(
-        "user",
-        currentUser.id,
-        {
-          first_name: currentUser.firstName,
-          plan: currentUser.plan,
-          beta_tester: currentUser.betaTester,
-        },
-        { name: currentUser.firstName },
-      ),
-      new Context(
-        "account",
-        currentAccount.id,
-        {
-          industry: currentAccount.industry,
-          region: currentAccount.region,
-          employee_count: currentAccount.employeeCount,
-        },
-        { name: currentAccount.id },
-      ),
-    ]);
-
-    step("Context provider registered");
-    step("  Returns: [Context('user', ...), Context('account', ...)]");
-
-    // ==================================================================
-    // 3. INITIALIZE — Fetch definitions, open WebSocket
-    // ==================================================================
-    //
-    // initialize() does three things:
-    //   1. Fetches all flag definitions via GET /api/v1/flags
-    //   2. Opens a shared WebSocket for live update events
-    //   3. Enables local JSON Logic evaluation for all declared handles
-    //
-    // After initialize(), get() never touches the network.
-    // ==================================================================
-
-    section("3. Initialize the Flags Runtime");
-
-    await client.flags.initialize();
-    step("client.flags.initialize() completed");
-    step("Flags loaded, WebSocket open, local evaluation ready");
-
-    // ==================================================================
-    // 4. EVALUATE FLAGS WITH .get()
-    // ==================================================================
-    //
-    // get() runs JSON Logic evaluation locally — no HTTP per call.
-    // The context provider is called, rules are matched in order,
-    // and the first matching rule's value is returned.
-    //
-    // Current context: Alice, enterprise plan, US region, tech, 500 employees
-    // ==================================================================
-
-    // ----------------------------------------------------------------
-    // 4a. Evaluate with current context (Alice)
-    // ----------------------------------------------------------------
-    section("4a. Evaluate Flags (Alice — enterprise, US, tech)");
-
-    const checkoutResult = checkoutV2.get();
-    step(`checkout-v2 = ${checkoutResult} (${typeof checkoutResult})`);
-    // Expected: true — matches enterprise + US region rule
-
-    const bannerResult = bannerColor.get();
-    step(`banner-color = ${bannerResult} (${typeof bannerResult})`);
-    // Expected: "blue" — matches enterprise plan rule
-
-    const retriesResult = maxRetries.get();
-    step(`max-retries = ${retriesResult} (${typeof retriesResult})`);
-    // Expected: 5 — matches employee_count > 100 rule
-
-    const themeResult = uiTheme.get();
-    step(`ui-theme = ${JSON.stringify(themeResult)} (${typeof themeResult})`);
-    // Expected: server-side default or code-level default
-
-    // ----------------------------------------------------------------
-    // 4b. Switch context — simulate a different user/request
-    // ----------------------------------------------------------------
-    section("4b. Evaluate Flags (Bob — free, EU, retail, 10 employees)");
-
-    setSimulatedContext({
-      user: {
-        id: "user-002",
-        firstName: "Bob",
-        plan: "free",
-        betaTester: false,
-      },
-      account: {
-        id: "small-biz",
-        industry: "retail",
-        region: "eu",
-        employeeCount: 10,
-      },
-    });
-
-    const checkoutBob = checkoutV2.get();
-    step(`checkout-v2 = ${checkoutBob}`);
-    // Expected: false — no rules match
-
-    const bannerBob = bannerColor.get();
-    step(`banner-color = ${bannerBob}`);
-    // Expected: "red" — no rules match, flag default
-
-    const retriesBob = maxRetries.get();
-    step(`max-retries = ${retriesBob}`);
-    // Expected: 3 — no rules match, flag default
-
-    step("Context-dependent evaluation correct");
-
-    // Restore Alice for subsequent sections.
-    setSimulatedContext({
-      user: { id: "user-001", firstName: "Alice", plan: "enterprise", betaTester: true },
-      account: { id: "acme-corp", industry: "technology", region: "us", employeeCount: 500 },
-    });
-
-    // ==================================================================
-    // 5. EVALUATE WITH CONTEXT OVERRIDE
-    // ==================================================================
-    //
-    // For edge cases (background jobs, tests, scripts), pass context
-    // directly to get(). This bypasses the registered provider.
-    // ==================================================================
-
-    section("5. Evaluate with Context Override");
-
-    const overrideFree = checkoutV2.get({
-      context: [
-        new Context("user", "test-user", { plan: "free", beta_tester: false }),
-        new Context("account", "test-account", { region: "jp" }),
-      ],
-    });
-    step(`checkout-v2 (free, JP) = ${overrideFree}`);
-    // Expected: false
-
-    const overrideEnterprise = checkoutV2.get({
-      context: [
-        new Context("user", "test-user", { plan: "enterprise", beta_tester: false }),
-        new Context("account", "test-account", { region: "us" }),
-      ],
-    });
-    step(`checkout-v2 (enterprise, US) = ${overrideEnterprise}`);
-    // Expected: true
-
-    const overrideBanner = bannerColor.get({
-      context: [
-        new Context("user", "override-user", { plan: "free" }),
-        new Context("account", "override-account", { industry: "retail" }),
-      ],
-    });
-    step(`banner-color (free, retail) = ${overrideBanner}`);
-    // Expected: "red" (no rules match)
-
-    step("Context override works — provider bypassed for these calls");
-
-    // ==================================================================
-    // 6. SCOPED CHANGE LISTENER
-    // ==================================================================
-    //
-    // onChange(key, callback) fires only when the specified flag
-    // definition changes. Useful for reacting to specific flags.
-    // ==================================================================
-
-    section("6. Scoped Change Listener");
-
-    const bannerChanges: Array<{ id: string; source: string }> = [];
-    client.flags.onChange("banner-color", (event) => {
-      bannerChanges.push({ id: event.id, source: event.source });
-      console.log(`    [BANNER] banner-color changed via ${event.source}`);
-    });
-    step("Scoped listener registered for banner-color");
-
-    const checkoutChanges: Array<{ id: string; source: string }> = [];
-    client.flags.onChange("checkout-v2", (event) => {
-      checkoutChanges.push({ id: event.id, source: event.source });
-      console.log(`    [CHECKOUT] checkout-v2 changed via ${event.source}`);
-    });
-    step("Scoped listener registered for checkout-v2");
-
-    // ==================================================================
-    // 7. GLOBAL CHANGE LISTENER
-    // ==================================================================
-    //
-    // onChange(callback) fires when ANY flag definition changes.
-    // Useful for logging, metrics, and cache invalidation.
-    // ==================================================================
-
-    section("7. Global Change Listener");
 
     const allChanges: Array<{ id: string; source: string }> = [];
+    const bannerChanges: any[] = [];
+
+    // global listener — fires when ANY flag definition changes
     client.flags.onChange((event) => {
       allChanges.push({ id: event.id, source: event.source });
-      console.log(`    [GLOBAL] Flag '${event.id}' changed via ${event.source}`);
+      console.log(`    Global flag listener: '${event.id}' updated via ${event.source}`);
     });
-    step("Global change listener registered (fires for any flag)");
 
-    // Trigger a refresh to fire listeners.
-    step("Triggering manual refresh to exercise change listeners...");
-    await client.flags.refresh();
-    step(`Global changes received: ${allChanges.length}`);
-    step(`Banner-specific changes: ${bannerChanges.length}`);
-    step(`Checkout-specific changes: ${checkoutChanges.length}`);
+    // flag listener — fires only when a specific flag changes
+    client.flags.onChange("banner-color", (event) => {
+      bannerChanges.push(event);
+      console.log("    banner-color flag changed!");
+    });
 
-    // ==================================================================
-    // 8. CACHE STATS
-    // ==================================================================
-    //
-    // The SDK caches resolved values by (flag_key, context_hash).
-    // Repeated evaluations with identical context skip JSON Logic
-    // entirely — pure hash lookup.
-    // ==================================================================
+    // request 1 — Alice from a large tech account
+    {
+      client.flags.setContextProvider(() => createContext(alice, largeTechnologyAccount));
+      const checkoutResult = checkoutV2.get();
+      console.log(`checkout-v2 = ${checkoutResult}`);
+      assert.equal(checkoutResult, true);
 
-    section("8. Cache Statistics");
+      const bannerResult = bannerColor.get();
+      console.log(`banner-color = ${bannerResult}`);
+      assert.equal(bannerResult, "blue");
 
-    const statsBefore = client.flags.stats();
-    step(`Cache hits: ${statsBefore.cacheHits}`);
-    step(`Cache misses: ${statsBefore.cacheMisses}`);
-
-    // Run 100 evaluations with the same context to demonstrate caching.
-    for (let i = 0; i < 100; i++) {
-      checkoutV2.get();
+      const retriesResult = maxRetries.get();
+      console.log(`max-retries = ${retriesResult}`);
+      assert.equal(retriesResult, 5);
     }
 
-    const statsAfter = client.flags.stats();
-    step(`Cache hits after 100 reads: ${statsAfter.cacheHits}`);
-    step(`New cache hits: ${statsAfter.cacheHits - statsBefore.cacheHits}`);
-    step("Repeated evaluations served from cache — zero JSON Logic overhead");
+    // request 2 — Bob from a small retail account
+    {
+      client.flags.setContextProvider(() => createContext(bob, smallRetailAccount));
+      const checkoutResult2 = checkoutV2.get();
+      console.log(`checkout-v2 = ${checkoutResult2}`);
+      assert.equal(checkoutResult2, false);
 
-    // ==================================================================
-    // 9. CONTEXT REGISTRATION
-    // ==================================================================
-    //
-    // register() explicitly queues contexts for background batch
-    // registration with the server. This populates the Console rule
-    // builder's autocomplete with real context types and attributes.
-    //
-    // flushContexts() forces an immediate flush of all pending
-    // registrations. Normally contexts are flushed automatically
-    // in batches.
-    // ==================================================================
+      const bannerResult2 = bannerColor.get();
+      console.log(`banner-color = ${bannerResult2}`);
+      assert.equal(bannerResult2, "red");
 
-    section("9. Context Registration");
+      const retriesResult2 = maxRetries.get();
+      console.log(`max-retries = ${retriesResult2}`);
+      assert.equal(retriesResult2, 3);
+    }
 
-    // Single context.
-    await client.management.contexts.register(
-      new Context(
-        "user",
-        currentUser.id,
-        {
-          first_name: currentUser.firstName,
-          plan: currentUser.plan,
-          beta_tester: currentUser.betaTester,
-        },
-        { name: currentUser.firstName },
-      ),
+    // get a flag's value (explicitly pass context)
+    const explicitResult = checkoutV2.get({
+      context: [
+        new Context("user", "john.smith@acme.com", { plan: "free", beta_tester: false }),
+        new Context("account", "1111", { region: "jp" }),
+      ],
+    });
+    console.log(`checkout-v2 (free, JP) = ${explicitResult}`);
+    assert.equal(explicitResult, false);
+
+    // simulate someone making changes to a flag to trigger listeners
+    await updateRules(client);
+
+    // wait a moment for the event to be delivered
+    await sleep(200);
+
+    // verify both listeners fired
+    assert.ok(
+      allChanges.length >= 1,
+      `Expected at least one global change, got ${allChanges.length}`,
     );
-    step("Registered single user context");
+    assert.ok(
+      bannerChanges.length >= 1,
+      `Expected at least one banner change, got ${bannerChanges.length}`,
+    );
 
-    // Multiple contexts at once — typical middleware pattern.
-    await client.management.contexts.register([
-      new Context("user", "user-003", {
-        first_name: "Charlie",
-        plan: "business",
-        beta_tester: false,
-      }),
-      new Context("account", "corp-xyz", {
-        industry: "finance",
-        region: "eu",
-        employee_count: 2000,
-      }),
-    ]);
-    step("Registered user + account contexts (batch)");
-
-    // Flush all pending registrations to the server.
-    await client.management.contexts.flush();
-    step("flush() completed — contexts sent to server");
-    step("Console rule builder now has autocomplete data for these context types");
-
-    // ==================================================================
-    // 10. CLEANUP
-    // ==================================================================
-    section("10. Cleanup");
-
-    await client.flags.disconnect();
-    step("Disconnected from flags runtime");
-
-    await teardownDemoFlags(client, demoFlagIds);
-    step("Demo flags deleted");
-
+    await cleanupRuntimeShowcase(client.manage);
+    console.log("Done!");
+  } finally {
     client.close();
-    step("SmplClient closed");
-
-    // ==================================================================
-    // DONE
-    // ==================================================================
-    section("ALL DONE");
-    console.log("  The Flags Runtime showcase completed successfully.");
-    console.log("  If you got here, Smpl Flags runtime evaluation is working.\n");
-  } catch (error) {
-    console.error("\n  ERROR:", error);
-    console.log("\n  Cleaning up...");
-    try {
-      await client.flags.disconnect();
-    } catch {
-      // ignore
-    }
-    await teardownDemoFlags(client, demoFlagIds);
-    client.close();
-    throw error;
   }
 }
 
-main()
-  .catch(console.error)
-  .finally(() => process.exit(0));
+async function updateRules(client: SmplClient): Promise<void> {
+  const currentBanner = await client.manage.flags.get("banner-color");
+  currentBanner.addRule(
+    new Rule("Red for small companies", { environment: "staging" })
+      .when("account.employee_count", Op.LT, 50)
+      .serve("red"),
+  );
+  await currentBanner.save();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

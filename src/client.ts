@@ -7,9 +7,10 @@
 
 import createClient from "openapi-fetch";
 import { ConfigClient } from "./config/client.js";
-import { FlagsClient, ContextRegistrationBuffer } from "./flags/client.js";
+import { FlagsClient } from "./flags/client.js";
+import { SmplTimeoutError } from "./errors.js";
 import { LoggingClient } from "./logging/client.js";
-import { ManagementClient } from "./management/client.js";
+import { SmplManagementClient } from "./management/client.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
@@ -112,8 +113,12 @@ export class SmplClient {
   /** Client for logging management and runtime. */
   readonly logging: LoggingClient;
 
-  /** Client for app-plane management (environments, contexts, context types, account settings). */
-  readonly management: ManagementClient;
+  /**
+   * Standalone management/CRUD entry point — mirrors Python's
+   * `client.manage`. Construction is side-effect-free; safe to use even
+   * when the runtime plane is dormant.
+   */
+  readonly manage: SmplManagementClient;
 
   private _wsManager: SharedWebSocket | null = null;
   private readonly _apiKey: string;
@@ -177,7 +182,16 @@ export class SmplClient {
       });
     }
 
-    const sharedContextBuffer = new ContextRegistrationBuffer();
+    // Construct the management client first so we can share its context
+    // buffer with the runtime flags client. Observations from runtime
+    // flag evaluation and from `client.manage.contexts.register(...)`
+    // dedupe through a single LRU.
+    this.manage = new SmplManagementClient({
+      apiKey: cfg.apiKey,
+      baseDomain: cfg.baseDomain,
+      scheme: cfg.scheme,
+      debug: cfg.debug,
+    });
 
     this.config = new ConfigClient(cfg.apiKey, this._timeout, configBaseUrl);
     this.flags = new FlagsClient(
@@ -186,7 +200,7 @@ export class SmplClient {
       this._timeout,
       flagsBaseUrl,
       appBaseUrl,
-      sharedContextBuffer,
+      this.manage._contextBuffer,
     );
     this.logging = new LoggingClient(
       cfg.apiKey,
@@ -194,11 +208,6 @@ export class SmplClient {
       this._timeout,
       loggingBaseUrl,
     );
-    this.management = new ManagementClient({
-      appBaseUrl,
-      apiKey: cfg.apiKey,
-      buffer: sharedContextBuffer,
-    });
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();
@@ -207,6 +216,11 @@ export class SmplClient {
     this.flags._parent = this;
     this.config._parent = this;
     this.logging._parent = this;
+
+    // Wire the management plane resolver — runtime sub-clients delegate
+    // CRUD/bulk-fetch to `client.manage.*` instead of duplicating it.
+    this.config._resolveManagement = () => this.manage;
+    this.logging._resolveManagement = () => this.manage;
 
     // Fire-and-forget: register service context
     void this._registerServiceContext();
@@ -242,6 +256,42 @@ export class SmplClient {
       this._wsManager.start();
     }
     return this._wsManager;
+  }
+
+  /**
+   * Eagerly initialize the SDK and wait until it is fully ready.
+   *
+   * Pre-fetches all flags and configs into the local cache, opens the
+   * live-updates WebSocket, and waits for the handshake to complete.
+   * After this returns, `flag.get()` / `client.config.get()` hit cache
+   * (no first-request connect tax) and any `onChange` listeners receive
+   * every server event from this point forward.
+   *
+   * Logging integration is _not_ installed here — call
+   * `client.logging.install()` separately if you want it (it installs
+   * adapters and hooks into your application's logger, which should be
+   * opt-in).
+   *
+   * Mirrors Python's `await client.wait_until_ready()`.
+   *
+   * @throws SmplTimeoutError If the WebSocket fails to connect within
+   *   `timeoutMs` milliseconds.
+   */
+  async waitUntilReady(options: { timeoutMs?: number } = {}): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    await this.flags.initialize();
+    await this.config.start();
+    const ws = this._ensureWs();
+    const deadline = Date.now() + timeoutMs;
+    while (ws.connectionStatus !== "connected") {
+      if (Date.now() >= deadline) {
+        throw new SmplTimeoutError(
+          `Live-updates websocket did not connect within ${timeoutMs}ms ` +
+            `(status: ${JSON.stringify(ws.connectionStatus)})`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   }
 
   /** Close the shared WebSocket and release resources. */

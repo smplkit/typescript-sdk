@@ -1,39 +1,50 @@
 /**
- * ConfigClient — management and runtime for Smpl Config.
+ * ConfigClient — runtime client for Smpl Config (live values, change listeners).
+ * Management/CRUD lives on `mgmt.config.*`.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
-import type { components, operations } from "../generated/config.d.ts";
-import {
-  SmplConflictError,
-  SmplNotFoundError,
-  SmplValidationError,
-  SmplError,
-  SmplConnectionError,
-  SmplTimeoutError,
-  throwForStatus,
-} from "../errors.js";
+import type { components } from "../generated/config.d.ts";
+import { SmplNotFoundError, SmplError, SmplTimeoutError } from "../errors.js";
 import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { keyToDisplayName } from "../helpers.js";
 import { debug } from "../_debug.js";
+import type { SmplManagementClient } from "../management/client.js";
 
-/** Describes a single config value change detected on refresh. */
-export interface ConfigChangeEvent {
+/**
+ * Describes a single config value change detected on refresh. Frozen —
+ * fields are set at construction and cannot be mutated afterward.
+ */
+export class ConfigChangeEvent {
   /** The config id that changed. */
-  configId: string;
+  readonly configId: string;
   /** The item key within the config that changed. */
-  itemKey: string;
+  readonly itemKey: string;
   /** The previous value (null if the key was absent). */
-  oldValue: unknown;
+  readonly oldValue: unknown;
   /** The updated value (null if the key was removed). */
-  newValue: unknown;
+  readonly newValue: unknown;
   /** How the change was delivered. */
-  source: "websocket" | "manual";
+  readonly source: "websocket" | "manual";
+
+  constructor(fields: {
+    configId: string;
+    itemKey: string;
+    oldValue: unknown;
+    newValue: unknown;
+    source: "websocket" | "manual";
+  }) {
+    this.configId = fields.configId;
+    this.itemKey = fields.itemKey;
+    this.oldValue = fields.oldValue;
+    this.newValue = fields.newValue;
+    this.source = fields.source;
+    Object.freeze(this);
+  }
 }
 
 /** @internal */
@@ -90,10 +101,14 @@ function extractEnvironments(
   return result;
 }
 
-/** @internal */
-function resourceToConfig(resource: ConfigResource, client: ConfigClient): Config {
+/**
+ * @internal Construct a typed Config from a wire resource. The runtime
+ * uses these only to resolve values for the local cache; they do not
+ * support `.save()` or `.delete()` (use `mgmt.config.*` instead).
+ */
+function resourceToConfig(resource: ConfigResource): Config {
   const attrs = resource.attributes;
-  return new Config(client, {
+  return new Config(null, {
     id: resource.id ?? null,
     name: attrs.name,
     description: attrs.description ?? null,
@@ -110,140 +125,12 @@ function resourceToConfig(resource: ConfigResource, client: ConfigClient): Confi
   });
 }
 
-/** @internal */
-async function checkError(response: Response, _context: string): Promise<never> {
-  const body = await response.text().catch(() => "");
-  throwForStatus(response.status, body);
-}
-
-/** @internal */
-function wrapFetchError(err: unknown): never {
-  if (
-    err instanceof SmplNotFoundError ||
-    err instanceof SmplConflictError ||
-    err instanceof SmplValidationError ||
-    err instanceof SmplError
-  ) {
-    throw err;
-  }
-  if (err instanceof TypeError) {
-    throw new SmplConnectionError(`Network error: ${err.message}`);
-  }
-  throw new SmplConnectionError(
-    `Request failed: ${err instanceof Error ? err.message : String(err)}`,
-  );
-}
-
 /**
- * Wrap plain values into typed item format for the API.
- * `{key: rawValue}` -> `{key: {value: rawValue}}`
- * @internal
- */
-function wrapItemValues(
-  values: Record<string, unknown> | null | undefined,
-): Record<string, { value: unknown }> | null {
-  if (!values) return null;
-  const result: Record<string, { value: unknown }> = {};
-  for (const [key, val] of Object.entries(values)) {
-    result[key] = { value: val };
-  }
-  return result;
-}
-
-/**
- * Wrap plain environment values into the API wire format.
- * SDK format:  `{ env: { values: { key: raw } } }`
- * Wire format: `{ env: { values: { key: { value: raw } } } }`
- * @internal
- */
-function wrapEnvironments(
-  environments: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null {
-  if (!environments) return null;
-  const result: Record<string, unknown> = {};
-  for (const [envName, envEntry] of Object.entries(environments)) {
-    if (envEntry && typeof envEntry === "object" && !Array.isArray(envEntry)) {
-      const entry = envEntry as Record<string, unknown>;
-      if (entry.values && typeof entry.values === "object" && !Array.isArray(entry.values)) {
-        const wrapped: Record<string, { value: unknown }> = {};
-        for (const [key, val] of Object.entries(entry.values as Record<string, unknown>)) {
-          wrapped[key] = { value: val };
-        }
-        result[envName] = { ...entry, values: wrapped };
-      } else {
-        result[envName] = envEntry;
-      }
-    } else {
-      result[envName] = envEntry;
-    }
-  }
-  return result;
-}
-
-/**
- * Build a JSON:API request body for create/update operations.
- * @internal
- */
-function buildRequestBody(options: {
-  id?: string | null;
-  name: string;
-  description?: string | null;
-  parent?: string | null;
-  items?: Record<string, unknown> | null;
-  environments?: Record<string, unknown> | null;
-}): operations["create_config"]["requestBody"]["content"]["application/vnd.api+json"] {
-  const attrs: components["schemas"]["Config"] = {
-    name: options.name,
-  };
-  if (options.description !== undefined) attrs.description = options.description;
-  if (options.parent !== undefined) attrs.parent = options.parent;
-  if (options.items !== undefined)
-    attrs.items = wrapItemValues(options.items) as typeof attrs.items;
-  if (options.environments !== undefined)
-    attrs.environments = wrapEnvironments(options.environments) as typeof attrs.environments;
-
-  return {
-    data: {
-      id: options.id ?? null,
-      type: "config",
-      attributes: attrs,
-    },
-  };
-}
-
-/**
- * Management API for smplkit Config — CRUD operations on Config models.
+ * Runtime client for the smplkit Config service.
  *
- * Access via `SmplClient.config.management`.
- */
-export class ConfigManagement {
-  constructor(private readonly _client: ConfigClient) {}
-
-  /** Create an unsaved config. Call `.save()` to persist. */
-  new(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
-    return this._client._mgNew(id, options);
-  }
-
-  /** Fetch a config by id. */
-  async get(id: string): Promise<Config> {
-    return this._client._getById(id);
-  }
-
-  /** List all configs. */
-  async list(): Promise<Config[]> {
-    return this._client._mgList();
-  }
-
-  /** Delete a config by id. */
-  async delete(id: string): Promise<void> {
-    return this._client._mgDelete(id);
-  }
-}
-
-/**
- * Client for the smplkit Config API.
- *
- * Obtained via `SmplClient.config`.
+ * Obtained via `SmplClient.config`. Provides live config values, change
+ * listeners, and lazy initialization. Management/CRUD lives on
+ * `SmplClient.manage.config` (or use a standalone {@link SmplManagementClient}).
  */
 export class ConfigClient {
   /** @internal */
@@ -265,8 +152,8 @@ export class ConfigClient {
     readonly _metrics: MetricsReporter | null;
   } | null = null;
 
-  /** Management API — CRUD operations on Config models. */
-  readonly management: ConfigManagement;
+  /** @internal — resolves the management config sub-client used by lazy-init/refresh. */
+  _resolveManagement?: () => SmplManagementClient;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
   private _initialized = false;
@@ -299,122 +186,6 @@ export class ConfigClient {
         }
       },
     });
-    this.management = new ConfigManagement(this);
-  }
-
-  // ------------------------------------------------------------------
-  // Management: internal implementations (delegated from ConfigManagement)
-  // ------------------------------------------------------------------
-
-  /** @internal */
-  _mgNew(id: string, options?: { name?: string; description?: string; parent?: string }): Config {
-    return new Config(this, {
-      id,
-      name: options?.name ?? keyToDisplayName(id),
-      description: options?.description ?? null,
-      parent: options?.parent ?? null,
-      items: {},
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-  }
-
-  /** @internal */
-  async _mgList(): Promise<Config[]> {
-    let data: components["schemas"]["ConfigListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/configs", {});
-      if (!result.response.ok) await checkError(result.response, "Failed to list configs");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data) return [];
-    return data.data.map((r) => resourceToConfig(r, this));
-  }
-
-  /** @internal */
-  async _mgDelete(id: string): Promise<void> {
-    try {
-      const result = await this._http.DELETE("/api/v1/configs/{id}", {
-        params: { path: { id } },
-      });
-      if (!result.response.ok) await checkError(result.response, `Failed to delete config '${id}'`);
-    } catch (err) {
-      wrapFetchError(err);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Management: internal save methods (called by Config.save())
-  // ------------------------------------------------------------------
-
-  /** @internal — POST a new config. */
-  async _createConfig(config: Config): Promise<Config> {
-    const body = buildRequestBody({
-      id: config.id,
-      name: config.name,
-      description: config.description,
-      parent: config.parent,
-      items: config.items,
-      environments: config.environments,
-    });
-
-    let data: components["schemas"]["ConfigResponse"] | undefined;
-    try {
-      const result = await this._http.POST("/api/v1/configs", { body });
-      if (!result.response.ok) await checkError(result.response, "Failed to create config");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError("Failed to create config");
-    return resourceToConfig(data.data, this);
-  }
-
-  /** @internal — PUT a config update. */
-  async _updateConfig(config: Config): Promise<Config> {
-    const body = buildRequestBody({
-      id: config.id,
-      name: config.name,
-      description: config.description,
-      parent: config.parent,
-      items: config.items,
-      environments: config.environments,
-    });
-
-    let data: components["schemas"]["ConfigResponse"] | undefined;
-    try {
-      const result = await this._http.PUT("/api/v1/configs/{id}", {
-        params: { path: { id: config.id! } },
-        body,
-      });
-      if (!result.response.ok)
-        await checkError(result.response, `Failed to update config ${config.id}`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplValidationError(`Failed to update config ${config.id}`);
-    return resourceToConfig(data.data, this);
-  }
-
-  /** @internal — fetch a config by id. */
-  async _getById(id: string): Promise<Config> {
-    let data: components["schemas"]["ConfigResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/configs/{id}", {
-        params: { path: { id } },
-      });
-      if (!result.response.ok)
-        await checkError(result.response, `Config with id '${id}' not found`);
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data || !data.data) throw new SmplNotFoundError(`Config with id '${id}' not found`);
-    return resourceToConfig(data.data, this);
   }
 
   // ------------------------------------------------------------------
@@ -422,40 +193,32 @@ export class ConfigClient {
   // ------------------------------------------------------------------
 
   /**
-   * Get a config's resolved values for the current environment.
+   * Return a live, dict-like view of the resolved values for *id*.
    *
-   * Returns the resolved key-value pairs for the given config.
-   * Optionally pass a model class to map the resolved values.
-   */
-  async get<T = Record<string, unknown>>(id: string, model?: new (data: any) => T): Promise<T> {
-    await this._ensureInitialized();
-    const values = this._configCache[id];
-    if (values === undefined) {
-      throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
-    }
-    const metrics = this._parent?._metrics;
-    if (metrics) {
-      metrics.record("config.resolutions", 1, "resolutions", { config: id });
-    }
-    if (model) {
-      return new model(values);
-    }
-    return values as T;
-  }
-
-  /**
-   * Subscribe to a config's values. Returns a proxy whose properties
-   * always reflect the latest resolved values.
+   * Without `model`, returns a {@link LiveConfigProxy} that behaves like a
+   * `Record<string, unknown>` (`proxy["key"]`, iteration, `proxy.items()`,
+   * `Object.keys(proxy)`) and updates automatically as the server pushes
+   * changes.
    *
-   * Optionally pass a model class to map the resolved values.
+   * With `model`, the return value type-checks as `model` — attribute
+   * access (`cfg.database.host`) walks a model rebuilt from the current
+   * values on each read, so the customer sees the model's type signature
+   * in their IDE while still tracking live data.
+   *
+   * Mirrors Python's `client.config.get(id)` / `client.config.get(id, ModelCls)`.
+   * There is no `subscribe()` — it was unified into `get()`.
    */
-  async subscribe<T = Record<string, unknown>>(
+  async get<T = Record<string, unknown>>(
     id: string,
     model?: new (data: any) => T,
   ): Promise<LiveConfigProxy<T>> {
     await this._ensureInitialized();
     if (!(id in this._configCache)) {
       throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
+    }
+    const metrics = this._parent?._metrics;
+    if (metrics) {
+      metrics.record("config.resolutions", 1, "resolutions", { config: id });
     }
     return new LiveConfigProxy<T>(this, id, model);
   }
@@ -510,13 +273,13 @@ export class ConfigClient {
    */
   async refresh(): Promise<void> {
     if (!this._initialized) {
-      throw new SmplError("Config not initialized. Call get() or subscribe() first.");
+      throw new SmplError("Config not initialized. Call get() first.");
     }
     const environment = this._parent?._environment;
     if (!environment) {
       throw new SmplError("No environment set.");
     }
-    const configs = await this.management.list();
+    const configs = await this._listConfigs();
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
@@ -527,9 +290,38 @@ export class ConfigClient {
     this._diffAndFire(oldCache, newCache, "manual");
   }
 
+  /**
+   * @internal — fetch the full config list. Prefers the management plane
+   * (set via `_resolveManagement`) so runtime + management share one HTTP
+   * client; falls back to a direct GET when running without `SmplClient`
+   * bootstrap (e.g. unit tests that construct `ConfigClient` directly).
+   */
+  private async _listConfigs(): Promise<Config[]> {
+    if (this._resolveManagement) {
+      return this._resolveManagement().config.list();
+    }
+    const result = await this._http.GET("/api/v1/configs", {});
+    if (!result.response.ok) {
+      throw new SmplError(`Failed to list configs: ${result.response.status}`);
+    }
+    const data = result.data;
+    if (!data) return [];
+    return data.data.map((r) => resourceToConfig(r));
+  }
+
   // ------------------------------------------------------------------
   // Runtime: lazy initialization
   // ------------------------------------------------------------------
+
+  /**
+   * Eagerly initialize the config subclient — fetch all configs, resolve
+   * environment-scoped values into the local cache, and subscribe to the
+   * shared WebSocket for live updates. Idempotent. Called automatically
+   * on first `client.config.get(...)` if not invoked manually.
+   */
+  async start(): Promise<void> {
+    return this._ensureInitialized();
+  }
 
   /** @internal */
   private async _ensureInitialized(): Promise<void> {
@@ -538,7 +330,7 @@ export class ConfigClient {
     if (!environment) {
       throw new SmplError("No environment set. Ensure SmplClient is configured.");
     }
-    const configs = await this.management.list();
+    const configs = await this._listConfigs();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
@@ -559,7 +351,7 @@ export class ConfigClient {
   /** @internal — called by SmplClient for backward compat. */
   async _connectInternal(environment: string): Promise<void> {
     if (this._initialized) return;
-    const configs = await this.management.list();
+    const configs = await this._listConfigs();
     const cache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
@@ -647,7 +439,7 @@ export class ConfigClient {
       });
       if (!result.response.ok) return null;
       if (!result.data?.data) return null;
-      return resourceToConfig(result.data.data, this);
+      return resourceToConfig(result.data.data);
     } catch {
       return null;
     }
@@ -681,13 +473,13 @@ export class ConfigClient {
           if (metrics) {
             metrics.record("config.changes", 1, "changes", { config: cfgKey });
           }
-          const event: ConfigChangeEvent = {
+          const event = new ConfigChangeEvent({
             configId: cfgKey,
             itemKey: iKey,
             oldValue: oldVal,
             newValue: newVal,
             source,
-          };
+          });
           for (const listener of this._listeners) {
             if (listener.configId !== null && listener.configId !== cfgKey) continue;
             if (listener.itemKey !== null && listener.itemKey !== iKey) continue;
