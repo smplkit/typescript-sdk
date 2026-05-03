@@ -117,13 +117,31 @@ function convertEnvironments(
   return out;
 }
 
-/** @internal Convert a typed environments dict to the wire-shaped dict the resolver expects. */
+/** @internal Convert a typed environments dict to the wire-shaped dict the
+ *  serializer (mgmt save path) expects: `{env: {values: {key: {value, ...}}}}`.
+ *  NOT for the resolver — the resolver wants unwrapped values; use
+ *  {@link environmentsForResolver} there. */
 export function environmentsToWire(
   environments: Record<string, ConfigEnvironment>,
 ): Record<string, { values: Record<string, Record<string, unknown>> }> {
   const out: Record<string, { values: Record<string, Record<string, unknown>> }> = {};
   for (const [envId, env] of Object.entries(environments)) {
     out[envId] = { values: env._valuesRaw };
+  }
+  return out;
+}
+
+/** @internal Convert a typed environments dict to the unwrapped shape the
+ *  resolver expects: `{env: {values: {key: rawValue}}}`. The resolver
+ *  deepMerges these into the resolved cache, so values must be raw —
+ *  passing the wire envelope `{value, type, description}` would propagate
+ *  the wrapper into customer reads. */
+export function environmentsForResolver(
+  environments: Record<string, ConfigEnvironment>,
+): Record<string, { values: Record<string, unknown> }> {
+  const out: Record<string, { values: Record<string, unknown> }> = {};
+  for (const [envId, env] of Object.entries(environments)) {
+    out[envId] = { values: env.values };
   }
   return out;
 }
@@ -375,15 +393,20 @@ export class Config {
   async _buildChain(configs?: Config[]): Promise<
     Array<{
       id: string | null;
-      items: Record<string, Record<string, unknown>>;
-      environments: Record<string, { values: Record<string, Record<string, unknown>> }>;
+      items: Record<string, unknown>;
+      environments: Record<string, { values: Record<string, unknown> }>;
     }>
   > {
+    // resolveChain expects unwrapped values (raw values, not the
+    // {value, type, description} wire envelope). Pass `this.items` —
+    // the unwrapping getter — not the raw `_itemsRaw`. Otherwise the
+    // wrapped envelope ends up in the resolved cache and customer
+    // reads return `{type, value, description}` instead of the value.
     const chain = [
       {
         id: this.id,
-        items: this._itemsRaw,
-        environments: environmentsToWire(this._environments),
+        items: this.items,
+        environments: environmentsForResolver(this._environments),
       },
     ];
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -406,8 +429,8 @@ export class Config {
       }
       chain.push({
         id: parentConfig.id,
-        items: parentConfig._itemsRaw,
-        environments: environmentsToWire(parentConfig._environments),
+        items: parentConfig.items,
+        environments: environmentsForResolver(parentConfig._environments),
       });
       current = parentConfig;
     }

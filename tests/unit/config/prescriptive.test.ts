@@ -99,8 +99,8 @@ describe("get", () => {
     // Cache stores wire-shaped values (lazy-init path); proxy property access
     // walks through to the cached entry.
     expect(Object.keys(result)).toEqual(["retries", "timeout"]);
-    expect((result as Record<string, unknown>).retries).toEqual({ value: 3 });
-    expect((result as Record<string, unknown>).timeout).toEqual({ value: 2000 });
+    expect((result as Record<string, unknown>).retries).toEqual(3);
+    expect((result as Record<string, unknown>).timeout).toEqual(2000);
   });
 
   it("should handle parent chain resolution during lazy init", async () => {
@@ -130,8 +130,8 @@ describe("get", () => {
 
     // Child overrides parent: retries=5, parent's timeout=2000 (env override).
     // Cache is wire-shaped due to the resolve path, so values are `{value: ...}`.
-    expect((result as Record<string, unknown>).retries).toEqual({ value: 5 });
-    expect((result as Record<string, unknown>).timeout).toEqual({ value: 2000 });
+    expect((result as Record<string, unknown>).retries).toEqual(5);
+    expect((result as Record<string, unknown>).timeout).toEqual(2000);
   });
 
   it("should pass cached values into the model on each access", async () => {
@@ -162,8 +162,8 @@ describe("get", () => {
     // The proxy is not directly an AppConfig — it constructs one per access
     // and proxies attribute access through it. Because the cache stores
     // wire-shape values, the model fields receive `{value: raw}`.
-    expect((result as unknown as AppConfig).retries).toEqual({ value: 3 });
-    expect((result as unknown as AppConfig).timeout).toEqual({ value: 1000 });
+    expect((result as unknown as AppConfig).retries).toEqual(3);
+    expect((result as unknown as AppConfig).timeout).toEqual(1000);
   });
 
   it("should throw SmplNotFoundError for unknown key", async () => {
@@ -234,8 +234,8 @@ describe("get returns a live proxy", () => {
     const proxy = await client.get("app");
 
     // Cache is wire-shaped — property access yields `{value: raw}`.
-    expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
-    expect((proxy as Record<string, unknown>).timeout).toEqual({ value: 1000 });
+    expect((proxy as Record<string, unknown>).retries).toEqual(3);
+    expect((proxy as Record<string, unknown>).timeout).toEqual(1000);
   });
 
   it("should throw SmplNotFoundError for unknown key", async () => {
@@ -270,7 +270,7 @@ describe("get returns a live proxy", () => {
     );
 
     const proxy = await client.get("app");
-    expect((proxy as Record<string, unknown>).retries).toEqual({ value: 3 });
+    expect((proxy as Record<string, unknown>).retries).toEqual(3);
 
     // Simulate cache update by directly writing to the cache (raw shape).
     const cache = (client as unknown as { _configCache: Record<string, Record<string, unknown>> })
@@ -338,7 +338,7 @@ describe("get returns a live proxy", () => {
 
     const desc = Object.getOwnPropertyDescriptor(proxy, "retries");
     expect(desc).toBeDefined();
-    expect(desc!.value).toEqual({ value: 3 }); // cache stores wire-shaped
+    expect(desc!.value).toEqual(3); // cache stores wire-shaped
     expect(desc!.enumerable).toBe(true);
     expect(desc!.configurable).toBe(true);
 
@@ -400,10 +400,10 @@ describe("get returns a live proxy", () => {
 
     const proxy = await client.get("app", AppConfig);
 
-    expect((proxy as unknown as AppConfig).retries).toEqual({ value: 3 });
-    expect((proxy as unknown as AppConfig).timeout).toEqual({ value: 1000 });
+    expect((proxy as unknown as AppConfig).retries).toEqual(3);
+    expect((proxy as unknown as AppConfig).timeout).toEqual(1000);
     // Method/getter access also goes through the model rebuild.
-    expect((proxy as unknown as AppConfig).raw).toEqual({ value: 3 });
+    expect((proxy as unknown as AppConfig).raw).toEqual(3);
   });
 });
 
@@ -435,20 +435,20 @@ describe("LiveConfigProxy dict helpers", () => {
 
   it("values() returns resolved values", async () => {
     const { proxy } = await setupProxy();
-    expect(proxy.values()).toEqual([{ value: 3 }, { value: 1000 }]);
+    expect(proxy.values()).toEqual([3, 1000]);
   });
 
   it("items() returns key/value pairs", async () => {
     const { proxy } = await setupProxy();
     expect(proxy.items()).toEqual([
-      ["retries", { value: 3 }],
-      ["timeout", { value: 1000 }],
+      ["retries", 3],
+      ["timeout", 1000],
     ]);
   });
 
   it("get(key) returns the value when present", async () => {
     const { proxy } = await setupProxy();
-    expect(proxy.get("retries")).toEqual({ value: 3 });
+    expect(proxy.get("retries")).toEqual(3);
   });
 
   it("get(key, default) returns the default when key absent", async () => {
@@ -511,8 +511,8 @@ describe("onChange", () => {
     expect(events[0].itemKey).toBe("retries");
     // Both old and new values arrive wire-shaped because both passes go
     // through `_buildChain` + `resolveChain`.
-    expect(events[0].oldValue).toEqual({ value: 3 });
-    expect(events[0].newValue).toEqual({ value: 7 });
+    expect(events[0].oldValue).toEqual(3);
+    expect(events[0].newValue).toEqual(7);
     expect(events[0].source).toBe("manual");
   });
 
@@ -675,7 +675,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("new_key");
     expect(events[0].oldValue).toBeNull();
-    expect(events[0].newValue).toEqual({ value: "hello" });
+    expect(events[0].newValue).toEqual('hello');
   });
 
   it("should detect removed keys", async () => {
@@ -712,7 +712,7 @@ describe("onChange", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("old_key");
-    expect(events[0].oldValue).toEqual({ value: "bye" });
+    expect(events[0].oldValue).toEqual('bye');
     expect(events[0].newValue).toBeNull();
   });
 
@@ -755,7 +755,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].newValue).toEqual({ value: "localhost" });
+    expect(events[0].newValue).toEqual('localhost');
   });
 
   it("should detect removed configs on refresh", async () => {
@@ -798,7 +798,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].oldValue).toEqual({ value: "localhost" });
+    expect(events[0].oldValue).toEqual('localhost');
     expect(events[0].newValue).toBeNull();
   });
 
@@ -838,7 +838,7 @@ describe("onChange", () => {
     await client.refresh();
 
     expect(events).toHaveLength(1);
-    expect(events[0].newValue).toEqual({ value: 7 });
+    expect(events[0].newValue).toEqual(7);
   });
 });
 
@@ -862,7 +862,7 @@ describe("refresh", () => {
     );
 
     const original = await client.get("app");
-    expect((original as Record<string, unknown>).retries).toEqual({ value: 3 });
+    expect((original as Record<string, unknown>).retries).toEqual(3);
 
     // Refresh with updated value
     mockFetch.mockResolvedValueOnce(
@@ -880,7 +880,7 @@ describe("refresh", () => {
 
     // Re-resolve should return updated value
     const refreshed = await client.get("app");
-    expect((refreshed as Record<string, unknown>).retries).toEqual({ value: 7 });
+    expect((refreshed as Record<string, unknown>).retries).toEqual(7);
   });
 
   it("should throw SmplError before initialization", async () => {
@@ -1007,7 +1007,10 @@ describe("_ensureInitialized WebSocket wiring", () => {
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
 
-    // Simulate WebSocket config_changed event — handler does scoped GET /configs/{id}
+    // Simulate WebSocket config_changed event. The handler refetches the
+    // single changed config (single GET — fast), updates its local raw
+    // store, then rebuilds every config's resolved cache from the store
+    // (so cascade-affected descendants are also refreshed).
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: configResource({
@@ -1024,8 +1027,6 @@ describe("_ensureInitialized WebSocket wiring", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(events).toHaveLength(1);
-    // The websocket scoped-fetch path resolves values via `_resolveConfigValues`
-    // which returns raw item values (no `{value: ...}` wrapper).
     expect(events[0].newValue).toBe(99);
   });
 
@@ -1095,7 +1096,9 @@ describe("Config WebSocket event behaviors", () => {
     );
     await client.get("app");
 
-    // Scoped re-fetch: content changed
+    // The handler refetches just the single changed config (single GET),
+    // updates its local raw store, then rebuilds the resolved cache for
+    // every config so cascade-affected descendants are also refreshed.
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: configResource({ id: "app", items: { timeout: 60 } }) }),
     );
@@ -1106,15 +1109,10 @@ describe("Config WebSocket event behaviors", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("app");
     expect(events[0].itemKey).toBe("timeout");
-    // websocket scoped-fetch path emits raw values for `newValue`.
     expect(events[0].newValue).toBe(60);
   });
 
-  it("config_changed: subsequent unchanged scoped fetch does NOT fire listener", async () => {
-    // The very first WS-driven refresh always rewrites the cache from
-    // wire-shape (init) into raw-shape (`_resolveConfigValues`), so it fires
-    // an event even when the upstream value is identical. Subsequent
-    // unchanged refreshes do not fire — exercise that here.
+  it("config_changed: subsequent unchanged refetch does NOT fire listener", async () => {
     const { client, wsListeners } = makeWsClient();
 
     mockFetch.mockResolvedValueOnce(
@@ -1124,18 +1122,10 @@ describe("Config WebSocket event behaviors", () => {
     );
     await client.get("app");
 
-    // First WS event: cache wire→raw conversion (will fire a "shape" change event).
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({ data: configResource({ id: "app", items: { timeout: 30 } }) }),
-    );
-    wsListeners["config_changed"]({ id: "app" });
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Now register a fresh listener and fire the same content again — the
-    // cache is already raw, so the diff is empty and nothing fires.
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
 
+    // Same content as initial — diff should be empty, no listener firing.
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: configResource({ id: "app", items: { timeout: 30 } }) }),
     );
@@ -1212,7 +1202,7 @@ describe("Config WebSocket event behaviors", () => {
     expect(events).toHaveLength(1);
     // configs_changed triggers `refresh()`, which uses `_buildChain` +
     // `resolveChain` — values stay wire-shaped through that path.
-    expect(events[0].newValue).toEqual({ value: 99 });
+    expect(events[0].newValue).toEqual(99);
   });
 
   it("should register config_deleted and configs_changed listeners", async () => {
@@ -1309,6 +1299,59 @@ describe("Config WebSocket event behaviors", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].newValue).toBe(90);
+  });
+
+  // Regression for the cascade bug: a child config that inherits from a
+  // parent must see the new resolved value when the parent changes. The
+  // previous handler only re-resolved the changed config, so descendants
+  // pointed at the stale inherited value.
+  it("config_changed: cascade — descendant cache is rebuilt when ancestor changes", async () => {
+    const { client, wsListeners } = makeWsClient();
+    // makeClient() uses environment "staging"
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    // Initial: parent has retries=3 (with staging override 5), child inherits.
+    // Resolved cache: parent.retries=5, child.retries=5.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "parent",
+            items: { retries: 3 },
+            environments: { staging: { values: { retries: 5 } } },
+          }),
+          configResource({
+            id: "child",
+            parent: "parent",
+            items: {},
+            environments: {},
+          }),
+        ],
+      }),
+    );
+    await client.get("child");
+
+    // Parent's staging override changes from 5 to 7. Child still has no
+    // override, so its inherited value should also become 7. The handler
+    // refetches just the single changed config (parent) and rebuilds
+    // every entry from its local raw store.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: configResource({
+          id: "parent",
+          items: { retries: 3 },
+          environments: { staging: { values: { retries: 7 } } },
+        }),
+      }),
+    );
+    wsListeners["config_changed"]({ id: "parent" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Both configs should fire change events for retries: 5 -> 7.
+    const childEvents = events.filter((e) => e.configId === "child" && e.itemKey === "retries");
+    expect(childEvents).toHaveLength(1);
+    expect(childEvents[0].newValue).toBe(7);
   });
 });
 

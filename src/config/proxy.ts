@@ -7,6 +7,32 @@
 import type { ConfigChangeEvent, ConfigClient } from "./client.js";
 
 /**
+ * Convert dot-notation keys to a nested object.
+ * `{"database.host": "x", "database.port": 5}` → `{database: {host: "x", port: 5}}`.
+ *
+ * Used when reconstructing a typed model: the resolved-cache stores keys
+ * verbatim (`"database.host"`), but the model class expects nested
+ * structure (`data.database.host`). Mirrors Python's `_unflatten`.
+ * @internal
+ */
+function _unflattenDotNotation(flat: Record<string, unknown>): Record<string, unknown> {
+  const nested: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split(".");
+    let current = nested;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      if (current[part] === undefined || typeof current[part] !== "object" || current[part] === null) {
+        current[part] = {};
+      }
+      current = current[part] as Record<string, unknown>;
+    }
+    current[parts[parts.length - 1]] = value;
+  }
+  return nested;
+}
+
+/**
  * A live, dict-like, read-only view of resolved config values.
  *
  * Returned by {@link ConfigClient.get}. Always reflects the latest
@@ -63,7 +89,13 @@ export class LiveConfigProxy<T = Record<string, unknown>> {
         }
         const values = target._currentValues();
         if (target._model) {
-          const instance = new target._model(values) as any;
+          // Typed-model construction: unflatten dot-notation keys
+          // so {"database.host": "x"} becomes {database: {host: "x"}}
+          // before passing to the model constructor — the model
+          // expects nested structure, not flat keys. Mirrors Python's
+          // `_unflatten` step in LiveConfigProxy.
+          const nested = _unflattenDotNotation(values);
+          const instance = new target._model(nested) as any;
           return instance[prop];
         }
         return (values as any)[prop];

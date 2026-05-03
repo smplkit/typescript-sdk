@@ -50,7 +50,7 @@ describe("ConfigClient", () => {
                 name: "DB Config",
                 description: null,
                 parent: null,
-                items: { host: { value: "localhost" }, port: { value: 5432 } },
+                items: { host: 'localhost', port: 5432 },
                 environments: {},
               },
             },
@@ -60,13 +60,12 @@ describe("ConfigClient", () => {
 
       await client._connectInternal("production");
 
-      // Cache stores resolved values from `_buildChain` + `resolveChain`.
-      // The current source preserves the wire-shaped `{value: raw}` typed-item
-      // wrappers in the cache (no unwrap step in `resolveChain`); assert the
-      // structure we actually get back.
+      // Cache stores resolved values as raw {key: value}. The wire-shaped
+      // {value, type, description} envelope is unwrapped in _buildChain
+      // before resolveChain merges values into the cache.
       expect(client._getCachedConfig("db")).toEqual({
-        host: { value: "localhost" },
-        port: { value: 5432 },
+        host: "localhost",
+        port: 5432,
       });
     });
 

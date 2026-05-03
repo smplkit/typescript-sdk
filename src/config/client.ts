@@ -156,6 +156,11 @@ export class ConfigClient {
   _resolveManagement?: () => SmplManagementClient;
 
   private _configCache: Record<string, Record<string, unknown>> = {};
+  /** Raw Config objects keyed by id, kept around so a single-config
+   * change (WS event) can refetch one config and rebuild the resolved
+   * cache for everyone (including descendants that inherit from it)
+   * without a full re-list. Mirrors Python's `_raw_config_cache`. */
+  private _configStore: Record<string, Config> = {};
   private _initialized = false;
   private _listeners: ChangeListener[] = [];
 
@@ -281,12 +286,15 @@ export class ConfigClient {
     }
     const configs = await this._listConfigs();
     const newCache: Record<string, Record<string, unknown>> = {};
+    const newStore: Record<string, Config> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
       newCache[cfg.id!] = resolveChain(chain, environment);
+      newStore[cfg.id!] = cfg;
     }
     const oldCache = this._configCache;
     this._configCache = newCache;
+    this._configStore = newStore;
     this._diffAndFire(oldCache, newCache, "manual");
   }
 
@@ -332,11 +340,14 @@ export class ConfigClient {
     }
     const configs = await this._listConfigs();
     const cache: Record<string, Record<string, unknown>> = {};
+    const store: Record<string, Config> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
       cache[cfg.id!] = resolveChain(chain, environment);
+      store[cfg.id!] = cfg;
     }
     this._configCache = cache;
+    this._configStore = store;
     this._initialized = true;
 
     // Wire WebSocket for real-time updates
@@ -353,11 +364,14 @@ export class ConfigClient {
     if (this._initialized) return;
     const configs = await this._listConfigs();
     const cache: Record<string, Record<string, unknown>> = {};
+    const store: Record<string, Config> = {};
     for (const cfg of configs) {
       const chain = await cfg._buildChain(configs);
       cache[cfg.id!] = resolveChain(chain, environment);
+      store[cfg.id!] = cfg;
     }
     this._configCache = cache;
+    this._configStore = store;
     this._initialized = true;
   }
 
@@ -374,29 +388,36 @@ export class ConfigClient {
     debug("websocket", `config_changed event received: ${JSON.stringify(data)}`);
     const configKey = data.id as string | undefined;
     if (!configKey) return;
-    // Scoped fetch: GET /configs/{key}
+    // The change can cascade: any config that has `configKey` in its
+    // parent chain has a stale resolved cache. Refetch JUST the changed
+    // config (single GET — fast), update the local raw store, then
+    // rebuild every config's resolved cache from the store. Mirrors
+    // Python's _handle_config_changed -> _rebuild_resolved_cache.
+    const environment = this._parent?._environment;
+    if (!environment) return;
     void this._fetchSingleConfig(configKey)
       .then((newConfig) => {
-        const environment = this._parent?._environment;
-        if (!environment) return;
-        const oldValues = this._configCache[configKey];
-        let newValues: Record<string, unknown>;
-        if (newConfig !== null) {
-          // Build a temporary chain with just this config (for simplicity, no parent resolution)
-          newValues = this._resolveConfigValues(newConfig, environment);
+        const newStore = { ...this._configStore };
+        if (newConfig === null) {
+          delete newStore[configKey];
         } else {
-          newValues = {};
+          newStore[configKey] = newConfig;
         }
-        const oldJson = JSON.stringify(oldValues ?? {});
-        const newJson = JSON.stringify(newValues);
-        if (oldJson === newJson) return; // no change
-        const oldCache = { ...this._configCache };
-        if (newConfig !== null) {
-          this._configCache[configKey] = newValues;
-        } else {
-          delete this._configCache[configKey];
-        }
-        this._diffAndFire(oldCache, this._configCache, "websocket");
+        const allConfigs = Object.values(newStore);
+        return Promise.all(
+          allConfigs.map(async (cfg) => {
+            const chain = await cfg._buildChain(allConfigs);
+            return [cfg.id!, resolveChain(chain, environment)] as const;
+          }),
+        ).then((entries) => ({ entries, newStore }));
+      })
+      .then(({ entries, newStore }) => {
+        const newCache: Record<string, Record<string, unknown>> = {};
+        for (const [id, values] of entries) newCache[id] = values;
+        const oldCache = this._configCache;
+        this._configCache = newCache;
+        this._configStore = newStore;
+        this._diffAndFire(oldCache, newCache, "websocket");
       })
       .catch((err: unknown) => {
         debug(
@@ -405,6 +426,21 @@ export class ConfigClient {
         );
       });
   };
+
+  /** Fetch a single config by key. Returns null if not found. @internal */
+  private async _fetchSingleConfig(key: string): Promise<Config | null> {
+    debug("api", `GET /api/v1/configs/${key}`);
+    try {
+      const result = await this._http.GET("/api/v1/configs/{id}", {
+        params: { path: { id: key } },
+      });
+      if (!result.response.ok) return null;
+      if (!result.data?.data) return null;
+      return resourceToConfig(result.data.data);
+    } catch {
+      return null;
+    }
+  }
 
   private _handleConfigDeleted = (data: Record<string, any>): void => {
     debug("websocket", `config_deleted event received: ${JSON.stringify(data)}`);
@@ -429,30 +465,6 @@ export class ConfigClient {
   // ------------------------------------------------------------------
   // Internal: change detection
   // ------------------------------------------------------------------
-
-  /** Fetch a single config by key. Returns null if not found. @internal */
-  private async _fetchSingleConfig(key: string): Promise<Config | null> {
-    debug("api", `GET /api/v1/configs/${key}`);
-    try {
-      const result = await this._http.GET("/api/v1/configs/{id}", {
-        params: { path: { id: key } },
-      });
-      if (!result.response.ok) return null;
-      if (!result.data?.data) return null;
-      return resourceToConfig(result.data.data);
-    } catch {
-      return null;
-    }
-  }
-
-  /** Resolve a config's values for an environment (no parent chain). @internal */
-  private _resolveConfigValues(config: Config, environment: string): Record<string, unknown> {
-    // Merge base items with environment overrides
-    const base = config.items ?? {};
-    const envEntry = (config.environments as Record<string, any>)?.[environment];
-    if (!envEntry?.values) return { ...base };
-    return { ...base, ...envEntry.values };
-  }
 
   /** @internal */
   private _diffAndFire(

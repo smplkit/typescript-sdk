@@ -637,7 +637,7 @@ describe("ConfigClient — metrics instrumentation", () => {
 
     const result = await client.get("my-config");
     // client.get() returns a LiveConfigProxy; subscript reflects the cached resolved values.
-    expect((result as Record<string, unknown>).host).toEqual({ value: "localhost" });
+    expect((result as Record<string, unknown>).host).toEqual("localhost");
     expect(recordSpy).toHaveBeenCalledWith("config.resolutions", 1, "resolutions", {
       config: "my-config",
     });

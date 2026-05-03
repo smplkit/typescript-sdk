@@ -485,8 +485,11 @@ describe("Config", () => {
 
       expect(chain).toHaveLength(1);
       expect(chain[0].id).toBe("my-config");
-      // chain returns wire-format items: {key: {value: raw, type?: ItemType}}
-      expect(chain[0].items).toEqual({ timeout: { value: 30 } });
+      // chain entries return UNWRAPPED items {key: rawValue} so the
+      // resolver can deepMerge them into the resolved cache. Wire
+      // wrapping (the {value, type, description} envelope) only
+      // happens at the serialization boundary in mgmt save.
+      expect(chain[0].items).toEqual({ timeout: 30 });
       expect(client._fetchConfig).not.toHaveBeenCalled();
     });
 
@@ -513,9 +516,9 @@ describe("Config", () => {
 
       expect(chain).toHaveLength(2);
       expect(chain[0].id).toBe("child-id");
-      expect(chain[0].items).toEqual({ child_val: { value: 1 } });
+      expect(chain[0].items).toEqual({ child_val: 1 });
       expect(chain[1].id).toBe("parent-id");
-      expect(chain[1].items).toEqual({ parent_val: { value: 2 } });
+      expect(chain[1].items).toEqual({ parent_val: 2 });
       expect(client._fetchConfig).toHaveBeenCalledWith("parent-id");
     });
 
@@ -616,9 +619,42 @@ describe("Config", () => {
 
       const chain = await config._buildChain();
 
-      // chain entries return environments in wire format: { env: { values: { key: { value: raw } } } }
-      expect(chain[0].environments).toEqual({ prod: { values: { retries: { value: 5 } } } });
-      expect(chain[1].environments).toEqual({ prod: { values: { timeout: { value: 60 } } } });
+      // chain entries return UNWRAPPED env values {env: {values: {key: rawValue}}}
+      // so the resolver can deepMerge them. The wire wrapping only
+      // happens at the serialization boundary in mgmt save.
+      expect(chain[0].environments).toEqual({ prod: { values: { retries: 5 } } });
+      expect(chain[1].environments).toEqual({ prod: { values: { timeout: 60 } } });
+    });
+
+    // Regression: an earlier version of _buildChain returned the wrapped
+    // wire envelope {value, type, description} for items and the wrapped
+    // form {value: raw} for env values, which propagated into the resolver
+    // and meant customer reads got back {value, type, description} instead
+    // of the actual value. Lock the unwrapped contract here so that bug
+    // can't return.
+    it("returns fully unwrapped raw values (no {value, type, description} envelopes)", async () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, {
+        id: "cfg",
+        parent: null,
+        items: { host: "localhost", port: 5432, enabled: true },
+        environments: {
+          prod: { values: { host: "prod-host", port: 6543 } },
+        },
+      });
+
+      const chain = await config._buildChain();
+
+      // Each item should be the raw value, not {value: raw, ...}.
+      for (const [, raw] of Object.entries(chain[0].items)) {
+        expect(typeof raw).not.toBe("object");
+      }
+      // Each env value should be the raw value, not {value: raw, ...}.
+      const envValues = (chain[0].environments as Record<string, { values: Record<string, unknown> }>)
+        .prod.values;
+      for (const [, raw] of Object.entries(envValues)) {
+        expect(typeof raw).not.toBe("object");
+      }
     });
 
     it("should throw when client is null and parent cannot be resolved from configs", async () => {
