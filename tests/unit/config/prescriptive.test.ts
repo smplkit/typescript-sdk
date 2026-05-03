@@ -405,6 +405,92 @@ describe("get returns a live proxy", () => {
     // Method/getter access also goes through the model rebuild.
     expect((proxy as unknown as AppConfig).raw).toEqual(3);
   });
+
+  it("typed-model access unflattens dotted keys before passing to the model constructor", async () => {
+    const client = makeClient();
+
+    // Resolved cache holds dotted keys like "database.host". The proxy
+    // must unflatten these into nested {database: {host: ...}} before
+    // constructing the typed model — otherwise `cfg.database.host`
+    // is undefined.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "user-svc",
+            items: { "database.host": "h", "database.port": 5432, "cache.ttl": 60 },
+          }),
+        ],
+      }),
+    );
+
+    class Db {
+      host: unknown;
+      port: unknown;
+      constructor(data: Record<string, unknown>) {
+        this.host = data?.host;
+        this.port = data?.port;
+      }
+    }
+    class Cache {
+      ttl: unknown;
+      constructor(data: Record<string, unknown>) {
+        this.ttl = data?.ttl;
+      }
+    }
+    class UserSvc {
+      database: Db;
+      cache: Cache;
+      constructor(data: Record<string, unknown>) {
+        this.database = new Db((data?.database as Record<string, unknown>) ?? {});
+        this.cache = new Cache((data?.cache as Record<string, unknown>) ?? {});
+      }
+    }
+
+    const proxy = await client.get("user-svc", UserSvc);
+    expect((proxy as unknown as UserSvc).database.host).toBe("h");
+    expect((proxy as unknown as UserSvc).database.port).toBe(5432);
+    expect((proxy as unknown as UserSvc).cache.ttl).toBe(60);
+  });
+
+  it("typed-model unflatten overwrites a non-object intermediate key", async () => {
+    // Cover the conflict branch in _unflattenDotNotation: if `db` is set
+    // first as a string (literal "db" key) and then `db.host` arrives,
+    // the literal value gets replaced by an object so the nested write
+    // can proceed. Tests the `current[part] !== "object"` branch.
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          configResource({
+            id: "conflict-svc",
+            // Order matters for the conflict path: literal "db" first,
+            // then the dotted "db.host" which forces "db" to become {}.
+            items: { db: "literal-string", "db.host": "h" },
+          }),
+        ],
+      }),
+    );
+
+    class Db {
+      host: unknown;
+      constructor(data: Record<string, unknown>) {
+        this.host = data?.host;
+      }
+    }
+    class Svc {
+      db: Db;
+      constructor(data: Record<string, unknown>) {
+        this.db = new Db((data?.db as Record<string, unknown>) ?? {});
+      }
+    }
+
+    const proxy = await client.get("conflict-svc", Svc);
+    // The dotted key wins because it forces an object; the literal value
+    // is dropped on the unflatten side. (Customers shouldn't mix the two
+    // shapes, but the proxy must not throw if they do.)
+    expect((proxy as unknown as Svc).db.host).toBe("h");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -675,7 +761,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("new_key");
     expect(events[0].oldValue).toBeNull();
-    expect(events[0].newValue).toEqual('hello');
+    expect(events[0].newValue).toEqual("hello");
   });
 
   it("should detect removed keys", async () => {
@@ -712,7 +798,7 @@ describe("onChange", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].itemKey).toBe("old_key");
-    expect(events[0].oldValue).toEqual('bye');
+    expect(events[0].oldValue).toEqual("bye");
     expect(events[0].newValue).toBeNull();
   });
 
@@ -755,7 +841,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].newValue).toEqual('localhost');
+    expect(events[0].newValue).toEqual("localhost");
   });
 
   it("should detect removed configs on refresh", async () => {
@@ -798,7 +884,7 @@ describe("onChange", () => {
     expect(events).toHaveLength(1);
     expect(events[0].configId).toBe("db");
     expect(events[0].itemKey).toBe("host");
-    expect(events[0].oldValue).toEqual('localhost');
+    expect(events[0].oldValue).toEqual("localhost");
     expect(events[0].newValue).toBeNull();
   });
 

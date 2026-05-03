@@ -650,8 +650,9 @@ describe("Config", () => {
         expect(typeof raw).not.toBe("object");
       }
       // Each env value should be the raw value, not {value: raw, ...}.
-      const envValues = (chain[0].environments as Record<string, { values: Record<string, unknown> }>)
-        .prod.values;
+      const envValues = (
+        chain[0].environments as Record<string, { values: Record<string, unknown> }>
+      ).prod.values;
       for (const [, raw] of Object.entries(envValues)) {
         expect(typeof raw).not.toBe("object");
       }

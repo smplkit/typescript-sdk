@@ -50,7 +50,7 @@ describe("ConfigClient", () => {
                 name: "DB Config",
                 description: null,
                 parent: null,
-                items: { host: 'localhost', port: 5432 },
+                items: { host: "localhost", port: 5432 },
                 environments: {},
               },
             },

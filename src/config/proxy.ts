@@ -22,7 +22,11 @@ function _unflattenDotNotation(flat: Record<string, unknown>): Record<string, un
     let current = nested;
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
-      if (current[part] === undefined || typeof current[part] !== "object" || current[part] === null) {
+      if (
+        current[part] === undefined ||
+        typeof current[part] !== "object" ||
+        current[part] === null
+      ) {
         current[part] = {};
       }
       current = current[part] as Record<string, unknown>;
