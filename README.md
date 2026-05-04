@@ -137,7 +137,7 @@ const all = await client.manage.config.list();
 await client.manage.config.delete("my-service");
 ```
 
-Configs support a single level of inheritance via `parent`:
+A config can have a `parent`; resolved values from the parent are inherited and overridden by the child. The hierarchy is at most two levels deep — the server rejects a parent that itself has a parent.
 
 ```typescript
 const child = client.manage.config.new("user-service", {
