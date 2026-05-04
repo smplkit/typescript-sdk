@@ -1197,6 +1197,188 @@ describe("LoggingClient — WebSocket event behaviors", () => {
 });
 
 // ===========================================================================
+// LoggingClient.refresh() — manual level re-fetch + apply + diff-and-fire
+// ===========================================================================
+
+describe("LoggingClient — refresh()", () => {
+  function prepareClient(adapter?: {
+    discover?: () => Array<{ name: string; level: string }>;
+    applyLevel?: (name: string, level: string) => void;
+  }): { client: LoggingClient; applyLevel: ReturnType<typeof vi.fn> } {
+    const client = makeClient();
+    const applyLevel = vi.fn(adapter?.applyLevel ?? (() => {}));
+    client.registerAdapter({
+      name: "noop",
+      discover: adapter?.discover ?? (() => []),
+      applyLevel,
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    return { client, applyLevel };
+  }
+
+  function loggerListResponse(loggers: Array<{ id: string; level: string | null }>): Response {
+    return jsonResponse({
+      data: loggers.map(({ id, level }) => ({
+        id,
+        type: "logger",
+        attributes: {
+          name: id,
+          level,
+          group: null,
+          managed: false,
+          environments: {},
+          created_at: null,
+          updated_at: null,
+        },
+      })),
+    });
+  }
+
+  function groupListResponse(groups: Array<{ id: string; level: string | null }> = []): Response {
+    return jsonResponse({
+      data: groups.map(({ id, level }) => ({
+        id,
+        type: "log_group",
+        attributes: {
+          name: id,
+          level,
+          parent_id: null,
+          environments: {},
+          created_at: null,
+          updated_at: null,
+        },
+      })),
+    });
+  }
+
+  it("throws SmplError when called before install()", async () => {
+    const { client } = prepareClient();
+    await expect(client.refresh()).rejects.toBeInstanceOf(SmplError);
+  });
+
+  it("re-applies levels onto adapters and fires listeners with source 'manual'", async () => {
+    const { client, applyLevel } = prepareClient();
+    // Initial start: sql=INFO
+    mockFetch
+      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "INFO" }]))
+      .mockResolvedValueOnce(groupListResponse());
+    const globalCb = vi.fn();
+    const sqlCb = vi.fn();
+    client.onChange(globalCb);
+    client.onChange("sql", sqlCb);
+    await client.start();
+
+    applyLevel.mockClear();
+
+    // refresh() picks up sql=WARN
+    mockFetch
+      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "WARN" }]))
+      .mockResolvedValueOnce(groupListResponse());
+
+    await client.refresh();
+
+    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
+    expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(globalCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "WARN", source: "manual" }),
+    );
+    expect(sqlCb).toHaveBeenCalledTimes(1);
+    expect(sqlCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "WARN", source: "manual" }),
+    );
+  });
+
+  it("fires global listener exactly once and per-key for each changed id", async () => {
+    const { client } = prepareClient();
+    mockFetch
+      .mockResolvedValueOnce(
+        loggerListResponse([
+          { id: "sql", level: "INFO" },
+          { id: "http", level: "DEBUG" },
+        ]),
+      )
+      .mockResolvedValueOnce(groupListResponse());
+    const globalCb = vi.fn();
+    const sqlCb = vi.fn();
+    const httpCb = vi.fn();
+    client.onChange(globalCb);
+    client.onChange("sql", sqlCb);
+    client.onChange("http", httpCb);
+    await client.start();
+
+    // sql unchanged (INFO), http -> WARN
+    mockFetch
+      .mockResolvedValueOnce(
+        loggerListResponse([
+          { id: "sql", level: "INFO" },
+          { id: "http", level: "WARN" },
+        ]),
+      )
+      .mockResolvedValueOnce(groupListResponse());
+
+    await client.refresh();
+
+    expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(sqlCb).not.toHaveBeenCalled();
+    expect(httpCb).toHaveBeenCalledTimes(1);
+    expect(httpCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "http", level: "WARN", source: "manual" }),
+    );
+  });
+
+  it("detects deleted loggers and fires for them", async () => {
+    const { client } = prepareClient();
+    mockFetch
+      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "INFO" }]))
+      .mockResolvedValueOnce(groupListResponse());
+    const globalCb = vi.fn();
+    const sqlCb = vi.fn();
+    client.onChange(globalCb);
+    client.onChange("sql", sqlCb);
+    await client.start();
+
+    // refresh: sql is gone
+    mockFetch
+      .mockResolvedValueOnce(loggerListResponse([]))
+      .mockResolvedValueOnce(groupListResponse());
+
+    await client.refresh();
+
+    expect(globalCb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", source: "manual" }));
+    expect(sqlCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire listeners when nothing changed", async () => {
+    const { client } = prepareClient();
+    const list = () => loggerListResponse([{ id: "sql", level: "INFO" }]);
+    mockFetch.mockResolvedValueOnce(list()).mockResolvedValueOnce(groupListResponse());
+    const globalCb = vi.fn();
+    client.onChange(globalCb);
+    await client.start();
+
+    mockFetch.mockResolvedValueOnce(list()).mockResolvedValueOnce(groupListResponse());
+
+    await client.refresh();
+
+    expect(globalCb).not.toHaveBeenCalled();
+  });
+
+  it("propagates fetch errors instead of swallowing them", async () => {
+    const { client } = prepareClient();
+    mockFetch
+      .mockResolvedValueOnce(loggerListResponse([]))
+      .mockResolvedValueOnce(groupListResponse());
+    await client.start();
+
+    mockFetch.mockReset();
+    mockFetch.mockRejectedValue(new Error("boom"));
+
+    await expect(client.refresh()).rejects.toThrow("boom");
+  });
+});
+
+// ===========================================================================
 // LoggerRegistrationBuffer
 // ===========================================================================
 

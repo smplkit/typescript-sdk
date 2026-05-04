@@ -300,6 +300,7 @@ export class SmplClient {
     if (this._metrics !== null) {
       this._metrics.close();
     }
+    this.flags._close();
     this.logging._close();
     if (this._wsManager !== null) {
       this._wsManager.stop();

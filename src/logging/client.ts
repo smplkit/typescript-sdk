@@ -212,9 +212,39 @@ export class LoggingClient {
    * `install()`.
    *
    * Mirrors Python's `client.logging.install()`. There is no `stop()`.
+   *
+   * Adapter coverage:
+   * - **winston**: pre-existing named loggers (`winston.loggers.*`) and the
+   *   default logger are auto-discovered.
+   * - **pino**: pino has no global registry, so only loggers created
+   *   through `pino()` / `logger.child()` *after* `install()` runs are
+   *   tracked. To bring pre-existing pino loggers under management, recreate
+   *   them after install or register them explicitly via
+   *   `client.manage.loggers.register([...])`.
+   *
+   * After the initial pass, call {@link refresh} to re-fetch managed levels
+   * from the server and re-apply them onto the native loggers (e.g. after
+   * suspecting drift, or to force a manual sync outside the WebSocket).
    */
   async install(): Promise<void> {
     return this._installInternal();
+  }
+
+  /**
+   * Re-fetch logger and group levels from the server and re-apply them
+   * onto the registered adapters.
+   *
+   * Diff-based: change listeners only fire for loggers whose level
+   * actually changed (added, removed, or different level), with
+   * `source: "manual"`. Mirrors Python's `client.logging.refresh()`.
+   *
+   * @throws SmplError if `install()` has not been called.
+   */
+  async refresh(): Promise<void> {
+    if (!this._started) {
+      throw new SmplError("Logging not installed. Call install() first.");
+    }
+    await this._resolveAndFire("manual");
   }
 
   /**
@@ -308,9 +338,13 @@ export class LoggingClient {
     this._wsManager.on("loggers_changed", this._handleLoggersChanged);
 
     // 8. Start periodic flush timer for post-startup logger discovery
+    //    (unref so it doesn't pin the event loop).
     this._loggerFlushTimer = setInterval(() => {
       void this._flushLoggerBuffer();
     }, 30_000);
+    if (typeof this._loggerFlushTimer === "object" && "unref" in this._loggerFlushTimer) {
+      (this._loggerFlushTimer as NodeJS.Timeout).unref();
+    }
 
     this._started = true;
   }
@@ -628,76 +662,80 @@ export class LoggingClient {
 
   private _handleLoggersChanged = (_data: Record<string, any>): void => {
     debug("websocket", `loggers_changed event received`);
-    // Full refetch of both loggers AND log_groups, diff-based firing
-    void Promise.all([this._listLoggers(), this._listLogGroups()])
-      .then(([serverLoggers, serverGroups]) => {
-        debug("resolution", `resolution pass (trigger: loggers_changed event)`);
-        // Diff loggers
-        const changedLoggerIds = new Set<string>();
-        const newLoggerKeys = new Set(serverLoggers.map((l) => l.id!));
-        // Check new/changed loggers
-        for (const logger of serverLoggers) {
-          const key = logger.id!;
-          const oldLevel = this._loggerStore[key] ?? null;
-          const newLevel = logger.level ?? null;
-          if (oldLevel !== newLevel || !(key in this._loggerStore)) {
-            changedLoggerIds.add(key);
-            this._loggerStore[key] = newLevel;
-          }
-        }
-        // Check deleted loggers
-        for (const key of Object.keys(this._loggerStore)) {
-          if (!newLoggerKeys.has(key)) {
-            changedLoggerIds.add(key);
-            delete this._loggerStore[key];
-          }
-        }
-        // Update group store
-        for (const group of serverGroups) {
-          this._groupStore[group.id!] = group.level ?? null;
-        }
-        // Apply levels
-        this._applyLevels(serverLoggers);
-        if (changedLoggerIds.size === 0) return;
-        // Fire global listener ONCE
-        const [firstKey] = changedLoggerIds;
-        const firstLogger = serverLoggers.find((l) => l.id === firstKey);
-        const globalEvent = new LoggerChangeEvent({
-          id: firstKey,
-          level: (firstLogger?.level ?? null) as LogLevel | null,
-          source: "websocket",
+    void this._resolveAndFire("websocket").catch(() => {
+      // ignore refresh errors from WebSocket events
+    });
+  };
+
+  /**
+   * Full refetch of loggers + log_groups, apply resolved levels to
+   * adapters, diff against local stores and fire change listeners
+   * (global once, per-key for each changed id). Shared between the
+   * `loggers_changed` WS handler and the public `refresh()` method.
+   * @internal
+   */
+  private async _resolveAndFire(source: "websocket" | "manual"): Promise<void> {
+    const [serverLoggers, serverGroups] = await Promise.all([
+      this._listLoggers(),
+      this._listLogGroups(),
+    ]);
+    debug("resolution", `resolution pass (trigger: ${source})`);
+    // Diff loggers
+    const changedLoggerIds = new Set<string>();
+    const newLoggerKeys = new Set(serverLoggers.map((l) => l.id!));
+    for (const logger of serverLoggers) {
+      const key = logger.id!;
+      const oldLevel = this._loggerStore[key] ?? null;
+      const newLevel = logger.level ?? null;
+      if (oldLevel !== newLevel || !(key in this._loggerStore)) {
+        changedLoggerIds.add(key);
+        this._loggerStore[key] = newLevel;
+      }
+    }
+    for (const key of Object.keys(this._loggerStore)) {
+      if (!newLoggerKeys.has(key)) {
+        changedLoggerIds.add(key);
+        delete this._loggerStore[key];
+      }
+    }
+    for (const group of serverGroups) {
+      this._groupStore[group.id!] = group.level ?? null;
+    }
+    this._applyLevels(serverLoggers);
+    if (changedLoggerIds.size === 0) return;
+    const [firstKey] = changedLoggerIds;
+    const firstLogger = serverLoggers.find((l) => l.id === firstKey);
+    const globalEvent = new LoggerChangeEvent({
+      id: firstKey,
+      level: (firstLogger?.level ?? null) as LogLevel | null,
+      source,
+    });
+    for (const cb of this._globalListeners) {
+      try {
+        cb(globalEvent);
+      } catch {
+        // ignore listener errors
+      }
+    }
+    for (const key of changedLoggerIds) {
+      const keyCallbacks = this._keyListeners.get(key);
+      if (keyCallbacks) {
+        const l = serverLoggers.find((x) => x.id === key);
+        const keyEvent = new LoggerChangeEvent({
+          id: key,
+          level: (l?.level ?? null) as LogLevel | null,
+          source,
         });
-        for (const cb of this._globalListeners) {
+        for (const cb of keyCallbacks) {
           try {
-            cb(globalEvent);
+            cb(keyEvent);
           } catch {
             // ignore listener errors
           }
         }
-        // Fire per-key listeners for each changed key
-        for (const key of changedLoggerIds) {
-          const keyCallbacks = this._keyListeners.get(key);
-          if (keyCallbacks) {
-            const l = serverLoggers.find((x) => x.id === key);
-            const keyEvent = new LoggerChangeEvent({
-              id: key,
-              level: (l?.level ?? null) as LogLevel | null,
-              source: "websocket",
-            });
-            for (const cb of keyCallbacks) {
-              try {
-                cb(keyEvent);
-              } catch {
-                // ignore listener errors
-              }
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // ignore refresh errors
-      });
-  };
+      }
+    }
+  }
 
   // ------------------------------------------------------------------
   // Internal: single-resource fetchers

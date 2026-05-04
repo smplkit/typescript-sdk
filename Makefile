@@ -1,8 +1,7 @@
 .PHONY: install build generate \
 	config_runtime_showcase config_management_showcase \
 	flags_runtime_showcase flags_management_showcase \
-	logging_runtime_showcase logging_management_showcase \
-	management_showcase
+	logging_runtime_showcase logging_management_showcase
 
 install:
 	npm ci
@@ -30,6 +29,3 @@ logging_runtime_showcase: build
 
 logging_management_showcase: build
 	npx tsx examples/logging_management_showcase.ts
-
-management_showcase: build
-	npx tsx examples/management_showcase.ts

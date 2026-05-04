@@ -278,4 +278,39 @@ describe("SmplClient", () => {
       expect(msg).toContain("~/.smplkit");
     }
   });
+
+  it("close() shuts down the flags subsystem so the event loop can exit", async () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+
+    // Stub the WS factory used by lazy initialisation. We never let the WS
+    // dial out — _ensureWs() is replaced before flags.initialize() runs.
+    const fakeWs = {
+      on: vi.fn(),
+      off: vi.fn(),
+      stop: vi.fn(),
+      start: vi.fn(),
+      connectionStatus: "connected",
+    };
+    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => fakeWs;
+    (client as unknown as { _wsManager: unknown })._wsManager = fakeWs;
+
+    // initialize() schedules the periodic flag-flush interval. It also tries
+    // to GET /flags; the global mockFetch returns 200/empty so that's fine.
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    await client.flags.initialize();
+
+    const timer = (client.flags as unknown as { _flagFlushTimer: NodeJS.Timeout | null })
+      ._flagFlushTimer;
+    expect(timer).not.toBeNull();
+    const clearSpy = vi.spyOn(global, "clearInterval");
+
+    client.close();
+
+    expect(clearSpy).toHaveBeenCalledWith(timer);
+    expect(
+      (client.flags as unknown as { _flagFlushTimer: NodeJS.Timeout | null })._flagFlushTimer,
+    ).toBeNull();
+    expect(fakeWs.off).toHaveBeenCalledWith("flag_changed", expect.any(Function));
+    clearSpy.mockRestore();
+  });
 });

@@ -527,10 +527,38 @@ export class FlagsClient {
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
     this._wsManager.on("flags_changed", this._handleFlagsChanged);
 
-    // Start periodic flush timer
+    // Start periodic flush timer. Unref so the timer alone doesn't keep the
+    // Node.js event loop alive — customers who forget `client.close()` (or
+    // who exit a script via `process.on('SIGINT')`) shouldn't see the
+    // process hang.
     this._flagFlushTimer = setInterval(() => {
       void this._flushFlags();
     }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
+    if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
+      (this._flagFlushTimer as NodeJS.Timeout).unref();
+    }
+  }
+
+  /**
+   * Synchronous teardown — clears the flag-flush interval and unsubscribes
+   * from WebSocket events. Called by `SmplClient.close()`. Does not flush
+   * pending context observations (use {@link disconnect} for that).
+   * @internal
+   */
+  _close(): void {
+    if (this._flagFlushTimer !== null) {
+      clearInterval(this._flagFlushTimer);
+      this._flagFlushTimer = null;
+    }
+    if (this._wsManager !== null) {
+      this._wsManager.off("flag_changed", this._handleFlagChanged);
+      this._wsManager.off("flag_deleted", this._handleFlagDeleted);
+      this._wsManager.off("flags_changed", this._handleFlagsChanged);
+      this._wsManager = null;
+    }
+    this._cache.clear();
+    this._initialized = false;
+    this._environment = null;
   }
 
   /** Disconnect the flags runtime and release resources. */
@@ -723,10 +751,13 @@ export class FlagsClient {
     this._wsManager.on("flag_deleted", this._handleFlagDeleted);
     this._wsManager.on("flags_changed", this._handleFlagsChanged);
 
-    // Start periodic flush timer
+    // Start periodic flush timer (unref so it doesn't pin the event loop).
     this._flagFlushTimer = setInterval(() => {
       void this._flushFlags();
     }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
+    if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
+      (this._flagFlushTimer as NodeJS.Timeout).unref();
+    }
   }
 
   // ------------------------------------------------------------------
