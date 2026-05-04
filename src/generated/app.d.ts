@@ -1794,8 +1794,12 @@ export interface components {
             name: string;
             /** Color */
             color?: string | null;
-            /** Classification */
-            readonly classification?: string | null;
+            /**
+             * Classification
+             * @default AD_HOC
+             * @enum {string}
+             */
+            classification: "STANDARD" | "AD_HOC";
             /**
              * Created At
              * Format: date-time
