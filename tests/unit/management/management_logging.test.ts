@@ -766,11 +766,11 @@ describe("LogGroupsClient.delete()", () => {
 });
 
 // ===========================================================================
-// LogGroup.save() — _saveGroup uses PUT only (upsert)
+// LogGroup.save() — POST for create, PUT for update
 // ===========================================================================
 
-describe("LogGroup.save() — upsert via PUT", () => {
-  it("uses PUT for new (unsaved) groups — no POST", async () => {
+describe("LogGroup.save() — create vs update dispatch", () => {
+  it("uses POST /api/v1/log_groups for new (unsaved) groups", async () => {
     const client = makeClient();
     const group = client.logGroups.new("db");
     expect(group.createdAt).toBeNull();
@@ -779,11 +779,12 @@ describe("LogGroup.save() — upsert via PUT", () => {
     await group.save();
 
     const req: Request = mockFetch.mock.calls[0][0];
-    expect(req.method).toBe("PUT");
-    expect(req.url).toContain("/api/v1/log_groups/db");
+    expect(req.method).toBe("POST");
+    expect(req.url).toContain("/api/v1/log_groups");
+    expect(req.url).not.toMatch(/\/api\/v1\/log_groups\/[^?]+$/);
   });
 
-  it("uses PUT for existing groups", async () => {
+  it("uses PUT /api/v1/log_groups/{id} for existing groups", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOG_GROUP }));
     const group = await client.logGroups.get("db");
@@ -871,13 +872,33 @@ describe("LogGroup.save() — upsert via PUT", () => {
     mockFetch.mockResolvedValueOnce(textResponse("invalid", 422));
     await expect(group.save()).rejects.toThrow(SmplValidationError);
   });
+
+  it("update path: throws SmplValidationError when server returns no data", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOG_GROUP }));
+    const group = await client.logGroups.get("db");
+    group.setLevel(LogLevel.DEBUG);
+
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await expect(group.save()).rejects.toThrow(SmplValidationError);
+  });
+
+  it("update path: throws SmplConnectionError on network failure", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_LOG_GROUP }));
+    const group = await client.logGroups.get("db");
+    group.setLevel(LogLevel.DEBUG);
+
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(group.save()).rejects.toThrow(SmplConnectionError);
+  });
 });
 
 // ===========================================================================
-// _saveGroup — guard against null id
+// _updateGroup — guard against null id
 // ===========================================================================
 
-describe("_saveGroup() guard", () => {
+describe("_updateGroup() guard", () => {
   it("throws when called on a LogGroup with no id", async () => {
     const client = makeClient();
     const group = new LogGroup(client.logGroups as LogGroupsClient, {
@@ -891,8 +912,8 @@ describe("_saveGroup() guard", () => {
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect((client.logGroups as any)._saveGroup(group)).rejects.toThrow(
-      "Cannot save a LogGroup with no id",
+    await expect((client.logGroups as any)._updateGroup(group)).rejects.toThrow(
+      "Cannot update a LogGroup with no id",
     );
   });
 });

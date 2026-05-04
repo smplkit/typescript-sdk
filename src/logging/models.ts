@@ -14,7 +14,8 @@ export interface LoggerModelClient {
 
 /** @internal */
 export interface LogGroupModelClient {
-  _saveGroup?: (group: LogGroup) => Promise<LogGroup>;
+  _createGroup?: (group: LogGroup) => Promise<LogGroup>;
+  _updateGroup?: (group: LogGroup) => Promise<LogGroup>;
   _deleteGroup?: (id: string) => Promise<void>;
 }
 
@@ -231,14 +232,27 @@ export class LogGroup {
     if (this._client === null) {
       throw new Error("LogGroup was constructed without a client; cannot save");
     }
-    if (!this._client._saveGroup) {
-      throw new Error(
-        "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
-          "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
-      );
+    if (this.createdAt === null) {
+      // New group — POST /api/v1/log_groups. The {id} PUT endpoint
+      // returns 404 for non-existent ids; PUT is update-only on the server.
+      if (!this._client._createGroup) {
+        throw new Error(
+          "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
+            "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
+        );
+      }
+      const created = await this._client._createGroup(this);
+      this._apply(created);
+    } else {
+      if (!this._client._updateGroup) {
+        throw new Error(
+          "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
+            "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
+        );
+      }
+      const updated = await this._client._updateGroup(this);
+      this._apply(updated);
     }
-    const saved = await this._client._saveGroup(this);
-    this._apply(saved);
   }
 
   async delete(): Promise<void> {

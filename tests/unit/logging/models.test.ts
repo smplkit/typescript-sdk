@@ -7,8 +7,8 @@ import type { LoggingClient } from "../../../src/logging/client.js";
 function mockClient(): LoggingClient {
   return {
     _saveLogger: vi.fn(),
-    _saveLogGroup: vi.fn(),
-    _saveGroup: vi.fn(),
+    _createGroup: vi.fn(),
+    _updateGroup: vi.fn(),
   } as unknown as LoggingClient;
 }
 
@@ -492,7 +492,7 @@ describe("LogGroup", () => {
   });
 
   describe("save()", () => {
-    it("should call _saveGroup and apply the result", async () => {
+    it("calls _createGroup for a new group (createdAt null) and applies the result", async () => {
       const client = mockClient();
       const group = new LogGroup(client, {
         id: "test-group",
@@ -514,13 +514,47 @@ describe("LogGroup", () => {
         updatedAt: "2026-04-01T00:00:00Z",
       });
 
-      (client._saveGroup as ReturnType<typeof vi.fn>).mockResolvedValue(saved);
+      (client._createGroup as ReturnType<typeof vi.fn>).mockResolvedValue(saved);
 
       await group.save();
 
-      expect(client._saveGroup).toHaveBeenCalledWith(group);
+      expect(client._createGroup).toHaveBeenCalledWith(group);
+      expect(client._updateGroup).not.toHaveBeenCalled();
       expect(group.id).toBe("test-group");
       expect(group.createdAt).toBe("2026-04-01T00:00:00Z");
+    });
+
+    it("calls _updateGroup for an existing group (createdAt set) and applies the result", async () => {
+      const client = mockClient();
+      const group = new LogGroup(client, {
+        id: "test-group",
+        name: "Test Group",
+        level: null,
+        group: null,
+        environments: {},
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:00Z",
+      });
+
+      const saved = new LogGroup(client, {
+        id: "test-group",
+        name: "Renamed",
+        level: null,
+        group: null,
+        environments: {},
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-05-01T00:00:00Z",
+      });
+
+      (client._updateGroup as ReturnType<typeof vi.fn>).mockResolvedValue(saved);
+
+      group.name = "Renamed";
+      await group.save();
+
+      expect(client._updateGroup).toHaveBeenCalledWith(group);
+      expect(client._createGroup).not.toHaveBeenCalled();
+      expect(group.name).toBe("Renamed");
+      expect(group.updatedAt).toBe("2026-05-01T00:00:00Z");
     });
 
     it("should throw when client is null", async () => {
@@ -536,7 +570,7 @@ describe("LogGroup", () => {
       await expect(group.save()).rejects.toThrow("cannot save");
     });
 
-    it("should throw on runtime client (no _saveGroup)", async () => {
+    it("should throw on runtime client (no _createGroup) when creating", async () => {
       const runtimeClient = {} as never;
       const group = new LogGroup(runtimeClient, {
         id: "test-group",
@@ -546,6 +580,20 @@ describe("LogGroup", () => {
         environments: {},
         createdAt: null,
         updatedAt: null,
+      });
+      await expect(group.save()).rejects.toThrow(/cannot be saved/);
+    });
+
+    it("should throw on runtime client (no _updateGroup) when updating", async () => {
+      const runtimeClient = {} as never;
+      const group = new LogGroup(runtimeClient, {
+        id: "test-group",
+        name: "Test Group",
+        level: null,
+        group: null,
+        environments: {},
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:00Z",
       });
       await expect(group.save()).rejects.toThrow(/cannot be saved/);
     });

@@ -347,9 +347,29 @@ export class LogGroupsClient {
     }
   }
 
-  /** @internal — called by `LogGroup.save()`. PUT /log_groups/{id} is upsert. */
-  async _saveGroup(group: LogGroup): Promise<LogGroup> {
-    if (group.id === null) throw new Error("Cannot save a LogGroup with no id");
+  /**
+   * @internal — called by `LogGroup.save()` for new groups.
+   * POST /api/v1/log_groups creates a new log group. The {id} PUT endpoint
+   * is update-only on the server and returns 404 for non-existent ids,
+   * so create and update have to dispatch to different endpoints.
+   */
+  async _createGroup(group: LogGroup): Promise<LogGroup> {
+    const body = groupToBody(group);
+    let data: components["schemas"]["LogGroupResponse"] | undefined;
+    try {
+      const result = await this._http.POST("/api/v1/log_groups", { body });
+      if (!result.response.ok) await checkError(result.response);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data || !data.data) throw new SmplkitValidationError("Failed to create log group");
+    return resourceToLogGroup(data.data, this);
+  }
+
+  /** @internal — called by `LogGroup.save()` for existing groups. */
+  async _updateGroup(group: LogGroup): Promise<LogGroup> {
+    if (group.id === null) throw new Error("Cannot update a LogGroup with no id");
     const body = groupToBody(group);
     let data: components["schemas"]["LogGroupResponse"] | undefined;
     try {
@@ -362,7 +382,9 @@ export class LogGroupsClient {
     } catch (err) {
       wrapFetchError(err);
     }
-    if (!data || !data.data) throw new SmplkitValidationError("Failed to save log group");
+    if (!data || !data.data) {
+      throw new SmplkitValidationError(`Failed to update log group ${group.id}`);
+    }
     return resourceToLogGroup(data.data, this);
   }
 }
