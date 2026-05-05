@@ -1185,6 +1185,16 @@ export interface components {
             readonly product_subscriptions?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Entry Point
+             * @description Registration entry point (from account.data)
+             */
+            readonly entry_point?: string | null;
+            /**
+             * Show Sample Data
+             * @description Whether sample data is active (from account.settings)
+             */
+            readonly show_sample_data?: boolean | null;
         };
         /**
          * AccountResource
@@ -2467,6 +2477,7 @@ export interface components {
          * RegisterRequest
          * @example {
          *       "email": "jane@example.com",
+         *       "entry_point": "get_started",
          *       "password": "correct-horse-battery-staple"
          *     }
          */
@@ -2478,6 +2489,12 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+            /**
+             * Entry Point
+             * @description Registration entry point. Allowed: login, get_started, live_demo, unknown. Defaults to unknown when omitted.
+             * @enum {string|null}
+             */
+            entry_point?: "login" | "get_started" | "live_demo" | "unknown" | null;
         };
         /**
          * ServiceResource
@@ -2728,6 +2745,7 @@ export interface operations {
             query?: {
                 mode?: string;
                 source?: string | null;
+                entry_point?: string | null;
             };
             header?: never;
             path: {
