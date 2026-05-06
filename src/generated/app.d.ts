@@ -844,7 +844,7 @@ export interface paths {
         };
         /**
          * List Products
-         * @description Return all flag-enabled products with their plans and limits.
+         * @description Return all flag-enabled products with their plans, limits, and marketing content.
          */
         get: operations["list_products"];
         put?: never;
@@ -2411,6 +2411,13 @@ export interface components {
             display_name: string;
             /** Description */
             description: string;
+            /** Tagline */
+            tagline?: string | null;
+            /**
+             * Features
+             * @default []
+             */
+            features: string[];
             /**
              * Coming Soon
              * @default false
@@ -2435,8 +2442,13 @@ export interface components {
          * @example {
          *       "attributes": {
          *         "coming_soon": false,
-         *         "description": "Feature flags with targeting rules and real-time updates",
+         *         "description": "Feature flag management",
          *         "display_name": "Smpl Flags",
+         *         "features": [
+         *           "Targeted rollouts",
+         *           "Experiment toggles",
+         *           "Environment controls"
+         *         ],
          *         "limits": {
          *           "flags": {
          *             "description": "Maximum number of feature flags",
@@ -2457,7 +2469,8 @@ export interface components {
          *             },
          *             "price_monthly_cents": 2900
          *           }
-         *         }
+         *         },
+         *         "tagline": "Feature flag delivery for safer rollouts and controlled experiments."
          *       },
          *       "id": "flags",
          *       "type": "product"
