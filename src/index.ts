@@ -10,6 +10,15 @@ export type { SmplClientOptions } from "./client.js";
 export { SmplManagementClient } from "./management/client.js";
 export type { SmplManagementClientOptions } from "./management/client.js";
 
+// Audit
+export { AuditClient } from "./audit/client.js";
+export type {
+  AuditEvent,
+  CreateEventInput as CreateAuditEventInput,
+  ListEventsPage as AuditEventListPage,
+  ListEventsParams as AuditEventListParams,
+} from "./audit/types.js";
+
 // Config
 export { ConfigClient } from "./config/client.js";
 export type { ConfigChangeEvent } from "./config/client.js";

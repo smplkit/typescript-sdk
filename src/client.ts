@@ -6,6 +6,7 @@
  */
 
 import createClient from "openapi-fetch";
+import { AuditClient } from "./audit/client.js";
 import { ConfigClient } from "./config/client.js";
 import { FlagsClient } from "./flags/client.js";
 import { SmplTimeoutError } from "./errors.js";
@@ -113,6 +114,9 @@ export class SmplClient {
   /** Client for logging management and runtime. */
   readonly logging: LoggingClient;
 
+  /** Client for the audit service — fire-and-forget event recording (ADR-047). */
+  readonly audit: AuditClient;
+
   /**
    * Standalone management/CRUD entry point — mirrors Python's
    * `client.manage`. Construction is side-effect-free; safe to use even
@@ -153,6 +157,7 @@ export class SmplClient {
     const configBaseUrl = serviceUrl(cfg.scheme, "config", cfg.baseDomain);
     const flagsBaseUrl = serviceUrl(cfg.scheme, "flags", cfg.baseDomain);
     const loggingBaseUrl = serviceUrl(cfg.scheme, "logging", cfg.baseDomain);
+    const auditBaseUrl = serviceUrl(cfg.scheme, "audit", cfg.baseDomain);
     this._appBaseUrl = appBaseUrl;
 
     const maskedKey =
@@ -208,6 +213,11 @@ export class SmplClient {
       this._timeout,
       loggingBaseUrl,
     );
+    this.audit = new AuditClient({
+      apiKey: cfg.apiKey,
+      baseUrl: auditBaseUrl,
+      timeoutMs: this._timeout,
+    });
 
     // Wire the shared WebSocket into the config client
     this.config._getSharedWs = () => this._ensureWs();
@@ -302,6 +312,7 @@ export class SmplClient {
     }
     this.flags._close();
     this.logging._close();
+    void this.audit._close();
     if (this._wsManager !== null) {
       this._wsManager.stop();
       this._wsManager = null;
