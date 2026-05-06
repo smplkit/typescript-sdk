@@ -3,9 +3,4 @@
  */
 
 export { AuditClient } from "./client.js";
-export type {
-  AuditEvent,
-  CreateEventInput,
-  ListEventsPage,
-  ListEventsParams,
-} from "./types.js";
+export type { AuditEvent, CreateEventInput, ListEventsPage, ListEventsParams } from "./types.js";

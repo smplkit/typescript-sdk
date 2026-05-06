@@ -9,12 +9,7 @@
  */
 
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
-import type {
-  AuditEvent,
-  CreateEventInput,
-  ListEventsPage,
-  ListEventsParams,
-} from "./types.js";
+import type { AuditEvent, CreateEventInput, ListEventsPage, ListEventsParams } from "./types.js";
 
 const JSONAPI_HEADERS: Record<string, string> = {
   "Content-Type": "application/vnd.api+json",
@@ -120,8 +115,7 @@ class EventsClient {
     if (params.resourceId !== undefined) qs.set("filter[resource_id]", params.resourceId);
     if (params.actorType !== undefined) qs.set("filter[actor_type]", params.actorType);
     if (params.actorId !== undefined) qs.set("filter[actor_id]", params.actorId);
-    if (params.occurredAtRange !== undefined)
-      qs.set("filter[occurred_at]", params.occurredAtRange);
+    if (params.occurredAtRange !== undefined) qs.set("filter[occurred_at]", params.occurredAtRange);
     if (params.pageSize !== undefined) qs.set("page[size]", String(params.pageSize));
     if (params.pageAfter !== undefined) qs.set("page[after]", params.pageAfter);
 
@@ -157,7 +151,9 @@ class EventsClient {
     if (!resp.ok) {
       throw new Error(`audit get failed: ${resp.status} ${resp.statusText}`);
     }
-    const body = (await resp.json()) as { data: { id: string; attributes: Record<string, unknown> } };
+    const body = (await resp.json()) as {
+      data: { id: string; attributes: Record<string, unknown> };
+    };
     return _eventFromResource(body.data);
   }
 

@@ -137,9 +137,7 @@ export class AuditEventBuffer {
     // Permanent 4xx other than 429.
     if (outcome.status >= 400 && outcome.status < 500 && outcome.status !== 429) {
       // eslint-disable-next-line no-console
-      console.warn(
-        `[smplkit.audit] permanent failure status=${outcome.status}; event dropped`,
-      );
+      console.warn(`[smplkit.audit] permanent failure status=${outcome.status}; event dropped`);
       return null;
     }
 
