@@ -103,7 +103,9 @@ function _httpFromWire(raw: Record<string, unknown> | undefined): ForwarderHttp 
   };
 }
 
-function _forwarderAttributes(input: CreateForwarderInput | UpdateForwarderInput): Record<string, unknown> {
+function _forwarderAttributes(
+  input: CreateForwarderInput | UpdateForwarderInput,
+): Record<string, unknown> {
   const attrs: Record<string, unknown> = {
     name: input.name,
     forwarder_type: input.forwarderType,
@@ -116,7 +118,10 @@ function _forwarderAttributes(input: CreateForwarderInput | UpdateForwarderInput
   return attrs;
 }
 
-function _forwarderFromResource(resource: { id: string; attributes: Record<string, unknown> }): Forwarder {
+function _forwarderFromResource(resource: {
+  id: string;
+  attributes: Record<string, unknown>;
+}): Forwarder {
   const a = resource.attributes;
   return {
     id: resource.id,
@@ -135,7 +140,10 @@ function _forwarderFromResource(resource: { id: string; attributes: Record<strin
   };
 }
 
-function _deliveryFromResource(resource: { id: string; attributes: Record<string, unknown> }): ForwarderDelivery {
+function _deliveryFromResource(resource: {
+  id: string;
+  attributes: Record<string, unknown>;
+}): ForwarderDelivery {
   const a = resource.attributes;
   return {
     id: resource.id,
@@ -152,9 +160,7 @@ function _deliveryFromResource(resource: { id: string; attributes: Record<string
   };
 }
 
-function _nextCursorFromLinks(body: {
-  links?: { next?: string | null } | null;
-}): string | null {
+function _nextCursorFromLinks(body: { links?: { next?: string | null } | null }): string | null {
   const next = body.links?.next;
   if (typeof next !== "string" || !next.includes("page[after]=")) return null;
   return next.split("page[after]=")[1]!;

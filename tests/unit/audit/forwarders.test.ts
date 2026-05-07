@@ -8,11 +8,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { AuditClient } from "../../../src/audit/client.js";
-import type {
-  Forwarder,
-  ForwarderDelivery,
-  ForwarderHttp,
-} from "../../../src/audit/types.js";
+import type { Forwarder, ForwarderDelivery, ForwarderHttp } from "../../../src/audit/types.js";
 
 const FWD_ID = "11111111-2222-3333-4444-555555555555";
 const DELIVERY_ID = "22222222-3333-4444-5555-666666666666";
@@ -23,7 +19,10 @@ function _forwarderResource(name = "Datadog production") {
     type: "forwarder",
     attributes: {
       name,
-      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
+      slug: name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, ""),
       forwarder_type: "datadog",
       enabled: true,
       filter: null,
@@ -267,10 +266,7 @@ describe("AuditClient.forwarders.deliveries", () => {
       expect(req.url).toContain("actions/retry");
       return _jsonResponse({ data: _deliveryResource("succeeded") });
     });
-    const row: ForwarderDelivery = await c.forwarders.deliveries.actions.retry(
-      FWD_ID,
-      DELIVERY_ID,
-    );
+    const row: ForwarderDelivery = await c.forwarders.deliveries.actions.retry(FWD_ID, DELIVERY_ID);
     expect(row.status).toBe("succeeded");
     await c._close();
   });
@@ -343,9 +339,9 @@ describe("AuditClient.functions.test_forwarder.actions.execute", () => {
 
   test("execute throws on non-2xx", async () => {
     const c = _newClient(async () => _jsonResponse({}, 500));
-    await expect(
-      c.functions.test_forwarder.actions.execute({ url: "https://x" }),
-    ).rejects.toThrow(/audit test_forwarder failed/);
+    await expect(c.functions.test_forwarder.actions.execute({ url: "https://x" })).rejects.toThrow(
+      /audit test_forwarder failed/,
+    );
     await c._close();
   });
 });
