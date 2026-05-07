@@ -87,6 +87,171 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/forwarders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Forwarders
+         * @description List forwarders for the authenticated account.
+         *
+         *     Reads do not require the entitlement — a downgraded account can still
+         *     inspect what they configured, they just can't create new ones.
+         */
+        get: operations["list_forwarders"];
+        put?: never;
+        /**
+         * Create Forwarder
+         * @description Create a forwarder. Requires the ``audit.siem_streaming`` entitlement
+         *     on the account; lower-tier accounts get 402.
+         */
+        post: operations["create_forwarder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forwarders/{forwarder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Forwarder
+         * @description Retrieve a single forwarder by id.
+         *
+         *     Returns 404 if no forwarder with that id exists in the caller's
+         *     account, including if the forwarder is soft-deleted. Header values
+         *     in the response are always redacted regardless of caller permission.
+         */
+        get: operations["get_forwarder"];
+        /**
+         * Update Forwarder
+         * @description Full-replace update. PUT semantics — every field is overwritten.
+         *
+         *     The header values must be re-supplied; the GET path redacts them, but
+         *     a PUT body that contains ``"<redacted>"`` would persist that literal.
+         *     Customers must round-trip the actual secret back. This is the standard
+         *     get-mutate-put pattern (see CLAUDE.md "Updating Resources via the
+         *     API"); the SDK helpers track the un-redacted secret client-side so
+         *     customers don't usually need to re-enter it.
+         */
+        put: operations["update_forwarder"];
+        post?: never;
+        /**
+         * Delete Forwarder
+         * @description Soft-delete a forwarder. Delivery rows are retained per the normal
+         *     forwarder_delivery retention; a future create with the same slug is
+         *     allowed (the unique index is partial on deleted_at IS NULL).
+         */
+        delete: operations["delete_forwarder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forwarders/{forwarder_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Forwarder Deliveries
+         * @description List delivery rows for a forwarder.
+         *
+         *     Default sort is ``-created_at``. Cursor pagination via ``page[after]``.
+         *     Filter by status (``succeeded`` / ``failed`` / ``filtered_out`` /
+         *     ``skipped_do_not_forward``) or by a ``created_at`` range using the
+         *     platform's interval notation (``[2026-01-01T00:00:00Z,*)``). Reads do
+         *     not require the entitlement — a downgraded account can still inspect
+         *     historical deliveries from when the forwarder was active.
+         */
+        get: operations["list_forwarder_deliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forwarders/{forwarder_id}/deliveries/{delivery_id}/actions/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Forwarder Delivery
+         * @description Retry a single failed delivery. Returns the new delivery row with
+         *     its outcome. Prior delivery rows are not modified.
+         */
+        post: operations["retry_forwarder_delivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forwarders/{forwarder_id}/actions/retry_failed_deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Failed Forwarder Deliveries
+         * @description Retry every failed delivery for the forwarder.
+         *
+         *     For each failed delivery row, re-attempt with the latest forwarder
+         *     configuration and the original event payload. Returns counts.
+         */
+        post: operations["retry_failed_forwarder_deliveries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/functions/test_forwarder/actions/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Test Forwarder
+         * @description Execute a prepared HTTP request server-side and return the response.
+         *
+         *     The same SSRF guard that gates the in-line forwarder loop is applied
+         *     here — internal/private addresses, link-local IPs (including the EC2
+         *     metadata service at 169.254.169.254), unique-local IPv6, and ports
+         *     outside the configured allowlist are all rejected.
+         */
+        post: operations["execute_test_forwarder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -124,6 +289,12 @@ export interface components {
             data?: {
                 [key: string]: unknown;
             };
+            /**
+             * Do Not Forward
+             * @description When true, this event is recorded normally but is not forwarded to any configured SIEM forwarder. A forwarder_delivery row with status=skipped_do_not_forward is recorded for each enabled forwarder so the skip is visible in the delivery log.
+             * @default false
+             */
+            do_not_forward: boolean;
             /** Created At */
             readonly created_at?: string | null;
             /** Actor Type */
@@ -168,6 +339,7 @@ export interface components {
          *         "data": {
          *           "request_id": "req-abc"
          *         },
+         *         "do_not_forward": false,
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
          *         "resource_id": "u-1",
@@ -196,6 +368,303 @@ export interface components {
          */
         EventResponse: {
             data: components["schemas"]["EventResource"];
+        };
+        /**
+         * Forwarder
+         * @description Public-facing forwarder resource.
+         *
+         *     Attribute set on POST /api/v1/forwarders:
+         *         - name (required)
+         *         - forwarder_type (required)
+         *         - http (required)
+         *         - enabled (optional, defaults true)
+         *         - filter (optional, JSON Logic)
+         *         - transform (optional, JSONata)
+         *
+         *     The slug is server-derived from name on create; it is immutable on
+         *     update because consumers (UI, observability) key off it.
+         */
+        Forwarder: {
+            /** Name */
+            name: string;
+            /** Forwarder Type */
+            forwarder_type: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Filter */
+            filter?: {
+                [key: string]: unknown;
+            } | null;
+            /** Transform */
+            transform?: string | null;
+            http: components["schemas"]["ForwarderHttp"];
+            /** Slug */
+            slug?: string | null;
+            /** Created At */
+            readonly created_at?: string | null;
+            /** Updated At */
+            readonly updated_at?: string | null;
+            /** Deleted At */
+            readonly deleted_at?: string | null;
+            /** Version */
+            readonly version?: number | null;
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ForwarderDelivery
+         * @description Read-only delivery log row.
+         *
+         *     All fields are server-populated. Headers in ``request`` always show
+         *     redacted values, regardless of who configured them.
+         */
+        ForwarderDelivery: {
+            /**
+             * Forwarder Id
+             * Format: uuid
+             */
+            forwarder_id: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Attempt Number */
+            attempt_number: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "succeeded" | "failed" | "filtered_out" | "skipped_do_not_forward";
+            /** Request */
+            request?: {
+                [key: string]: unknown;
+            } | null;
+            /** Response Status */
+            response_status?: number | null;
+            /** Response Body */
+            response_body?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** ForwarderDeliveryListResponse */
+        ForwarderDeliveryListResponse: {
+            /** Data */
+            data: components["schemas"]["ForwarderDeliveryResource"][];
+            meta: components["schemas"]["ForwarderListMeta"];
+            links?: components["schemas"]["ForwarderListLinks"] | null;
+        };
+        /**
+         * ForwarderDeliveryResource
+         * @example {
+         *       "attributes": {
+         *         "attempt_number": 1,
+         *         "created_at": "2026-05-07T12:00:01.234Z",
+         *         "event_id": "33333333-4444-5555-6666-777777777777",
+         *         "forwarder_id": "11111111-2222-3333-4444-555555555555",
+         *         "latency_ms": 187,
+         *         "request": {
+         *           "body": "{\"action\":\"user.created\",\"resource_id\":\"u-1\"}",
+         *           "headers": [
+         *             {
+         *               "name": "DD-API-KEY",
+         *               "value": "<redacted>"
+         *             }
+         *           ],
+         *           "method": "POST",
+         *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
+         *         },
+         *         "response_body": "",
+         *         "response_status": 202,
+         *         "status": "succeeded"
+         *       },
+         *       "id": "22222222-3333-4444-5555-666666666666",
+         *       "type": "forwarder_delivery"
+         *     }
+         */
+        ForwarderDeliveryResource: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default forwarder_delivery
+             */
+            type: string;
+            attributes: components["schemas"]["ForwarderDelivery"];
+        };
+        /** ForwarderDeliveryResponse */
+        ForwarderDeliveryResponse: {
+            data: components["schemas"]["ForwarderDeliveryResource"];
+        };
+        /**
+         * ForwarderHttp
+         * @description The destination HTTP request shape stored encrypted on a forwarder.
+         *
+         *     ``success_status`` is either a single integer status (e.g. ``200``) or
+         *     a class string like ``"2xx"``. Anything outside the matched set is
+         *     treated as a delivery failure.
+         */
+        ForwarderHttp: {
+            /**
+             * Method
+             * @default POST
+             */
+            method: string;
+            /** Url */
+            url: string;
+            /** Headers */
+            headers?: components["schemas"]["HttpHeader"][];
+            /** Body */
+            body?: string | null;
+            /**
+             * Success Status
+             * @default 2xx
+             */
+            success_status: number | string;
+        };
+        /** ForwarderListLinks */
+        ForwarderListLinks: {
+            /** Next */
+            next?: string | null;
+        };
+        /** ForwarderListMeta */
+        ForwarderListMeta: {
+            /** Page Size */
+            page_size: number;
+        };
+        /** ForwarderListResponse */
+        ForwarderListResponse: {
+            /** Data */
+            data: components["schemas"]["ForwarderResource"][];
+            meta: components["schemas"]["ForwarderListMeta"];
+            links?: components["schemas"]["ForwarderListLinks"] | null;
+        };
+        /**
+         * ForwarderResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-05-07T12:00:00Z",
+         *         "data": {},
+         *         "enabled": true,
+         *         "filter": {
+         *           "==": [
+         *             {
+         *               "var": "action"
+         *             },
+         *             "user.created"
+         *           ]
+         *         },
+         *         "forwarder_type": "datadog",
+         *         "http": {
+         *           "headers": [
+         *             {
+         *               "name": "DD-API-KEY",
+         *               "value": "<redacted>"
+         *             }
+         *           ],
+         *           "method": "POST",
+         *           "success_status": "2xx",
+         *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
+         *         },
+         *         "name": "Datadog production",
+         *         "slug": "datadog_production",
+         *         "updated_at": "2026-05-07T12:00:00Z",
+         *         "version": 1
+         *       },
+         *       "id": "11111111-2222-3333-4444-555555555555",
+         *       "type": "forwarder"
+         *     }
+         */
+        ForwarderResource: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default forwarder
+             */
+            type: string;
+            attributes: components["schemas"]["Forwarder"];
+        };
+        /** ForwarderResponse */
+        ForwarderResponse: {
+            data: components["schemas"]["ForwarderResource"];
+        };
+        /**
+         * HttpHeader
+         * @description A single header on a forwarder's HTTP destination.
+         */
+        HttpHeader: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** RetryFailedDeliveriesSummary */
+        RetryFailedDeliveriesSummary: {
+            /** Attempted */
+            attempted: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Failed */
+            failed: number;
+        };
+        /**
+         * TestForwarderRequest
+         * @description Plain-JSON body for the test_forwarder execute action.
+         *
+         *     Mirrors the encrypted ``ForwarderHttp`` shape with one addition —
+         *     ``timeout_ms``, capped server-side.
+         */
+        TestForwarderRequest: {
+            /**
+             * Method
+             * @default POST
+             */
+            method: string;
+            /** Url */
+            url: string;
+            /** Headers */
+            headers?: components["schemas"]["HttpHeader"][];
+            /** Body */
+            body?: string | null;
+            /**
+             * Success Status
+             * @default 2xx
+             */
+            success_status: number | string;
+            /** Timeout Ms */
+            timeout_ms?: number | null;
+        };
+        /**
+         * TestForwarderResponse
+         * @description Plain-JSON response body. Headers are echoed back unredacted because
+         *     the caller already supplied them — the response is for the caller, not
+         *     persisted into the delivery log.
+         */
+        TestForwarderResponse: {
+            /** Succeeded */
+            succeeded: boolean;
+            /** Response Status */
+            response_status: number | null;
+            /** Response Headers */
+            response_headers?: {
+                [key: string]: string;
+            };
+            /** Response Body */
+            response_body?: string | null;
+            /** Latency Ms */
+            latency_ms: number | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * UsageResource
@@ -342,6 +811,219 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["UsageResponse"];
+                };
+            };
+        };
+    };
+    list_forwarders: {
+        parameters: {
+            query?: {
+                "filter[forwarder_type]"?: string | null;
+                "filter[enabled]"?: boolean | null;
+                "page[size]"?: number | null;
+                "page[after]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderListResponse"];
+                };
+            };
+        };
+    };
+    create_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+                };
+            };
+        };
+    };
+    get_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                forwarder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+                };
+            };
+        };
+    };
+    update_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                forwarder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+                };
+            };
+        };
+    };
+    delete_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                forwarder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_forwarder_deliveries: {
+        parameters: {
+            query?: {
+                "filter[status]"?: string | null;
+                "filter[created_at]"?: string | null;
+                "page[size]"?: number | null;
+                "page[after]"?: string | null;
+            };
+            header?: never;
+            path: {
+                forwarder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderDeliveryListResponse"];
+                };
+            };
+        };
+    };
+    retry_forwarder_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                forwarder_id: string;
+                delivery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderDeliveryResponse"];
+                };
+            };
+        };
+    };
+    retry_failed_forwarder_deliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                forwarder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RetryFailedDeliveriesSummary"];
+                };
+            };
+        };
+    };
+    execute_test_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestForwarderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestForwarderResponse"];
                 };
             };
         };
