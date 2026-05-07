@@ -1842,13 +1842,10 @@ describe("LoggingClient — extraHeaders", () => {
     });
 
     const ws = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
-    const client = new LoggingClient(
-      "sk_api_test",
-      () => ws as never,
-      undefined,
-      undefined,
-      { "X-Custom": "hello", Authorization: "should-be-overridden" },
-    );
+    const client = new LoggingClient("sk_api_test", () => ws as never, undefined, undefined, {
+      "X-Custom": "hello",
+      Authorization: "should-be-overridden",
+    });
     await client.start();
 
     expect(seen.length).toBeGreaterThan(0);

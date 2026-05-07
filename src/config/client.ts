@@ -165,7 +165,12 @@ export class ConfigClient {
   private _listeners: ChangeListener[] = [];
 
   /** @internal */
-  constructor(apiKey: string, timeout?: number, baseUrl?: string, extraHeaders?: Record<string, string>) {
+  constructor(
+    apiKey: string,
+    timeout?: number,
+    baseUrl?: string,
+    extraHeaders?: Record<string, string>,
+  ) {
     this._apiKey = apiKey;
     const resolvedBaseUrl = baseUrl ?? BASE_URL;
     this._baseUrl = resolvedBaseUrl;
