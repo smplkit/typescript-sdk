@@ -76,10 +76,14 @@ export class AuditEventBuffer {
     }
   }
 
-  /** Block (cooperatively) until the buffer is empty or `timeoutMs` elapses. */
+  /** Block (cooperatively) until the buffer is idle or `timeoutMs` elapses. */
   async flush(timeoutMs = 5_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    while (this._queue.length > 0) {
+    // Idle = queue empty AND no drain pass in flight. Without the
+    // _draining check, an in-progress POST whose item has already been
+    // shifted off the queue would fool flush into returning early and
+    // an immediately following list() call could miss the event.
+    while (this._queue.length > 0 || this._draining) {
       if (Date.now() >= deadline) {
         // eslint-disable-next-line no-console
         console.warn(`[smplkit.audit] flush timed out after ${timeoutMs}ms`);

@@ -31,7 +31,7 @@ describe("AuditClient", () => {
 
     const before = Date.now();
     for (let i = 0; i < 10; i++) {
-      client.events.create({
+      client.events.record({
         action: "user.created",
         resourceType: "user",
         resourceId: `u-${i}`,
@@ -136,7 +136,7 @@ describe("AuditClient", () => {
       return new Response("{}", { status: 201 });
     });
     const ts = new Date("2026-05-06T12:00:00Z");
-    client.events.create({
+    client.events.record({
       action: "user.created",
       resourceType: "user",
       resourceId: "u-1",
@@ -161,7 +161,7 @@ describe("AuditClient", () => {
       calls.push(1);
       throw new Error("simulated network blip");
     });
-    client.events.create({ action: "x", resourceType: "y", resourceId: "1" });
+    client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
     // flush triggers a drain pass; the post wrapper's catch returns
     // status: 0 → transient, item requeued with backoff. flush hits its
     // 200ms timeout and returns. We just need to assert the post fn was

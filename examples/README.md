@@ -128,7 +128,7 @@ npx tsx examples/logging_runtime_showcase.ts
 
 Demonstrates the runtime experience for Smpl Audit:
 
-- Fire-and-forget `client.audit.events.create(...)` — returns immediately, posted on a background buffer worker (ADR-047 §2.6)
+- Fire-and-forget `client.audit.events.record(...)` — returns immediately, posted on a background buffer worker (ADR-047 §2.6)
 - Optional `occurredAt`, `snapshot`, and `data` payloads
 - Caller-supplied `idempotencyKey` for safe retries — server dedupes on `account_id + idempotency_key`
 - `flush(timeoutMs)` to drain the buffer before reading

@@ -101,7 +101,7 @@ class EventsClient {
    * reject those with a 403 (the buffer logs and drops permanent
    * failures, so a misuse will silently disappear from the queue).
    */
-  create(input: CreateEventInput): void {
+  record(input: CreateEventInput): void {
     const body = {
       data: { type: "event", attributes: _attributesFromInput(input) },
     };
