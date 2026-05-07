@@ -979,30 +979,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/bundles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Bundles
-         * @description Return all bundle definitions as JSON:API resources. Public, unauthenticated.
-         */
-        get: operations["list_bundles"];
-        put?: never;
-        /**
-         * Create Bundle Subscription
-         * @description Create a bundle subscription covering all three products at a shared plan tier.
-         */
-        post: operations["create_bundle"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/payment_methods": {
         parameters: {
             query?: never;
@@ -1195,6 +1171,27 @@ export interface components {
              * @description Whether sample data is active (from account.settings)
              */
             readonly show_sample_data?: boolean | null;
+            /**
+             * Discount Override Pct
+             * @description Custom discount percentage that overrides the volume schedule. Null means the volume schedule applies.
+             */
+            readonly discount_override_pct?: number | null;
+            /**
+             * Discount Override Reason
+             * @description Free-form note explaining why the override was set.
+             */
+            readonly discount_override_reason?: string | null;
+            /**
+             * Discount Override Set By User Id
+             * @description UUID of the admin user who set the override.
+             */
+            readonly discount_override_set_by_user_id?: string | null;
+            /**
+             * Discount Override Set At
+             * Format: date-time
+             * @description Timestamp when the override was last changed.
+             */
+            readonly discount_override_set_at?: string | null;
         };
         /**
          * AccountResource
@@ -1384,95 +1381,6 @@ export interface components {
             token: string;
             /** Expires In */
             expires_in: number;
-        };
-        /** BundleAttributes */
-        BundleAttributes: {
-            /** Bundle */
-            bundle: string;
-            /** Plan */
-            plan: string;
-            /** Products */
-            products: string[];
-            /** Subscriptions */
-            subscriptions: string[];
-        };
-        /** BundleListResponse */
-        BundleListResponse: {
-            /** Data */
-            data: components["schemas"]["CatalogBundleResource"][];
-        };
-        /**
-         * BundleResource
-         * @example {
-         *       "attributes": {
-         *         "bundle": "standard",
-         *         "plan": "standard",
-         *         "products": [
-         *           "config",
-         *           "flags",
-         *           "logging"
-         *         ],
-         *         "subscriptions": [
-         *           "sub-uuid-config",
-         *           "sub-uuid-flags",
-         *           "sub-uuid-logging"
-         *         ]
-         *       },
-         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-         *       "type": "bundle"
-         *     }
-         */
-        BundleResource: {
-            /** Id */
-            id?: string | null;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "bundle";
-            attributes: components["schemas"]["BundleAttributes"];
-        };
-        /** BundleResponse */
-        BundleResponse: {
-            data: components["schemas"]["BundleResource"];
-        };
-        /** CatalogBundleAttributes */
-        CatalogBundleAttributes: {
-            /** Display Name */
-            display_name: string;
-            /** Plan */
-            plan: string;
-            /** Products */
-            products: string[];
-            /** Price Monthly Cents */
-            price_monthly_cents: number;
-        };
-        /**
-         * CatalogBundleResource
-         * @example {
-         *       "attributes": {
-         *         "display_name": "Standard Bundle",
-         *         "plan": "standard",
-         *         "price_monthly_cents": 14900,
-         *         "products": [
-         *           "config",
-         *           "flags",
-         *           "logging"
-         *         ]
-         *       },
-         *       "id": "standard",
-         *       "type": "bundle"
-         *     }
-         */
-        CatalogBundleResource: {
-            /** Id */
-            id?: string | null;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "bundle";
-            attributes: components["schemas"]["CatalogBundleAttributes"];
         };
         /**
          * ContactTopic
@@ -1667,32 +1575,6 @@ export interface components {
         /** ContextTypeResponse */
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
-        };
-        /**
-         * CreateBundleAttributes
-         * @example {
-         *       "bundle": "standard",
-         *       "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-         *     }
-         */
-        CreateBundleAttributes: {
-            /** Bundle */
-            bundle: string;
-            /** Payment Method */
-            payment_method?: string | null;
-        };
-        /** CreateBundleBody */
-        CreateBundleBody: {
-            data: components["schemas"]["CreateBundleData"];
-        };
-        /** CreateBundleData */
-        CreateBundleData: {
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "bundle";
-            attributes: components["schemas"]["CreateBundleAttributes"];
         };
         /**
          * CreateSubscriptionAttributes
@@ -2235,6 +2117,15 @@ export interface components {
             type: "metric_rollup";
             attributes: components["schemas"]["MetricRollupAttributes"];
         };
+        /** NextTierMeta */
+        NextTierMeta: {
+            /** Products Needed */
+            products_needed: number;
+            /** Discount Pct */
+            discount_pct: number;
+            /** Additional Savings Cents */
+            additional_savings_cents: number;
+        };
         /**
          * OidcProvider
          * @enum {string}
@@ -2631,17 +2522,36 @@ export interface components {
             comped: boolean;
             /** Stripe Managed */
             stripe_managed: boolean;
-            /** Bundle */
-            bundle?: string | null;
             /** Current Period End */
             current_period_end?: string | null;
             /** Client Secret */
             client_secret?: string | null;
         };
+        /**
+         * SubscriptionListMeta
+         * @description Discount and totals summary attached to GET /api/v1/subscriptions.
+         */
+        SubscriptionListMeta: {
+            /** Subtotal Cents */
+            subtotal_cents: number;
+            /** Discount Pct */
+            discount_pct: number;
+            /** Discount Amount Cents */
+            discount_amount_cents: number;
+            /**
+             * Discount Source
+             * @enum {string}
+             */
+            discount_source: "volume" | "override";
+            /** Total Cents */
+            total_cents: number;
+            next_tier?: components["schemas"]["NextTierMeta"];
+        };
         /** SubscriptionListResponse */
         SubscriptionListResponse: {
             /** Data */
             data: components["schemas"]["SubscriptionResource"][];
+            meta?: components["schemas"]["SubscriptionListMeta"];
         };
         /**
          * SubscriptionResource
@@ -6670,122 +6580,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_bundles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["BundleListResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_bundle: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/vnd.api+json": components["schemas"]["CreateBundleBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["BundleResponse"];
                 };
             };
             /** @description Validation error or malformed request */
