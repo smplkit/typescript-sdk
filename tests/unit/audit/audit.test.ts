@@ -24,10 +24,8 @@ describe("AuditClient", () => {
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
+      fetch: slowFetch,
     });
-    // Replace the underlying fetch the buffer's POST function uses.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = slowFetch;
 
     const before = Date.now();
     for (let i = 0; i < 10; i++) {
@@ -75,11 +73,9 @@ describe("AuditClient", () => {
     });
 
     const client = new AuditClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = fetchMock;
 
     const ev = await client.events.get(eventId);
     expect(ev.id).toBe(eventId);
@@ -92,11 +88,9 @@ describe("AuditClient", () => {
   test("get throws on non-2xx response", async () => {
     const fetchMock = vi.fn(async () => new Response("not found", { status: 404 }));
     const client = new AuditClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = fetchMock;
     await expect(client.events.get("nonexistent")).rejects.toThrow(/audit get failed/);
     await client._close();
   });
@@ -104,11 +98,9 @@ describe("AuditClient", () => {
   test("list throws on non-2xx response", async () => {
     const fetchMock = vi.fn(async () => new Response("server error", { status: 500 }));
     const client = new AuditClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = fetchMock;
     await expect(client.events.list()).rejects.toThrow(/audit list failed/);
     await client._close();
   });
@@ -125,15 +117,39 @@ describe("AuditClient", () => {
 
   test("create accepts Date for occurredAt and serializes it as ISO", async () => {
     const seen: string[] = [];
+    const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      // openapi-fetch invokes the underlying fetch with a Request object,
+      // not (url, init). Read the body off the Request.
+      const req = urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      const body = JSON.parse(await req.text());
+      seen.push(body.data.attributes.occurred_at);
+      return new Response(
+        JSON.stringify({
+          data: {
+            id: "00000000-0000-0000-0000-000000000001",
+            type: "event",
+            attributes: {
+              action: "x",
+              resource_type: "x",
+              resource_id: "1",
+              occurred_at: "2026-05-06T12:00:00+00:00",
+              created_at: "2026-05-06T12:00:01+00:00",
+              actor_type: "API_KEY",
+              actor_id: null,
+              actor_label: "",
+              snapshot: null,
+              data: {},
+              idempotency_key: "",
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = vi.fn(async (_url: string, init: { body: string }) => {
-      const body = JSON.parse(init.body);
-      seen.push(body.data.attributes.occurred_at);
-      return new Response("{}", { status: 201 });
+      fetch: fetchMock,
     });
     const ts = new Date("2026-05-06T12:00:00Z");
     client.events.record({
@@ -152,14 +168,14 @@ describe("AuditClient", () => {
     // events.flush() forces a synchronous drain pass — without it the
     // worker timer wouldn't fire for several seconds.
     const calls: number[] = [];
+    const fetchMock = vi.fn(async () => {
+      calls.push(1);
+      throw new Error("simulated network blip");
+    });
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = vi.fn(async () => {
-      calls.push(1);
-      throw new Error("simulated network blip");
+      fetch: fetchMock,
     });
     client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
     // flush triggers a drain pass; the post wrapper's catch returns
@@ -201,11 +217,9 @@ describe("AuditClient", () => {
     });
 
     const client = new AuditClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (client.events as any)._fetch = fetchMock;
 
     const page = await client.events.list({ pageSize: 1 });
     expect(page.events.length).toBe(1);

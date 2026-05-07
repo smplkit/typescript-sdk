@@ -1,20 +1,26 @@
 /**
- * Audit namespace — `client.audit.events.{create,list,get}`.
+ * Audit namespace — `client.audit.events.{record,list,get}`.
  *
- * ADR-047 §2.6. Writes are fire-and-forget by default: `create` enqueues the
+ * ADR-047 §2.6. Writes are fire-and-forget by default: `record` enqueues the
  * event onto an in-memory bounded buffer and returns immediately. The buffer
  * worker flushes on a timer or when depth crosses a watermark, and retries
  * transient failures with exponential backoff. Reads are async and return
  * Promises that resolve to typed `AuditEvent` instances.
+ *
+ * All HTTP work is delegated to the auto-generated openapi-fetch client
+ * over `../generated/audit.d.ts` — the wrapper does not issue raw fetch
+ * calls.
  */
 
+import createClient from "openapi-fetch";
+
+import type { paths } from "../generated/audit.d.ts";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import type { AuditEvent, CreateEventInput, ListEventsPage, ListEventsParams } from "./types.js";
 
-const JSONAPI_HEADERS: Record<string, string> = {
-  "Content-Type": "application/vnd.api+json",
-  Accept: "application/vnd.api+json",
-};
+type AuditHttp = ReturnType<typeof createClient<paths>>;
+
+const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
 function _attributesFromInput(input: CreateEventInput): Record<string, unknown> {
   const attrs: Record<string, unknown> = {
@@ -53,39 +59,38 @@ function _eventFromResource(resource: {
 }
 
 class EventsClient {
-  private readonly _apiKey: string;
-  private readonly _baseUrl: string;
-  private readonly _timeoutMs: number;
-  private readonly _buffer: AuditEventBuffer;
   /** @internal */
-  _fetch: typeof fetch = fetch;
+  readonly _http: AuditHttp;
+  private readonly _buffer: AuditEventBuffer;
 
-  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number }) {
-    this._apiKey = opts.apiKey;
-    this._baseUrl = opts.baseUrl.replace(/\/$/, "");
-    this._timeoutMs = opts.timeoutMs ?? 10_000;
+  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number; fetch?: typeof fetch }) {
+    const baseUrl = opts.baseUrl.replace(/\/$/, "");
+
+    // openapi-fetch wraps the runtime fetch and provides typed
+    // GET/POST/PUT/DELETE methods keyed off the OpenAPI paths interface.
+    this._http = createClient<paths>({
+      baseUrl,
+      fetch: opts.fetch,
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        Accept: JSONAPI_CONTENT_TYPE,
+        "Content-Type": JSONAPI_CONTENT_TYPE,
+      },
+    });
 
     this._buffer = new AuditEventBuffer({
       post: async (item): Promise<PostOutcome> => {
         try {
-          const headers: Record<string, string> = {
-            ...JSONAPI_HEADERS,
-            Authorization: `Bearer ${this._apiKey}`,
-          };
-          if (item.idempotencyKey !== null) headers["Idempotency-Key"] = item.idempotencyKey;
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), this._timeoutMs);
-          try {
-            const resp = await this._fetch(`${this._baseUrl}/api/v1/events`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify(item.body),
-              signal: ctrl.signal,
-            });
-            return { status: resp.status };
-          } finally {
-            clearTimeout(t);
-          }
+          const headerInit: Record<string, string> = {};
+          if (item.idempotencyKey !== null) headerInit["Idempotency-Key"] = item.idempotencyKey;
+          const result = await this._http.POST("/api/v1/events", {
+            // Casting through unknown because the generated body type is
+            // EventResponse with id required, while the wrapper builds an
+            // unsaved-resource body without an id (server assigns).
+            body: item.body as unknown as paths["/api/v1/events"]["post"]["requestBody"]["content"]["application/vnd.api+json"],
+            headers: headerInit,
+          });
+          return { status: result.response.status };
         } catch {
           return { status: 0 };
         }
@@ -103,35 +108,35 @@ class EventsClient {
    */
   record(input: CreateEventInput): void {
     const body = {
-      data: { type: "event", attributes: _attributesFromInput(input) },
+      data: { id: "", type: "event", attributes: _attributesFromInput(input) },
     };
     this._buffer.enqueue(body, input.idempotencyKey ?? null);
   }
 
   async list(params: ListEventsParams = {}): Promise<ListEventsPage> {
-    const qs = new URLSearchParams();
-    if (params.action !== undefined) qs.set("filter[action]", params.action);
-    if (params.resourceType !== undefined) qs.set("filter[resource_type]", params.resourceType);
-    if (params.resourceId !== undefined) qs.set("filter[resource_id]", params.resourceId);
-    if (params.actorType !== undefined) qs.set("filter[actor_type]", params.actorType);
-    if (params.actorId !== undefined) qs.set("filter[actor_id]", params.actorId);
-    if (params.occurredAtRange !== undefined) qs.set("filter[occurred_at]", params.occurredAtRange);
-    if (params.pageSize !== undefined) qs.set("page[size]", String(params.pageSize));
-    if (params.pageAfter !== undefined) qs.set("page[after]", params.pageAfter);
+    const query: Record<string, string | number> = {};
+    if (params.action !== undefined) query["filter[action]"] = params.action;
+    if (params.resourceType !== undefined) query["filter[resource_type]"] = params.resourceType;
+    if (params.resourceId !== undefined) query["filter[resource_id]"] = params.resourceId;
+    if (params.actorType !== undefined) query["filter[actor_type]"] = params.actorType;
+    if (params.actorId !== undefined) query["filter[actor_id]"] = params.actorId;
+    if (params.occurredAtRange !== undefined) query["filter[occurred_at]"] = params.occurredAtRange;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+    if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
 
-    const resp = await this._fetch(`${this._baseUrl}/api/v1/events?${qs.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${this._apiKey}`,
-        Accept: "application/vnd.api+json",
-      },
+    const result = await this._http.GET("/api/v1/events", {
+      // openapi-fetch's typed query map is constrained by the spec's
+      // exact param names (filteraction etc.); the JSON:API filter[*]
+      // / page[*] format isn't expressible in that shape, so we cast
+      // and let openapi-fetch URL-encode the literal keys.
+      params: { query: query as unknown as Record<string, never> },
     });
-    if (!resp.ok) {
-      throw new Error(`audit list failed: ${resp.status} ${resp.statusText}`);
+    if (!result.response.ok || result.data === undefined) {
+      throw new Error(
+        `audit list failed: ${result.response.status} ${result.response.statusText}`,
+      );
     }
-    const body = (await resp.json()) as {
-      data?: Array<{ id: string; attributes: Record<string, unknown> }>;
-      links?: { next?: string };
-    };
+    const body = result.data;
     const events = (body.data ?? []).map(_eventFromResource);
     let nextCursor: string | null = null;
     const nextLink = body.links?.next;
@@ -142,19 +147,13 @@ class EventsClient {
   }
 
   async get(eventId: string): Promise<AuditEvent> {
-    const resp = await this._fetch(`${this._baseUrl}/api/v1/events/${eventId}`, {
-      headers: {
-        Authorization: `Bearer ${this._apiKey}`,
-        Accept: "application/vnd.api+json",
-      },
+    const result = await this._http.GET("/api/v1/events/{event_id}", {
+      params: { path: { event_id: eventId } },
     });
-    if (!resp.ok) {
-      throw new Error(`audit get failed: ${resp.status} ${resp.statusText}`);
+    if (!result.response.ok || result.data === undefined) {
+      throw new Error(`audit get failed: ${result.response.status} ${result.response.statusText}`);
     }
-    const body = (await resp.json()) as {
-      data: { id: string; attributes: Record<string, unknown> };
-    };
-    return _eventFromResource(body.data);
+    return _eventFromResource(result.data.data);
   }
 
   /** Block until the in-memory buffer is drained or `timeoutMs` elapses. */
@@ -171,7 +170,7 @@ class EventsClient {
 export class AuditClient {
   readonly events: EventsClient;
 
-  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number }) {
+  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number; fetch?: typeof fetch }) {
     this.events = new EventsClient(opts);
   }
 
