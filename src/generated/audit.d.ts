@@ -509,9 +509,12 @@ export interface components {
          * ForwarderHttp
          * @description The destination HTTP request shape stored encrypted on a forwarder.
          *
-         *     ``success_status`` is either a single integer status (e.g. ``200``) or
-         *     a class string like ``"2xx"``. Anything outside the matched set is
-         *     treated as a delivery failure.
+         *     ``success_status`` is a string: either a single status code (e.g.
+         *     ``"200"``, ``"204"``) or a class (e.g. ``"2xx"``, ``"3xx"``). The
+         *     string-only contract is intentional — a Pydantic ``int | str`` union
+         *     confused several SDK code generators (Java in particular wrote the
+         *     default ``"2xx"`` unquoted into a typed enum). String covers both
+         *     shapes universally with a single wire type.
          */
         ForwarderHttp: {
             /**
@@ -529,7 +532,7 @@ export interface components {
              * Success Status
              * @default 2xx
              */
-            success_status: number | string;
+            success_status: string;
         };
         /** ForwarderListLinks */
         ForwarderListLinks: {
@@ -640,7 +643,7 @@ export interface components {
              * Success Status
              * @default 2xx
              */
-            success_status: number | string;
+            success_status: string;
             /** Timeout Ms */
             timeout_ms?: number | null;
         };
