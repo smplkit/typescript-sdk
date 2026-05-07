@@ -3,4 +3,23 @@
  */
 
 export { AuditClient } from "./client.js";
-export type { AuditEvent, CreateEventInput, ListEventsPage, ListEventsParams } from "./types.js";
+export type {
+  AuditEvent,
+  CreateEventInput,
+  CreateForwarderInput,
+  Forwarder,
+  ForwarderDelivery,
+  ForwarderDeliveryStatus,
+  ForwarderHttp,
+  HttpHeader,
+  ListDeliveriesPage,
+  ListDeliveriesParams,
+  ListEventsPage,
+  ListEventsParams,
+  ListForwardersPage,
+  ListForwardersParams,
+  RetryFailedDeliveriesSummary,
+  TestForwarderRequest,
+  TestForwarderResult,
+  UpdateForwarderInput,
+} from "./types.js";
