@@ -165,7 +165,7 @@ export class ConfigClient {
   private _listeners: ChangeListener[] = [];
 
   /** @internal */
-  constructor(apiKey: string, timeout?: number, baseUrl?: string) {
+  constructor(apiKey: string, timeout?: number, baseUrl?: string, extraHeaders?: Record<string, string>) {
     this._apiKey = apiKey;
     const resolvedBaseUrl = baseUrl ?? BASE_URL;
     this._baseUrl = resolvedBaseUrl;
@@ -173,6 +173,7 @@ export class ConfigClient {
     this._http = createClient<import("../generated/config.d.ts").paths>({
       baseUrl: resolvedBaseUrl,
       headers: {
+        ...(extraHeaders ?? {}),
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },

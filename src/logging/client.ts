@@ -115,7 +115,13 @@ export class LoggingClient {
   private _groupStore: Record<string, string | null> = {}; // key -> level
 
   /** @internal */
-  constructor(apiKey: string, ensureWs: () => SharedWebSocket, timeout?: number, baseUrl?: string) {
+  constructor(
+    apiKey: string,
+    ensureWs: () => SharedWebSocket,
+    timeout?: number,
+    baseUrl?: string,
+    extraHeaders?: Record<string, string>,
+  ) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
     const resolvedBaseUrl = baseUrl ?? LOGGING_BASE_URL;
@@ -125,6 +131,7 @@ export class LoggingClient {
     this._http = createClient<import("../generated/logging.d.ts").paths>({
       baseUrl: resolvedBaseUrl,
       headers: {
+        ...(extraHeaders ?? {}),
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },

@@ -80,6 +80,15 @@ export interface SmplClientOptions {
    * falling back to `false`.
    */
   debug?: boolean;
+
+  /**
+   * Additional HTTP headers to include on every request made by this client
+   * and all sub-clients (audit, config, flags, logging).
+   *
+   * SDK-owned headers (`Authorization`, `Accept`) take precedence over any
+   * key supplied here — callers cannot override them.
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 /**
@@ -169,9 +178,12 @@ export class SmplClient {
       `SmplClient created (api_key=${maskedKey}, environment=${cfg.environment}, service=${cfg.service})`,
     );
 
+    const extraHeaders = options.extraHeaders ?? {};
+
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
       baseUrl: appBaseUrl,
       headers: {
+        ...extraHeaders,
         Authorization: `Bearer ${cfg.apiKey}`,
         Accept: "application/json",
       },
@@ -198,7 +210,7 @@ export class SmplClient {
       debug: cfg.debug,
     });
 
-    this.config = new ConfigClient(cfg.apiKey, this._timeout, configBaseUrl);
+    this.config = new ConfigClient(cfg.apiKey, this._timeout, configBaseUrl, extraHeaders);
     this.flags = new FlagsClient(
       cfg.apiKey,
       () => this._ensureWs(),
@@ -206,17 +218,20 @@ export class SmplClient {
       flagsBaseUrl,
       appBaseUrl,
       this.manage._contextBuffer,
+      extraHeaders,
     );
     this.logging = new LoggingClient(
       cfg.apiKey,
       () => this._ensureWs(),
       this._timeout,
       loggingBaseUrl,
+      extraHeaders,
     );
     this.audit = new AuditClient({
       apiKey: cfg.apiKey,
       baseUrl: auditBaseUrl,
       timeoutMs: this._timeout,
+      extraHeaders,
     });
 
     // Wire the shared WebSocket into the config client

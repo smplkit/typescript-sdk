@@ -171,7 +171,13 @@ class EventsClient {
   readonly _http: AuditHttp;
   private readonly _buffer: AuditEventBuffer;
 
-  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number; fetch?: typeof fetch }) {
+  constructor(opts: {
+    apiKey: string;
+    baseUrl: string;
+    timeoutMs?: number;
+    fetch?: typeof fetch;
+    extraHeaders?: Record<string, string>;
+  }) {
     const baseUrl = opts.baseUrl.replace(/\/$/, "");
 
     // openapi-fetch wraps the runtime fetch and provides typed
@@ -180,6 +186,7 @@ class EventsClient {
       baseUrl,
       fetch: opts.fetch,
       headers: {
+        ...(opts.extraHeaders ?? {}),
         Authorization: `Bearer ${opts.apiKey}`,
         Accept: JSONAPI_CONTENT_TYPE,
         "Content-Type": JSONAPI_CONTENT_TYPE,
@@ -504,7 +511,13 @@ export class AuditClient {
   readonly forwarders: ForwardersClient;
   readonly functions: FunctionsClient;
 
-  constructor(opts: { apiKey: string; baseUrl: string; timeoutMs?: number; fetch?: typeof fetch }) {
+  constructor(opts: {
+    apiKey: string;
+    baseUrl: string;
+    timeoutMs?: number;
+    fetch?: typeof fetch;
+    extraHeaders?: Record<string, string>;
+  }) {
     this.events = new EventsClient(opts);
     this.forwarders = new ForwardersClient(this.events._http);
     this.functions = new FunctionsClient(this.events._http);

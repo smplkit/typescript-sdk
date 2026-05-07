@@ -184,3 +184,22 @@ describe("ConfigClient", () => {
     });
   });
 });
+
+describe("ConfigClient — extraHeaders", () => {
+  it("extraHeaders are present on every request", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({
+        data: [],
+      });
+    });
+
+    const client = new ConfigClient(API_KEY, undefined, undefined, { "X-Test": "v" });
+    await client._connectInternal("production");
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]!.headers.get("x-test")).toBe("v");
+    // SDK Authorization header still present
+    expect(seen[0]!.headers.get("authorization")).toMatch(/^Bearer /);
+  });
+});

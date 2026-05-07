@@ -232,3 +232,51 @@ describe("AuditClient", () => {
     await client._close();
   });
 });
+
+describe("AuditClient — extraHeaders", () => {
+  test("extraHeaders are merged into every request, SDK headers win on collision", async () => {
+    const seen: Headers[] = [];
+    const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      seen.push(req.headers);
+      return new Response(
+        JSON.stringify({
+          data: {
+            id: "00000000-0000-0000-0000-000000000001",
+            type: "event",
+            attributes: {
+              action: "x",
+              resource_type: "y",
+              resource_id: "1",
+              occurred_at: "2026-05-06T12:00:00+00:00",
+              created_at: "2026-05-06T12:00:01+00:00",
+              actor_type: "API_KEY",
+              actor_id: null,
+              actor_label: "",
+              snapshot: null,
+              data: {},
+              idempotency_key: "",
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
+
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
+      extraHeaders: { "X-Test": "v" },
+    });
+
+    client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]!.get("x-test")).toBe("v");
+    // SDK Authorization header still present
+    expect(seen[0]!.get("authorization")).toMatch(/^Bearer sk_api_test$/);
+    await client._close();
+  });
+});

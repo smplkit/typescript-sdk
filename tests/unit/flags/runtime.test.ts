@@ -439,3 +439,32 @@ describe("FlagsClient runtime", () => {
     await expect(client._connectInternal("staging")).rejects.toThrow(/HTTP 500/);
   });
 });
+
+describe("FlagsClient — extraHeaders", () => {
+  it("extraHeaders are present on every request, SDK headers win on collision", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const ws = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
+    const client = new FlagsClient(
+      API_KEY,
+      () => ws as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { "X-Custom": "world", Authorization: "should-be-overridden" },
+    );
+    await client._connectInternal("production");
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]!.headers.get("x-custom")).toBe("world");
+    expect(seen[0]!.headers.get("authorization")).toBe(`Bearer ${API_KEY}`);
+  });
+});

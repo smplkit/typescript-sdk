@@ -324,6 +324,7 @@ export class FlagsClient {
     flagsBaseUrl?: string,
     appBaseUrl?: string,
     contextBuffer?: ContextRegistrationBuffer,
+    extraHeaders?: Record<string, string>,
   ) {
     this._apiKey = apiKey;
     this._ensureWs = ensureWs;
@@ -347,9 +348,11 @@ export class FlagsClient {
       }
     };
 
+    const extra = extraHeaders ?? {};
     this._http = createClient<import("../generated/flags.d.ts").paths>({
       baseUrl: resolvedBaseUrl,
       headers: {
+        ...extra,
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },
@@ -359,6 +362,7 @@ export class FlagsClient {
     this._appHttp = createClient<import("../generated/app.d.ts").paths>({
       baseUrl: resolvedAppBaseUrl,
       headers: {
+        ...extra,
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },

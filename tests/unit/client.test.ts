@@ -314,3 +314,30 @@ describe("SmplClient", () => {
     clearSpy.mockRestore();
   });
 });
+
+describe("SmplClient — extraHeaders", () => {
+  it("extraHeaders flow into sub-client HTTP calls", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = new SmplClient({
+      ...DEFAULT_OPTS,
+      extraHeaders: { "X-Tenant": "acme", Authorization: "should-be-overridden" },
+    });
+    try {
+      await client.flags._connectInternal("production");
+      const flagReq = seen.find((r) => r.url.includes("flags"));
+      expect(flagReq).toBeDefined();
+      expect(flagReq!.headers.get("x-tenant")).toBe("acme");
+      expect(flagReq!.headers.get("authorization")).toBe("Bearer sk_api_test");
+    } finally {
+      client.close();
+    }
+  });
+});

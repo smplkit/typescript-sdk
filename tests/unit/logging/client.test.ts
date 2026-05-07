@@ -1829,3 +1829,30 @@ describe("LoggingClient — _listLoggers/_listLogGroups direct HTTP fallback", (
     // No assertion on outcome; coverage of the AbortError branch is the point.
   });
 });
+
+describe("LoggingClient — extraHeaders", () => {
+  it("extraHeaders are present on every request, SDK headers win on collision", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const ws = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
+    const client = new LoggingClient(
+      "sk_api_test",
+      () => ws as never,
+      undefined,
+      undefined,
+      { "X-Custom": "hello", Authorization: "should-be-overridden" },
+    );
+    await client.start();
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]!.headers.get("x-custom")).toBe("hello");
+    expect(seen[0]!.headers.get("authorization")).toBe("Bearer sk_api_test");
+  });
+});
