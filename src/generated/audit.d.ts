@@ -23,7 +23,7 @@ export interface paths {
         get: operations["list_events"];
         put?: never;
         /**
-         * Create Event
+         * Record Event
          * @description Record an audit event for the authenticated account.
          *
          *     Returns ``201 Created`` on first write, ``200 OK`` if the request was a
@@ -33,7 +33,7 @@ export interface paths {
          *     ``smpl.`` — that namespace is reserved for smplkit-emitted events
          *     about platform resources.
          */
-        post: operations["create_event"];
+        post: operations["record_event"];
         delete?: never;
         options?: never;
         head?: never;
@@ -267,7 +267,7 @@ export interface operations {
             };
         };
     };
-    create_event: {
+    record_event: {
         parameters: {
             query?: never;
             header?: {
