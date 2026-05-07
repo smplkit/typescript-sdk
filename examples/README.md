@@ -119,3 +119,24 @@ Demonstrates the runtime experience for Smpl Logging:
 ```bash
 npx tsx examples/logging_runtime_showcase.ts
 ```
+
+## Audit Showcase
+
+### Runtime API
+
+**File:** [`audit_runtime_showcase.ts`](audit_runtime_showcase.ts)
+
+Demonstrates the runtime experience for Smpl Audit:
+
+- Fire-and-forget `client.audit.events.create(...)` — returns immediately, posted on a background buffer worker (ADR-047 §2.6)
+- Optional `occurredAt`, `snapshot`, and `data` payloads
+- Caller-supplied `idempotencyKey` for safe retries — server dedupes on `account_id + idempotency_key`
+- `flush(timeoutMs)` to drain the buffer before reading
+- Synchronous `list({...})` with server-side filters (`action`, `resourceType`, `resourceId`, `actorType`, `actorId`, `occurredAtRange`) and cursor pagination (`pageSize` / `pageAfter` / `nextCursor`)
+- Single-event read via `get(eventId)`
+
+> Audit has no management API — events are created at runtime and read via list/get. There is no separate management showcase.
+
+```bash
+npx tsx examples/audit_runtime_showcase.ts
+```
