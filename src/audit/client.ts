@@ -132,9 +132,7 @@ class EventsClient {
       params: { query: query as unknown as Record<string, never> },
     });
     if (!result.response.ok || result.data === undefined) {
-      throw new Error(
-        `audit list failed: ${result.response.status} ${result.response.statusText}`,
-      );
+      throw new Error(`audit list failed: ${result.response.status} ${result.response.statusText}`);
     }
     const body = result.data;
     const events = (body.data ?? []).map(_eventFromResource);

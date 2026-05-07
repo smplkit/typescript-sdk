@@ -73,7 +73,8 @@ describe("AuditClient", () => {
     });
 
     const client = new AuditClient({
-      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
 
@@ -88,7 +89,8 @@ describe("AuditClient", () => {
   test("get throws on non-2xx response", async () => {
     const fetchMock = vi.fn(async () => new Response("not found", { status: 404 }));
     const client = new AuditClient({
-      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
     await expect(client.events.get("nonexistent")).rejects.toThrow(/audit get failed/);
@@ -98,7 +100,8 @@ describe("AuditClient", () => {
   test("list throws on non-2xx response", async () => {
     const fetchMock = vi.fn(async () => new Response("server error", { status: 500 }));
     const client = new AuditClient({
-      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
     await expect(client.events.list()).rejects.toThrow(/audit list failed/);
@@ -120,7 +123,8 @@ describe("AuditClient", () => {
     const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
       // openapi-fetch invokes the underlying fetch with a Request object,
       // not (url, init). Read the body off the Request.
-      const req = urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
       const body = JSON.parse(await req.text());
       seen.push(body.data.attributes.occurred_at);
       return new Response(
@@ -217,7 +221,8 @@ describe("AuditClient", () => {
     });
 
     const client = new AuditClient({
-      apiKey: "sk_api_test",      baseUrl: "https://audit.example.com",
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
 
