@@ -14,8 +14,20 @@
 
 import createClient from "openapi-fetch";
 
-import type { paths } from "../generated/audit.d.ts";
+import type { components, paths } from "../generated/audit.d.ts";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
+
+// Type aliases for the generated request shapes. Constructing these
+// shapes directly (instead of `Record<string, unknown>` casts) means
+// a spec change that drops a field fails to type-check at the
+// construction site rather than silently shipping stale bytes — the
+// regression class that hit @smplkit/sdk@3.0.19.
+type GenEvent = components["schemas"]["Event"];
+type GenEventResponse = components["schemas"]["EventResponse"];
+type GenForwarder = components["schemas"]["Forwarder"];
+type GenForwarderHttpType = components["schemas"]["ForwarderHttp"];
+type GenForwarderResponse = components["schemas"]["ForwarderResponse"];
+type GenTestForwarderRequest = components["schemas"]["TestForwarderRequest"];
 import type {
   AuditEvent,
   CreateEventInput,
@@ -40,19 +52,21 @@ type AuditHttp = ReturnType<typeof createClient<paths>>;
 
 const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
-function _attributesFromInput(input: CreateEventInput): Record<string, unknown> {
-  const attrs: Record<string, unknown> = {
+function _eventBodyFromInput(input: CreateEventInput): GenEventResponse {
+  const attrs: GenEvent = {
     action: input.action,
     resource_type: input.resourceType,
     resource_id: input.resourceId,
+    do_not_forward: input.doNotForward ?? false,
   };
   if (input.occurredAt !== undefined) {
-    const ts = input.occurredAt instanceof Date ? input.occurredAt.toISOString() : input.occurredAt;
-    attrs.occurred_at = ts;
+    attrs.occurred_at =
+      input.occurredAt instanceof Date ? input.occurredAt.toISOString() : input.occurredAt;
   }
-  if (input.data !== undefined) attrs.data = input.data;
-  if (input.doNotForward) attrs.do_not_forward = true;
-  return attrs;
+  if (input.data !== undefined) {
+    attrs.data = input.data as { [key: string]: unknown };
+  }
+  return { data: { id: "", type: "event", attributes: attrs } };
 }
 
 function _eventFromResource(resource: {
@@ -76,7 +90,7 @@ function _eventFromResource(resource: {
   };
 }
 
-function _httpToWire(http: ForwarderHttp): Record<string, unknown> {
+function _httpToWire(http: ForwarderHttp): GenForwarderHttpType {
   return {
     method: http.method,
     url: http.url,
@@ -101,18 +115,20 @@ function _httpFromWire(raw: Record<string, unknown> | undefined): ForwarderHttp 
   };
 }
 
-function _forwarderAttributes(
-  input: CreateForwarderInput | UpdateForwarderInput,
-): Record<string, unknown> {
-  const attrs: Record<string, unknown> = {
+function _forwarderAttributes(input: CreateForwarderInput | UpdateForwarderInput): GenForwarder {
+  const attrs: GenForwarder = {
     name: input.name,
     forwarder_type: input.forwarderType,
     enabled: input.enabled ?? true,
     http: _httpToWire(input.http),
   };
-  if (input.filter !== undefined) attrs.filter = input.filter;
+  if (input.filter !== undefined) {
+    attrs.filter = input.filter as { [key: string]: unknown };
+  }
   if (input.transform !== undefined) attrs.transform = input.transform;
-  if (input.data !== undefined) attrs.data = input.data;
+  if (input.data !== undefined) {
+    attrs.data = input.data as { [key: string]: unknown };
+  }
   return attrs;
 }
 
@@ -197,10 +213,7 @@ class EventsClient {
           const headerInit: Record<string, string> = {};
           if (item.idempotencyKey !== null) headerInit["Idempotency-Key"] = item.idempotencyKey;
           const result = await this._http.POST("/api/v1/events", {
-            // Casting through unknown because the generated body type is
-            // EventResponse with id required, while the wrapper builds an
-            // unsaved-resource body without an id (server assigns).
-            body: item.body as unknown as paths["/api/v1/events"]["post"]["requestBody"]["content"]["application/vnd.api+json"],
+            body: item.body as GenEventResponse,
             headers: headerInit,
           });
           return { status: result.response.status };
@@ -220,10 +233,7 @@ class EventsClient {
    * failures, so a misuse will silently disappear from the queue).
    */
   record(input: CreateEventInput): void {
-    const body = {
-      data: { id: "", type: "event", attributes: _attributesFromInput(input) },
-    };
-    this._buffer.enqueue(body, input.idempotencyKey ?? null);
+    this._buffer.enqueue(_eventBodyFromInput(input), input.idempotencyKey ?? null);
   }
 
   async list(params: ListEventsParams = {}): Promise<ListEventsPage> {
@@ -367,10 +377,10 @@ class ForwardersClient {
   }
 
   async create(input: CreateForwarderInput): Promise<Forwarder> {
-    const body = { data: { id: "", type: "forwarder", attributes: _forwarderAttributes(input) } };
-    const result = await this._http.POST("/api/v1/forwarders", {
-      body: body as unknown as paths["/api/v1/forwarders"]["post"]["requestBody"]["content"]["application/vnd.api+json"],
-    });
+    const body: GenForwarderResponse = {
+      data: { id: "", type: "forwarder", attributes: _forwarderAttributes(input) },
+    };
+    const result = await this._http.POST("/api/v1/forwarders", { body });
     if (!result.response.ok || result.data === undefined) {
       throw new Error(
         `audit create forwarder failed: ${result.response.status} ${result.response.statusText}`,
@@ -414,12 +424,12 @@ class ForwardersClient {
   }
 
   async update(forwarderId: string, input: UpdateForwarderInput): Promise<Forwarder> {
-    const body = {
+    const body: GenForwarderResponse = {
       data: { id: forwarderId, type: "forwarder", attributes: _forwarderAttributes(input) },
     };
     const result = await this._http.PUT("/api/v1/forwarders/{forwarder_id}", {
       params: { path: { forwarder_id: forwarderId } },
-      body: body as unknown as paths["/api/v1/forwarders/{forwarder_id}"]["put"]["requestBody"]["content"]["application/vnd.api+json"],
+      body,
     });
     if (!result.response.ok || result.data === undefined) {
       throw new Error(
@@ -452,7 +462,7 @@ class TestForwarderActionsClient {
    *  audit service rejects private/loopback/link-local addresses (incl.
    *  the EC2 IMDS at 169.254.169.254) and ports outside the allowlist. */
   async execute(input: TestForwarderRequest): Promise<TestForwarderResult> {
-    const body: Record<string, unknown> = {
+    const body: GenTestForwarderRequest = {
       method: input.method ?? "POST",
       url: input.url,
       headers: (input.headers ?? []).map((h) => ({ name: h.name, value: h.value })),
@@ -467,7 +477,7 @@ class TestForwarderActionsClient {
       // header; we override here so the server's strict validator
       // doesn't reject the request.
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: body as unknown as paths["/api/v1/functions/test_forwarder/actions/execute"]["post"]["requestBody"]["content"]["application/json"],
+      body,
     });
     if (!result.response.ok || result.data === undefined) {
       throw new Error(

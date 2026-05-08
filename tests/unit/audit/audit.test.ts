@@ -159,6 +159,7 @@ describe("AuditClient", () => {
       resourceType: "user",
       resourceId: "u-1",
       occurredAt: ts,
+      data: { snapshot: { total_cents: 4900 }, request_id: "req-1" },
     });
     await client.events.flush(2_000);
     expect(seen[0]).toBe(ts.toISOString());
