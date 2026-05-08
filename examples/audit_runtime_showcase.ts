@@ -38,8 +38,10 @@ async function main(): Promise<void> {
       resourceType: "invoice",
       resourceId: someResourceId,
       occurredAt: new Date(),
-      snapshot: { total_cents: 4900, currency: "USD" },
-      data: { request_id: "req-abc" },
+      data: {
+        snapshot: { total_cents: 4900, currency: "USD" },
+        request_id: "req-abc",
+      },
     });
 
     // force the event to be posted (normally happens automatically, in the

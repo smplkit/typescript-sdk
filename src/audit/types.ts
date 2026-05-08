@@ -14,7 +14,6 @@ export interface AuditEvent {
   actorType: string;
   actorId: string | null;
   actorLabel: string;
-  snapshot: Record<string, unknown> | null;
   data: Record<string, unknown>;
   idempotencyKey: string;
   doNotForward: boolean;
@@ -26,7 +25,11 @@ export interface CreateEventInput {
   resourceId: string;
   /** Defaults to server-side now() if omitted. */
   occurredAt?: Date | string;
-  snapshot?: Record<string, unknown>;
+  /**
+   * Free-form contextual JSON. To record a resource snapshot, nest it
+   * inside `data` — smplkit's internal convention is `data.snapshot`,
+   * but the shape is unconstrained.
+   */
   data?: Record<string, unknown>;
   /** Optional caller-supplied idempotency key. Server derives one from event content if absent. */
   idempotencyKey?: string;

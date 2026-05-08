@@ -50,7 +50,6 @@ function _attributesFromInput(input: CreateEventInput): Record<string, unknown> 
     const ts = input.occurredAt instanceof Date ? input.occurredAt.toISOString() : input.occurredAt;
     attrs.occurred_at = ts;
   }
-  if (input.snapshot !== undefined) attrs.snapshot = input.snapshot;
   if (input.data !== undefined) attrs.data = input.data;
   if (input.doNotForward) attrs.do_not_forward = true;
   return attrs;
@@ -71,7 +70,6 @@ function _eventFromResource(resource: {
     actorType: String(attrs.actor_type ?? ""),
     actorId: (attrs.actor_id as string | null) ?? null,
     actorLabel: String(attrs.actor_label ?? ""),
-    snapshot: (attrs.snapshot as Record<string, unknown> | null) ?? null,
     data: (attrs.data as Record<string, unknown> | undefined) ?? {},
     idempotencyKey: String(attrs.idempotency_key ?? ""),
     doNotForward: Boolean(attrs.do_not_forward ?? false),
