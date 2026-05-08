@@ -265,8 +265,12 @@ export interface components {
          *         - resource_type (required)
          *         - resource_id (required)
          *         - occurred_at (optional; defaults to ``created_at``)
-         *         - snapshot (optional)
          *         - data (optional; defaults to ``{}``)
+         *
+         *     There is no top-level ``snapshot`` attribute. Customers wishing to
+         *     record a resource snapshot place it inside ``data`` -- smplkit's
+         *     internal convention nests it at ``data.snapshot``, but customers may
+         *     follow their own convention.
          *
          *     Attribute set on GET responses includes everything above plus the
          *     server-populated fields: ``created_at``, ``actor_type``, ``actor_id``,
@@ -281,10 +285,6 @@ export interface components {
             resource_id: string;
             /** Occurred At */
             occurred_at?: string | null;
-            /** Snapshot */
-            snapshot?: {
-                [key: string]: unknown;
-            } | null;
             /** Data */
             data?: {
                 [key: string]: unknown;
@@ -337,16 +337,16 @@ export interface components {
          *         "actor_type": "USER",
          *         "created_at": "2026-05-06T20:00:00.123Z",
          *         "data": {
-         *           "request_id": "req-abc"
+         *           "request_id": "req-abc",
+         *           "snapshot": {
+         *             "email": "alice@example.com"
+         *           }
          *         },
          *         "do_not_forward": false,
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
          *         "resource_id": "u-1",
-         *         "resource_type": "user",
-         *         "snapshot": {
-         *           "email": "alice@example.com"
-         *         }
+         *         "resource_type": "user"
          *       },
          *       "id": "11111111-2222-3333-4444-555555555555",
          *       "type": "event"
