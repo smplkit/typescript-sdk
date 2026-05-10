@@ -9,7 +9,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FlagsClient } from "../../../src/flags/client.js";
 import { Context } from "../../../src/flags/types.js";
-import { SmplConnectionError } from "../../../src/errors.js";
 
 const mockFetch = vi.fn();
 
@@ -327,12 +326,22 @@ describe("FlagsClient runtime", () => {
     expect(handle.get()).toBe("fallback");
   });
 
-  it("should wrap _fetchFlagsList errors via wrapFetchError", async () => {
+  it("should schedule a retry on fetch error instead of throwing", async () => {
     const client = makeFlagsClient();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(client._connectInternal("staging")).rejects.toThrow(SmplConnectionError);
+    // _connectInternal now swallows errors and schedules a backoff retry
+    await expect(client._connectInternal("staging")).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("initialization failed"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(false);
+
+    // Cleanup the pending retry timer
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
   });
 
   it("should auto-flush context buffer when it reaches batch size", async () => {
@@ -414,29 +423,51 @@ describe("FlagsClient runtime", () => {
     await new Promise((r) => setTimeout(r, 10));
   });
 
-  it("should re-throw non-abort errors from custom fetch wrapper", async () => {
+  it("should schedule a retry on non-abort errors from custom fetch wrapper", async () => {
     const client = makeFlagsClient();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     mockFetch.mockImplementationOnce(() => {
       throw new Error("unexpected fetch error");
     });
 
-    await expect(client._connectInternal("staging")).rejects.toThrow(SmplConnectionError);
+    await expect(client._connectInternal("staging")).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("initialization failed"));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
   });
 
-  it("should throw SmplTimeoutError on AbortError from custom fetch wrapper", async () => {
+  it("should schedule a retry on AbortError (timeout) from custom fetch wrapper", async () => {
     const ws = createMockSharedWs();
     const client = new FlagsClient(API_KEY, () => ws as never, 1);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     mockFetch.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
 
-    await expect(client._connectInternal("staging")).rejects.toThrow(/timed out/);
+    await expect(client._connectInternal("staging")).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("initialization failed"));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
   });
 
-  it("should map non-OK list responses through checkError", async () => {
+  it("should schedule a retry on non-OK list responses", async () => {
     const client = makeFlagsClient();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     mockFetch.mockResolvedValueOnce(new Response("Server Error", { status: 500 }));
 
-    await expect(client._connectInternal("staging")).rejects.toThrow(/HTTP 500/);
+    await expect(client._connectInternal("staging")).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("initialization failed"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(false);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
   });
 });
 

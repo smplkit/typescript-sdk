@@ -83,6 +83,69 @@ describe("FlagRegistrationBuffer", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FlagRegistrationBuffer — peek / commit
+// ---------------------------------------------------------------------------
+
+describe("FlagRegistrationBuffer — peek/commit", () => {
+  it("peek() returns a snapshot without removing items", () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    client.stringFlag("flag-b", "x");
+
+    const batch = buffer.peek();
+    expect(batch).toHaveLength(2);
+    expect(batch[0].id).toBe("flag-a");
+    expect(batch[1].id).toBe("flag-b");
+    // Buffer is NOT cleared
+    expect(buffer.pendingCount).toBe(2);
+  });
+
+  it("commit() removes committed items and retains the rest", () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    client.stringFlag("flag-b", "x");
+    client.numberFlag("flag-c", 0);
+
+    buffer.commit(new Set(["flag-a", "flag-b"]));
+    expect(buffer.pendingCount).toBe(1);
+    const remaining = buffer.drain();
+    expect(remaining[0].id).toBe("flag-c");
+  });
+
+  it("commit() does not re-allow a deduped id", () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    const batch = buffer.peek();
+    buffer.commit(new Set(batch.map((b: { id: string }) => b.id)));
+
+    // Same id — _seen still has it, so re-add is ignored
+    client.booleanFlag("flag-a", true);
+    expect(buffer.pendingCount).toBe(0);
+  });
+
+  it("drain() still clears everything (for teardown)", () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    client.booleanFlag("flag-b", true);
+    const batch = buffer.drain();
+    expect(batch).toHaveLength(2);
+    expect(buffer.pendingCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Typed flag methods populate buffer with correct type/default/service/env
 // ---------------------------------------------------------------------------
 
@@ -162,7 +225,7 @@ describe("typed flag methods populate buffer", () => {
 });
 
 // ---------------------------------------------------------------------------
-// _flushFlags() sends correct payload to POST /api/v1/flags/bulk
+// _flushFlags() — peek/commit semantics
 // ---------------------------------------------------------------------------
 
 describe("_flushFlags()", () => {
@@ -185,6 +248,21 @@ describe("_flushFlags()", () => {
     expect(body.flags[1]).toMatchObject({ id: "theme", type: "STRING" });
   });
 
+  it("commits items after a successful POST", async () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    expect(buffer.pendingCount).toBe(1);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (client as any)._flushFlags();
+
+    expect(buffer.pendingCount).toBe(0);
+  });
+
   it("does not make HTTP call when buffer is empty", async () => {
     const client = makeFlagsClient();
 
@@ -194,16 +272,34 @@ describe("_flushFlags()", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("silently catches flush failures", async () => {
+  it("rejects on network failure and preserves buffer", async () => {
     const client = makeFlagsClient();
-    client.booleanFlag("flag-a", false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
 
+    client.booleanFlag("flag-a", false);
     mockFetch.mockRejectedValueOnce(new Error("network error"));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect((client as any)._flushFlags()).resolves.toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    await expect((client as any)._flushFlags()).rejects.toThrow("network error");
+
+    // Buffer is intact — item was not committed
+    expect(buffer.pendingCount).toBe(1);
+  });
+
+  it("rejects on non-OK response and preserves buffer", async () => {
+    const client = makeFlagsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    client.booleanFlag("flag-a", false);
+    mockFetch.mockResolvedValueOnce(new Response("Server Error", { status: 500 }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((client as any)._flushFlags()).rejects.toThrow("HTTP 500");
+
+    // Buffer is intact — item was not committed
+    expect(buffer.pendingCount).toBe(1);
   });
 });
 
@@ -241,6 +337,274 @@ describe("initialize() flushes flags before fetching definitions", () => {
 });
 
 // ---------------------------------------------------------------------------
+// initialize() retry on failure
+// ---------------------------------------------------------------------------
+
+describe("initialize() retry on failure", () => {
+  it("stays uninitialized after 500, retries after backoff, initializes on 200", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    client.booleanFlag("flag-a", false);
+
+    let bulkCallCount = 0;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockFetch.mockImplementation(async (req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v1/flags/bulk") {
+        bulkCallCount++;
+        if (bulkCallCount === 1) return new Response("Server Error", { status: 500 });
+        return jsonResponse({ registered: 1 });
+      }
+      if (url.pathname === "/api/v1/flags") {
+        return jsonResponse({ data: [] });
+      }
+      return jsonResponse({});
+    });
+
+    await client.initialize();
+
+    // After 500: not initialized, buffer still has the pending item
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._flagBuffer.pendingCount).toBe(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("initialization failed"));
+
+    // Advance past the 1s backoff → retry fires and succeeds
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._flagBuffer.pendingCount).toBe(0);
+
+    await client.disconnect();
+    warnSpy.mockRestore();
+  });
+
+  it("_initialized stays false until retry succeeds", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+
+    await client.initialize();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it("backoff doubles on each successive failure", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    client.booleanFlag("flag-a", false);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // All bulk-register calls fail; GET /api/v1/flags succeeds
+    mockFetch.mockImplementation(async (req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v1/flags/bulk") return new Response("err", { status: 500 });
+      return jsonResponse({ data: [] });
+    });
+
+    await client.initialize(); // fails, backoff = 1s → next = 2s
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initBackoffMs).toBe(2_000);
+
+    // Advance 1s → retry fires, fails again, backoff = 2s → next = 4s
+    await vi.advanceTimersByTimeAsync(1_000);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initBackoffMs).toBe(4_000);
+
+    // Cleanup without waiting for more retries
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
+  });
+
+  it("ws listeners are registered exactly once across retries", async () => {
+    const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
+    const client = new FlagsClient("sk_test", () => mockWs as never, 30000);
+    (client as Record<string, unknown>)["_parent"] = {
+      _service: null,
+      _environment: "staging",
+      _metrics: null,
+    };
+    client.booleanFlag("flag-a", false);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let bulkCallCount = 0;
+    mockFetch.mockImplementation(async (req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v1/flags/bulk") {
+        bulkCallCount++;
+        if (bulkCallCount === 1) return new Response("Error", { status: 500 });
+        return jsonResponse({ registered: 1 });
+      }
+      return jsonResponse({ data: [] });
+    });
+
+    // First attempt fails
+    await client.initialize();
+    // Advance past backoff — retry succeeds
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // Each event should be registered exactly once
+    expect(mockWs.on).toHaveBeenCalledTimes(3);
+    expect(mockWs.on).toHaveBeenCalledWith("flag_changed", expect.any(Function));
+    expect(mockWs.on).toHaveBeenCalledWith("flag_deleted", expect.any(Function));
+    expect(mockWs.on).toHaveBeenCalledWith("flags_changed", expect.any(Function));
+
+    await client.disconnect();
+    warnSpy.mockRestore();
+  });
+
+  it("cancels existing retry timer on re-call while retry is pending", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // First initialize() fails → schedules retry
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client.initialize();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstTimer = (client as any)._initRetryTimer;
+    expect(firstTimer).not.toBeNull();
+
+    // Second initialize() also fails while retry is still pending → cancels first timer
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client.initialize();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const secondTimer = (client as any)._initRetryTimer;
+    expect(secondTimer).not.toBeNull();
+    expect(secondTimer).not.toBe(firstTimer);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
+  });
+
+  it("_close() cancels the pending retry timer", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client.initialize();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initRetryTimer).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initRetryTimer).toBeNull();
+
+    warnSpy.mockRestore();
+  });
+
+  it("disconnect() cancels the pending retry timer", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client.initialize();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initRetryTimer).not.toBeNull();
+    await client.disconnect();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initRetryTimer).toBeNull();
+
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// _connectInternal() retry on failure
+// ---------------------------------------------------------------------------
+
+describe("_connectInternal() retry on failure", () => {
+  it("cancels existing retry timer before scheduling a new one", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // First _connectInternal call fails → schedules retry at 1s
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client._connectInternal("staging");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstTimer = (client as any)._initRetryTimer;
+    expect(firstTimer).not.toBeNull();
+
+    // Second _connectInternal call also fails → cancels first timer, schedules new one
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await client._connectInternal("staging");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const secondTimer = (client as any)._initRetryTimer;
+    expect(secondTimer).not.toBeNull();
+    expect(secondTimer).not.toBe(firstTimer);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any)._close();
+    warnSpy.mockRestore();
+  });
+
+  it("periodic flush via _connectInternal warns on failure and retains buffer", async () => {
+    const client = makeFlagsClient("svc", "prod");
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client._connectInternal("staging");
+
+    client.booleanFlag("timer-flag", true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    expect(buffer.pendingCount).toBe(1);
+
+    await client.disconnect();
+    warnSpy.mockRestore();
+  });
+
+  it("stays uninitialized after 500, retries after backoff", async () => {
+    const client = makeFlagsClient();
+    client.booleanFlag("flag-a", false);
+
+    let bulkCallCount = 0;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockFetch.mockImplementation(async (req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v1/flags/bulk") {
+        bulkCallCount++;
+        if (bulkCallCount === 1) return new Response("Server Error", { status: 500 });
+        return jsonResponse({ registered: 1 });
+      }
+      if (url.pathname === "/api/v1/flags") return jsonResponse({ data: [] });
+      return jsonResponse({});
+    });
+
+    await client._connectInternal("staging");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._flagBuffer.pendingCount).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._initialized).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._flagBuffer.pendingCount).toBe(0);
+
+    await client.disconnect();
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Threshold flush at 50 items
 // ---------------------------------------------------------------------------
 
@@ -260,15 +624,18 @@ describe("threshold flush at 50 items", () => {
     const buffer = (client as any)._flagBuffer;
     expect(buffer.pendingCount).toBe(49);
 
-    // Adding the 50th flag triggers flush (drain() runs synchronously before first await)
+    // Adding the 50th flag triggers a fire-and-forget flush
     client.booleanFlag("flag-49", false);
 
-    // drain() inside _flushFlags is synchronous — buffer is empty immediately
+    // peek() does not drain — buffer still has items until commit() runs async
+    expect(buffer.pendingCount).toBe(50);
+
+    // Drain the full openapi-fetch microtask chain (POST → fetchWithTimeout → commit)
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
     expect(buffer.pendingCount).toBe(0);
-
-    // Let the async HTTP call resolve
-    await Promise.resolve();
-
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -287,8 +654,12 @@ describe("threshold flush at 50 items", () => {
 
     client.stringFlag("str-flag-49", "default");
 
+    // Buffer still has items — commit is async
+    expect(buffer.pendingCount).toBe(50);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
     expect(buffer.pendingCount).toBe(0);
-    await Promise.resolve();
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -307,8 +678,11 @@ describe("threshold flush at 50 items", () => {
 
     client.numberFlag("num-flag-49", 0);
 
+    expect(buffer.pendingCount).toBe(50);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
     expect(buffer.pendingCount).toBe(0);
-    await Promise.resolve();
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -327,10 +701,73 @@ describe("threshold flush at 50 items", () => {
 
     client.jsonFlag("json-flag-49", {});
 
-    // drain() is synchronous
+    // peek() does not drain synchronously
+    expect(buffer.pendingCount).toBe(50);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
     expect(buffer.pendingCount).toBe(0);
-    await Promise.resolve();
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains buffer on threshold-flush failure (booleanFlag)", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValue(new Response("err", { status: 500 }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    for (let i = 0; i < 50; i++) client.booleanFlag(`flag-${i}`, false);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(buffer.pendingCount).toBe(50);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    warnSpy.mockRestore();
+  });
+
+  it("retains buffer on threshold-flush failure (stringFlag)", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValue(new Response("err", { status: 500 }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 50; i++) client.stringFlag(`s-${i}`, "x");
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    warnSpy.mockRestore();
+  });
+
+  it("retains buffer on threshold-flush failure (numberFlag)", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValue(new Response("err", { status: 500 }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 50; i++) client.numberFlag(`n-${i}`, 0);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    warnSpy.mockRestore();
+  });
+
+  it("retains buffer on threshold-flush failure (jsonFlag)", async () => {
+    const client = makeFlagsClient();
+    mockFetch.mockResolvedValue(new Response("err", { status: 500 }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 50; i++) client.jsonFlag(`j-${i}`, {});
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    warnSpy.mockRestore();
   });
 });
 
@@ -409,5 +846,26 @@ describe("periodic flush timer", () => {
 
     // Cleanup
     await client.disconnect();
+  });
+
+  it("periodic flush warns on 500 but retains buffer", async () => {
+    const client = makeFlagsClient("svc", "prod");
+
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.initialize();
+
+    client.booleanFlag("timer-flag", true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = (client as any)._flagBuffer;
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockFetch.mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to bulk-register flags"));
+    expect(buffer.pendingCount).toBe(1); // item retained for next retry
+
+    await client.disconnect();
+    warnSpy.mockRestore();
   });
 });

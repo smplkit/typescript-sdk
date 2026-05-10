@@ -180,6 +180,17 @@ export class FlagRegistrationBuffer {
     } as components["schemas"]["FlagBulkItem"]);
   }
 
+  /** Non-destructive snapshot — items remain in the buffer until committed. */
+  peek(): Array<components["schemas"]["FlagBulkItem"]> {
+    return [...this._pending];
+  }
+
+  /** Remove successfully-sent items by id. Called after a successful POST. */
+  commit(ids: Set<string>): void {
+    this._pending = this._pending.filter((item) => !ids.has(item.id));
+  }
+
+  /** Destructively clear the buffer. For teardown / test use only. */
   drain(): Array<components["schemas"]["FlagBulkItem"]> {
     const batch = this._pending;
     this._pending = [];
@@ -366,12 +377,15 @@ export class ManagementFlagsClient {
 
   /** Send any pending flag declarations to the server. */
   async flush(): Promise<void> {
-    const batch = this._buffer.drain();
+    const batch = this._buffer.peek();
     if (batch.length === 0) return;
     try {
-      await this._http.POST("/api/v1/flags/bulk", { body: { flags: batch } });
+      const result = await this._http.POST("/api/v1/flags/bulk", { body: { flags: batch } });
+      if (result.response.ok) {
+        this._buffer.commit(new Set(batch.map((b) => b.id)));
+      }
     } catch {
-      // Re-queue on failure? For now: same behavior as Python — log and move on.
+      // Leave items in buffer for next retry attempt
     }
   }
 

@@ -259,6 +259,17 @@ class FlagRegistrationBuffer {
     }
   }
 
+  /** Non-destructive snapshot — items remain in the buffer until committed. */
+  peek(): Array<components["schemas"]["FlagBulkItem"]> {
+    return [...this._pending];
+  }
+
+  /** Remove successfully-sent items by id. Called after a successful POST. */
+  commit(ids: Set<string>): void {
+    this._pending = this._pending.filter((item) => !ids.has(item.id));
+  }
+
+  /** Destructively clear the buffer. For teardown / test use only. */
   drain(): Array<components["schemas"]["FlagBulkItem"]> {
     const batch = this._pending;
     this._pending = [];
@@ -302,6 +313,11 @@ export class FlagsClient {
   private _flagBuffer = new FlagRegistrationBuffer();
   private _flagFlushTimer: ReturnType<typeof setInterval> | null = null;
   private _handles: Record<string, Flag> = {};
+
+  // Backoff-retry state for initialize() / _connectInternal()
+  private _initBackoffMs = 1_000;
+  private _initRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private _wsSubscribed = false;
   private _globalListeners: Array<(event: FlagChangeEvent) => void> = [];
   private _keyListeners: Map<string, Array<(event: FlagChangeEvent) => void>> = new Map();
 
@@ -399,7 +415,11 @@ export class FlagsClient {
       this._parent?._environment ?? null,
     );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
-      void this._flushFlags();
+      void this._flushFlags().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+      });
     }
     return handle;
   }
@@ -426,7 +446,11 @@ export class FlagsClient {
       this._parent?._environment ?? null,
     );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
-      void this._flushFlags();
+      void this._flushFlags().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+      });
     }
     return handle;
   }
@@ -453,7 +477,11 @@ export class FlagsClient {
       this._parent?._environment ?? null,
     );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
-      void this._flushFlags();
+      void this._flushFlags().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+      });
     }
     return handle;
   }
@@ -480,7 +508,11 @@ export class FlagsClient {
       this._parent?._environment ?? null,
     );
     if (this._flagBuffer.pendingCount >= FLAG_REGISTRATION_FLUSH_SIZE) {
-      void this._flushFlags();
+      void this._flushFlags().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+      });
     }
     return handle;
   }
@@ -520,26 +552,56 @@ export class FlagsClient {
     if (this._initialized) return;
     debug("lifecycle", "FlagsClient.initialize() called");
     this._environment = this._parent?._environment ?? null;
-    await this._flushFlags();
-    await this._fetchAllFlags();
+
+    try {
+      await this._flushFlags();
+      await this._fetchAllFlags();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[smplkit] FlagsClient initialization failed (will retry): ${msg}`);
+      // Cancel any previous retry before scheduling a new one
+      if (this._initRetryTimer !== null) {
+        clearTimeout(this._initRetryTimer);
+        this._initRetryTimer = null;
+      }
+      const delay = this._initBackoffMs;
+      this._initBackoffMs = Math.min(this._initBackoffMs * 2, 60_000);
+      this._initRetryTimer = setTimeout(() => {
+        this._initRetryTimer = null;
+        void this.initialize();
+      }, delay);
+      if (typeof this._initRetryTimer === "object" && "unref" in this._initRetryTimer) {
+        (this._initRetryTimer as NodeJS.Timeout).unref();
+      }
+      return; // evaluations fall back to handle defaults during retry window
+    }
+
+    this._initBackoffMs = 1_000;
     this._initialized = true;
     this._cache.clear();
 
-    // Register on the shared WebSocket
-    this._wsManager = this._ensureWs();
-    this._wsManager.on("flag_changed", this._handleFlagChanged);
-    this._wsManager.on("flag_deleted", this._handleFlagDeleted);
-    this._wsManager.on("flags_changed", this._handleFlagsChanged);
+    // One-shot WS subscription — do not double-register across retries
+    if (!this._wsSubscribed) {
+      this._wsManager = this._ensureWs();
+      this._wsManager.on("flag_changed", this._handleFlagChanged);
+      this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+      this._wsManager.on("flags_changed", this._handleFlagsChanged);
+      this._wsSubscribed = true;
+    }
 
-    // Start periodic flush timer. Unref so the timer alone doesn't keep the
-    // Node.js event loop alive — customers who forget `client.close()` (or
-    // who exit a script via `process.on('SIGINT')`) shouldn't see the
-    // process hang.
-    this._flagFlushTimer = setInterval(() => {
-      void this._flushFlags();
-    }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
-    if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
-      (this._flagFlushTimer as NodeJS.Timeout).unref();
+    // Start periodic flush timer only once. Unref so the timer alone doesn't
+    // keep the Node.js event loop alive.
+    if (this._flagFlushTimer === null) {
+      this._flagFlushTimer = setInterval(() => {
+        void this._flushFlags().catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+          debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        });
+      }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
+      if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
+        (this._flagFlushTimer as NodeJS.Timeout).unref();
+      }
     }
   }
 
@@ -550,6 +612,10 @@ export class FlagsClient {
    * @internal
    */
   _close(): void {
+    if (this._initRetryTimer !== null) {
+      clearTimeout(this._initRetryTimer);
+      this._initRetryTimer = null;
+    }
     if (this._flagFlushTimer !== null) {
       clearInterval(this._flagFlushTimer);
       this._flagFlushTimer = null;
@@ -562,11 +628,17 @@ export class FlagsClient {
     }
     this._cache.clear();
     this._initialized = false;
+    this._wsSubscribed = false;
+    this._initBackoffMs = 1_000;
     this._environment = null;
   }
 
   /** Disconnect the flags runtime and release resources. */
   async disconnect(): Promise<void> {
+    if (this._initRetryTimer !== null) {
+      clearTimeout(this._initRetryTimer);
+      this._initRetryTimer = null;
+    }
     if (this._wsManager !== null) {
       this._wsManager.off("flag_changed", this._handleFlagChanged);
       this._wsManager.off("flag_deleted", this._handleFlagDeleted);
@@ -583,6 +655,8 @@ export class FlagsClient {
     this._flagStore = {};
     this._cache.clear();
     this._initialized = false;
+    this._wsSubscribed = false;
+    this._initBackoffMs = 1_000;
     this._environment = null;
   }
 
@@ -744,23 +818,52 @@ export class FlagsClient {
   /** @internal — called by SmplClient constructor / lazy init. */
   async _connectInternal(environment: string): Promise<void> {
     this._environment = environment;
-    await this._flushFlags();
-    await this._fetchAllFlags();
+
+    try {
+      await this._flushFlags();
+      await this._fetchAllFlags();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[smplkit] FlagsClient initialization failed (will retry): ${msg}`);
+      if (this._initRetryTimer !== null) {
+        clearTimeout(this._initRetryTimer);
+        this._initRetryTimer = null;
+      }
+      const delay = this._initBackoffMs;
+      this._initBackoffMs = Math.min(this._initBackoffMs * 2, 60_000);
+      this._initRetryTimer = setTimeout(() => {
+        this._initRetryTimer = null;
+        void this._connectInternal(environment);
+      }, delay);
+      if (typeof this._initRetryTimer === "object" && "unref" in this._initRetryTimer) {
+        (this._initRetryTimer as NodeJS.Timeout).unref();
+      }
+      return;
+    }
+
+    this._initBackoffMs = 1_000;
     this._initialized = true;
     this._cache.clear();
 
-    // Register on the shared WebSocket
-    this._wsManager = this._ensureWs();
-    this._wsManager.on("flag_changed", this._handleFlagChanged);
-    this._wsManager.on("flag_deleted", this._handleFlagDeleted);
-    this._wsManager.on("flags_changed", this._handleFlagsChanged);
+    if (!this._wsSubscribed) {
+      this._wsManager = this._ensureWs();
+      this._wsManager.on("flag_changed", this._handleFlagChanged);
+      this._wsManager.on("flag_deleted", this._handleFlagDeleted);
+      this._wsManager.on("flags_changed", this._handleFlagsChanged);
+      this._wsSubscribed = true;
+    }
 
-    // Start periodic flush timer (unref so it doesn't pin the event loop).
-    this._flagFlushTimer = setInterval(() => {
-      void this._flushFlags();
-    }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
-    if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
-      (this._flagFlushTimer as NodeJS.Timeout).unref();
+    if (this._flagFlushTimer === null) {
+      this._flagFlushTimer = setInterval(() => {
+        void this._flushFlags().catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
+          debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        });
+      }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
+      if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
+        (this._flagFlushTimer as NodeJS.Timeout).unref();
+      }
     }
   }
 
@@ -945,21 +1048,16 @@ export class FlagsClient {
   // ------------------------------------------------------------------
 
   private async _flushFlags(): Promise<void> {
-    const batch = this._flagBuffer.drain();
+    const batch = this._flagBuffer.peek();
     if (batch.length === 0) return;
     debug("registration", `flushing ${batch.length} flag(s) to bulk-register endpoint`);
-    try {
-      await this._http.POST("/api/v1/flags/bulk", {
-        body: { flags: batch },
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-      debug(
-        "registration",
-        `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
-      );
+    const result = await this._http.POST("/api/v1/flags/bulk", {
+      body: { flags: batch },
+    });
+    if (!result.response.ok) {
+      throw new Error(`HTTP ${result.response.status}`);
     }
+    this._flagBuffer.commit(new Set(batch.map((b) => b.id)));
   }
 
   // ------------------------------------------------------------------

@@ -201,6 +201,50 @@ describe("FlagRegistrationBuffer", () => {
   });
 });
 
+describe("FlagRegistrationBuffer — peek/commit", () => {
+  it("peek() returns a snapshot without removing items", () => {
+    const buf = new FlagRegistrationBuffer();
+    buf.add(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: false }));
+    buf.add(new FlagDeclaration({ id: "f2", type: "STRING", default: "x" }));
+
+    const batch = buf.peek();
+    expect(batch).toHaveLength(2);
+    expect(batch[0].id).toBe("f1");
+    expect(batch[1].id).toBe("f2");
+    // Buffer is NOT cleared
+    expect(buf.pendingCount).toBe(2);
+  });
+
+  it("commit() removes committed items and retains the rest", () => {
+    const buf = new FlagRegistrationBuffer();
+    buf.add(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: false }));
+    buf.add(new FlagDeclaration({ id: "f2", type: "STRING", default: "x" }));
+    buf.add(new FlagDeclaration({ id: "f3", type: "NUMERIC", default: 0 }));
+
+    buf.commit(new Set(["f1", "f2"]));
+    expect(buf.pendingCount).toBe(1);
+    const remaining = buf.drain();
+    expect(remaining[0].id).toBe("f3");
+  });
+
+  it("commit() does not re-allow a deduped id", () => {
+    const buf = new FlagRegistrationBuffer();
+    buf.add(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: false }));
+    const batch = buf.peek();
+    buf.commit(new Set(batch.map((b) => b.id)));
+
+    // Same id — _seen still has it, so re-add is ignored
+    buf.add(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: true }));
+    expect(buf.pendingCount).toBe(0);
+  });
+
+  it("peek() on an empty buffer returns empty array", () => {
+    const buf = new FlagRegistrationBuffer();
+    expect(buf.peek()).toEqual([]);
+    expect(buf.pendingCount).toBe(0);
+  });
+});
+
 // ===========================================================================
 // ManagementFlagsClient — typed factories
 // ===========================================================================
@@ -596,16 +640,17 @@ describe("ManagementFlagsClient.register()", () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(client.flags.pendingCount).toBe(49);
 
-    // The 50th registration triggers an auto-flush. drain() runs synchronously
-    // before the first await inside flush(), so pendingCount becomes 0 immediately.
+    // The 50th registration triggers a fire-and-forget flush. peek() does not
+    // drain synchronously, so pendingCount is still 50 immediately after register().
     await client.flags.register(
       new FlagDeclaration({ id: "f49", type: "BOOLEAN", default: false }),
     );
-    expect(client.flags.pendingCount).toBe(0);
+    expect(client.flags.pendingCount).toBe(50);
 
-    // Let the async POST settle.
+    // Let the async POST + commit() settle.
     await new Promise((r) => setTimeout(r, 0));
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(client.flags.pendingCount).toBe(0);
   });
 });
 
@@ -640,11 +685,22 @@ describe("ManagementFlagsClient.flush()", () => {
     expect(client.flags.pendingCount).toBe(0);
   });
 
-  it("silently swallows network errors", async () => {
+  it("silently swallows network errors and retains items in buffer", async () => {
     const client = makeClient();
     mockFetch.mockRejectedValueOnce(new TypeError("network"));
     await client.flags.register(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: false }));
     await expect(client.flags.flush()).resolves.toBeUndefined();
+    // Item is retained for next retry attempt
+    expect(client.flags.pendingCount).toBe(1);
+  });
+
+  it("retains items in buffer on non-OK response", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(new Response("Server Error", { status: 500 }));
+    await client.flags.register(new FlagDeclaration({ id: "f1", type: "BOOLEAN", default: false }));
+    await expect(client.flags.flush()).resolves.toBeUndefined();
+    // Item is retained — commit() was not called because response was not ok
+    expect(client.flags.pendingCount).toBe(1);
   });
 });
 
