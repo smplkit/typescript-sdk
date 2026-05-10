@@ -670,14 +670,29 @@ export interface components {
             error?: string | null;
         };
         /**
+         * UsageAttributes
+         * @description Attribute set for a usage resource.
+         *
+         *     The shape mirrors the ``/api/v1/usage`` contract used by config, flags,
+         *     and logging — three fields, no per-product extras. Per-period limits
+         *     live in the product catalog (``GET /api/v1/products``); the usage
+         *     endpoint reports counts only.
+         */
+        UsageAttributes: {
+            /** Limit Key */
+            limit_key: string;
+            /** Period */
+            period: string;
+            /** Value */
+            value: number;
+        };
+        /**
          * UsageResource
          * @example {
          *       "attributes": {
-         *         "current": 42,
-         *         "limit": 1000,
          *         "limit_key": "audit.customer_events_per_month",
          *         "period": "current",
-         *         "year_month": "2026-05"
+         *         "value": 42
          *       },
          *       "id": "audit.customer_events_per_month",
          *       "type": "usage"
@@ -691,10 +706,7 @@ export interface components {
              * @default usage
              */
             type: string;
-            /** Attributes */
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["UsageAttributes"];
         };
         /** UsageResponse */
         UsageResponse: {
