@@ -252,10 +252,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resource_types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Resource Types
+         * @description List the distinct ``resource_type`` slugs seen in the account.
+         *
+         *     Each row's ``id`` is the slug itself, mirroring the smplkit
+         *     convention of using customer-provided identifiers as the
+         *     public-facing resource id (ADR-014).
+         */
+        get: operations["list_resource_types"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Actions
+         * @description List the distinct ``action`` slugs seen in the account.
+         *
+         *     Without ``filter[resource_type]``, returns one row per distinct
+         *     action — the same action may have been recorded with multiple
+         *     resource types and the unfiltered dropdown shows it once.
+         *
+         *     With ``filter[resource_type]``, returns the actions seen with
+         *     that specific resource type, powering the Activity tab's
+         *     cascading filter behavior.
+         */
+        get: operations["list_actions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/functions/wipe/actions/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Wipe
+         * @description Delete every audit-database row scoped to the authenticated account.
+         *
+         *     Returns the per-table row counts that were deleted along with the
+         *     completion timestamp. The action is atomic within the audit
+         *     database — either every account-scoped row is gone, or none is.
+         *     The body is required to be ``{}``; no parameters are accepted.
+         */
+        post: operations["execute_wipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionAttributes */
+        ActionAttributes: {
+            /**
+             * Action
+             * @description The action slug. Same as the JSON:API ``id``.
+             */
+            action: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description First sighting of this action for the account. When the request includes ``filter[resource_type]``, this is the first sighting of the (action, resource_type) triple rather than the action overall.
+             */
+            created_at: string;
+        };
+        /** ActionListLinks */
+        ActionListLinks: {
+            /** Next */
+            next?: string | null;
+        };
+        /** ActionListMeta */
+        ActionListMeta: {
+            /** Page Size */
+            page_size: number;
+        };
+        /** ActionListResponse */
+        ActionListResponse: {
+            /** Data */
+            data: components["schemas"]["ActionResource"][];
+            meta: components["schemas"]["ActionListMeta"];
+            links?: components["schemas"]["ActionListLinks"] | null;
+        };
+        /**
+         * ActionResource
+         * @example {
+         *       "attributes": {
+         *         "action": "smpl.flag.created",
+         *         "created_at": "2026-04-12T15:23:01Z"
+         *       },
+         *       "id": "smpl.flag.created",
+         *       "type": "action"
+         *     }
+         */
+        ActionResource: {
+            /**
+             * Id
+             * @description The action slug.
+             */
+            id: string;
+            /**
+             * Type
+             * @default action
+             */
+            type: string;
+            attributes: components["schemas"]["ActionAttributes"];
+        };
         /**
          * Event
          * @description Public-facing event resource.
@@ -611,6 +743,61 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** ResourceTypeAttributes */
+        ResourceTypeAttributes: {
+            /**
+             * Resource Type
+             * @description The resource_type slug. Same as the JSON:API ``id``.
+             */
+            resource_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description First sighting of this resource_type for the account.
+             */
+            created_at: string;
+        };
+        /** ResourceTypeListLinks */
+        ResourceTypeListLinks: {
+            /** Next */
+            next?: string | null;
+        };
+        /** ResourceTypeListMeta */
+        ResourceTypeListMeta: {
+            /** Page Size */
+            page_size: number;
+        };
+        /** ResourceTypeListResponse */
+        ResourceTypeListResponse: {
+            /** Data */
+            data: components["schemas"]["ResourceTypeResource"][];
+            meta: components["schemas"]["ResourceTypeListMeta"];
+            links?: components["schemas"]["ResourceTypeListLinks"] | null;
+        };
+        /**
+         * ResourceTypeResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-12T15:23:01Z",
+         *         "resource_type": "smpl.flag"
+         *       },
+         *       "id": "smpl.flag",
+         *       "type": "resource_type"
+         *     }
+         */
+        ResourceTypeResource: {
+            /**
+             * Id
+             * @description The resource_type slug.
+             */
+            id: string;
+            /**
+             * Type
+             * @default resource_type
+             */
+            type: string;
+            attributes: components["schemas"]["ResourceTypeAttributes"];
+        };
         /** RetryFailedDeliveriesSummary */
         RetryFailedDeliveriesSummary: {
             /** Attempted */
@@ -712,6 +899,54 @@ export interface components {
         UsageResponse: {
             /** Data */
             data: components["schemas"]["UsageResource"][];
+        };
+        /**
+         * WipeRequest
+         * @description Empty body — the action requires no parameters.
+         */
+        WipeRequest: Record<string, never>;
+        /**
+         * WipeResponse
+         * @example {
+         *       "completed_at": "2026-05-08T19:31:24Z",
+         *       "tables": {
+         *         "action": 11,
+         *         "audit_event": 1432,
+         *         "audit_event_quota": 5,
+         *         "forwarder": 2,
+         *         "forwarder_delivery": 312,
+         *         "resource_type": 4
+         *       },
+         *       "wiped": true
+         *     }
+         */
+        WipeResponse: {
+            /**
+             * Wiped
+             * @default true
+             */
+            wiped: boolean;
+            tables: components["schemas"]["WipeTablesSummary"];
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+        };
+        /** WipeTablesSummary */
+        WipeTablesSummary: {
+            /** Audit Event */
+            audit_event: number;
+            /** Audit Event Quota */
+            audit_event_quota: number;
+            /** Forwarder */
+            forwarder: number;
+            /** Forwarder Delivery */
+            forwarder_delivery: number;
+            /** Resource Type */
+            resource_type: number;
+            /** Action */
+            action: number;
         };
     };
     responses: never;
@@ -1039,6 +1274,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestForwarderResponse"];
+                };
+            };
+        };
+    };
+    list_resource_types: {
+        parameters: {
+            query?: {
+                "page[size]"?: number | null;
+                "page[after]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ResourceTypeListResponse"];
+                };
+            };
+        };
+    };
+    list_actions: {
+        parameters: {
+            query?: {
+                "filter[resource_type]"?: string | null;
+                "page[size]"?: number | null;
+                "page[after]"?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ActionListResponse"];
+                };
+            };
+        };
+    };
+    execute_wipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WipeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WipeResponse"];
                 };
             };
         };
