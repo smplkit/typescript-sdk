@@ -141,7 +141,7 @@ function _forwarderFromResource(resource: {
     id: resource.id,
     name: String(a.name ?? ""),
     slug: String(a.slug ?? ""),
-    forwarderType: String(a.forwarder_type ?? ""),
+    forwarderType: a.forwarder_type as Forwarder["forwarderType"],
     enabled: Boolean(a.enabled ?? true),
     filter: (a.filter as Record<string, unknown> | null) ?? null,
     transform: (a.transform as string | null) ?? null,

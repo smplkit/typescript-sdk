@@ -69,6 +69,38 @@ export interface HttpHeader {
   value: string;
 }
 
+/**
+ * Supported SIEM forwarder destination types.
+ *
+ * ADR-047 §2.12. Mirrors the OpenAPI ``ForwarderType`` enum so callers
+ * see autocomplete and the compiler rejects typos at build time. The
+ * runtime values are a subset of the published constant
+ * {@link FORWARDER_TYPES} for callers that need to iterate.
+ */
+export type ForwarderType =
+  | "http"
+  | "datadog"
+  | "splunk_hec"
+  | "sumo_logic"
+  | "new_relic"
+  | "honeycomb"
+  | "elastic";
+
+/**
+ * Runtime tuple of every {@link ForwarderType} value, in the same order
+ * as the type union. Useful for `<select>` options or membership checks
+ * where a static type alone won't do.
+ */
+export const FORWARDER_TYPES: readonly ForwarderType[] = [
+  "http",
+  "datadog",
+  "splunk_hec",
+  "sumo_logic",
+  "new_relic",
+  "honeycomb",
+  "elastic",
+] as const;
+
 export interface ForwarderHttp {
   method: string;
   url: string;
@@ -85,7 +117,7 @@ export interface Forwarder {
   id: string;
   name: string;
   slug: string;
-  forwarderType: string;
+  forwarderType: ForwarderType;
   enabled: boolean;
   filter: Record<string, unknown> | null;
   transform: string | null;
@@ -100,7 +132,7 @@ export interface Forwarder {
 
 export interface CreateForwarderInput {
   name: string;
-  forwarderType: string;
+  forwarderType: ForwarderType;
   http: ForwarderHttp;
   enabled?: boolean;
   filter?: Record<string, unknown>;
@@ -114,7 +146,7 @@ export interface UpdateForwarderInput extends CreateForwarderInput {
 }
 
 export interface ListForwardersParams {
-  forwarderType?: string;
+  forwarderType?: ForwarderType;
   enabled?: boolean;
   pageSize?: number;
   pageAfter?: string;

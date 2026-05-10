@@ -3,6 +3,7 @@
  */
 
 export { AuditClient } from "./client.js";
+export { FORWARDER_TYPES } from "./types.js";
 export type {
   AuditEvent,
   CreateEventInput,
@@ -11,6 +12,7 @@ export type {
   ForwarderDelivery,
   ForwarderDeliveryStatus,
   ForwarderHttp,
+  ForwarderType,
   HttpHeader,
   ListDeliveriesPage,
   ListDeliveriesParams,
