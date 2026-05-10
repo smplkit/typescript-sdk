@@ -418,7 +418,10 @@ export class FlagsClient {
       void this._flushFlags().catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        debug(
+          "registration",
+          `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+        );
       });
     }
     return handle;
@@ -449,7 +452,10 @@ export class FlagsClient {
       void this._flushFlags().catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        debug(
+          "registration",
+          `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+        );
       });
     }
     return handle;
@@ -480,7 +486,10 @@ export class FlagsClient {
       void this._flushFlags().catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        debug(
+          "registration",
+          `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+        );
       });
     }
     return handle;
@@ -511,7 +520,10 @@ export class FlagsClient {
       void this._flushFlags().catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-        debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+        debug(
+          "registration",
+          `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+        );
       });
     }
     return handle;
@@ -596,7 +608,10 @@ export class FlagsClient {
         void this._flushFlags().catch((err) => {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-          debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+          debug(
+            "registration",
+            `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+          );
         });
       }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
       if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
@@ -858,7 +873,10 @@ export class FlagsClient {
         void this._flushFlags().catch((err) => {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[smplkit] Failed to bulk-register flags: ${msg}`);
-          debug("registration", `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`);
+          debug(
+            "registration",
+            `flag bulk-register error: ${err instanceof Error ? (err.stack ?? msg) : msg}`,
+          );
         });
       }, FLAG_REGISTRATION_FLUSH_INTERVAL_MS);
       if (typeof this._flagFlushTimer === "object" && "unref" in this._flagFlushTimer) {
