@@ -23,7 +23,7 @@ function _forwarderResource(name = "Datadog production") {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, ""),
-      forwarder_type: "datadog",
+      forwarder_type: "DATADOG",
       enabled: true,
       filter: null,
       transform: null,
@@ -43,7 +43,7 @@ function _forwarderResource(name = "Datadog production") {
   };
 }
 
-function _deliveryResource(status = "succeeded") {
+function _deliveryResource(status = "SUCCEEDED") {
   return {
     id: DELIVERY_ID,
     type: "forwarder_delivery",
@@ -108,7 +108,7 @@ describe("AuditClient.forwarders", () => {
 
     const fwd = await c.forwarders.create({
       name: "Datadog production",
-      forwarderType: "datadog",
+      forwarderType: "DATADOG",
       http: _httpInput,
       filter: { "==": [{ var: "action" }, "user.created"] },
       transform: "$",
@@ -124,7 +124,7 @@ describe("AuditClient.forwarders", () => {
   test("create throws on non-2xx", async () => {
     const c = _newClient(async () => _jsonResponse({ errors: [{ status: "402" }] }, 402));
     await expect(
-      c.forwarders.create({ name: "x", forwarderType: "http", http: _httpInput }),
+      c.forwarders.create({ name: "x", forwarderType: "HTTP", http: _httpInput }),
     ).rejects.toThrow(/audit create forwarder failed/);
     await c._close();
   });
@@ -141,7 +141,7 @@ describe("AuditClient.forwarders", () => {
     let i = 0;
     const c = _newClient(async () => _jsonResponse(pages[i++]!));
     const first = await c.forwarders.list({
-      forwarderType: "datadog",
+      forwarderType: "DATADOG",
       enabled: true,
       pageSize: 1,
     });
@@ -183,7 +183,7 @@ describe("AuditClient.forwarders", () => {
     });
     const fwd = await c.forwarders.update(FWD_ID, {
       name: "Renamed",
-      forwarderType: "datadog",
+      forwarderType: "DATADOG",
       http: _httpInput,
       enabled: false,
       filter: { "==": [1, 1] },
@@ -198,7 +198,7 @@ describe("AuditClient.forwarders", () => {
   test("update throws on non-2xx", async () => {
     const c = _newClient(async () => _jsonResponse({}, 404));
     await expect(
-      c.forwarders.update(FWD_ID, { name: "x", forwarderType: "http", http: _httpInput }),
+      c.forwarders.update(FWD_ID, { name: "x", forwarderType: "HTTP", http: _httpInput }),
     ).rejects.toThrow(/audit update forwarder failed/);
     await c._close();
   });
@@ -229,27 +229,40 @@ describe("AuditClient.forwarders.deliveries", () => {
   test("list filters and paginates", async () => {
     const pages = [
       {
-        data: [_deliveryResource("succeeded")],
+        data: [_deliveryResource("SUCCEEDED")],
         meta: { page_size: 1 },
         links: {
           next: `/api/v1/forwarders/${FWD_ID}/deliveries?page[size]=1&page[after]=tok-2`,
         },
       },
-      { data: [_deliveryResource("failed")], meta: { page_size: 1 } },
+      { data: [_deliveryResource("FAILED")], meta: { page_size: 1 } },
     ];
     let i = 0;
     const c = _newClient(async () => _jsonResponse(pages[i++]!));
 
     const first = await c.forwarders.deliveries.list(FWD_ID, {
-      status: "succeeded",
+      status: "SUCCEEDED",
       createdAtRange: "[2020-01-01T00:00:00Z,*)",
       pageSize: 1,
     });
-    expect(first.deliveries[0]!.status).toBe("succeeded");
+    expect(first.deliveries[0]!.status).toBe("SUCCEEDED");
     expect(first.nextCursor).toBe("tok-2");
 
     const second = await c.forwarders.deliveries.list(FWD_ID, { pageAfter: first.nextCursor! });
     expect(second.nextCursor).toBeNull();
+    await c._close();
+  });
+
+  test("list passes filter[event_id] in query string", async () => {
+    const EVENT_ID = "33333333-4444-5555-6666-777777777777";
+    let capturedUrl = "";
+    const c = _newClient(async (req) => {
+      capturedUrl = req.url;
+      return _jsonResponse({ data: [_deliveryResource()], meta: { page_size: 20 } });
+    });
+    const page = await c.forwarders.deliveries.list(FWD_ID, { eventId: EVENT_ID });
+    expect(capturedUrl).toContain(`filter[event_id]=${EVENT_ID}`);
+    expect(page.deliveries).toHaveLength(1);
     await c._close();
   });
 
@@ -264,10 +277,10 @@ describe("AuditClient.forwarders.deliveries", () => {
   test("retry returns the new attempt row", async () => {
     const c = _newClient(async (req) => {
       expect(req.url).toContain("actions/retry");
-      return _jsonResponse({ data: _deliveryResource("succeeded") });
+      return _jsonResponse({ data: _deliveryResource("SUCCEEDED") });
     });
     const row: ForwarderDelivery = await c.forwarders.deliveries.actions.retry(FWD_ID, DELIVERY_ID);
-    expect(row.status).toBe("succeeded");
+    expect(row.status).toBe("SUCCEEDED");
     await c._close();
   });
 
@@ -432,7 +445,7 @@ describe("Forwarder._fromResource defaults", () => {
             // intentionally minimal
             name: "x",
             slug: "x",
-            forwarder_type: "http",
+            forwarder_type: "HTTP",
             enabled: false,
           },
         },

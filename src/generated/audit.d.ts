@@ -170,8 +170,8 @@ export interface paths {
          * @description List delivery rows for a forwarder.
          *
          *     Default sort is ``-created_at``. Cursor pagination via ``page[after]``.
-         *     Filter by status (``succeeded`` / ``failed`` / ``filtered_out`` /
-         *     ``skipped_do_not_forward``) or by a ``created_at`` range using the
+         *     Filter by status (``SUCCEEDED`` / ``FAILED`` / ``FILTERED_OUT`` /
+         *     ``SKIPPED_DO_NOT_FORWARD``, case-insensitive) or by a ``created_at`` range using the
          *     platform's interval notation (``[2026-01-01T00:00:00Z,*)``). Reads do
          *     not require the entitlement — a downgraded account can still inspect
          *     historical deliveries from when the forwarder was active.
@@ -573,7 +573,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "succeeded" | "failed" | "filtered_out" | "skipped_do_not_forward";
+            status: "SUCCEEDED" | "FAILED" | "FILTERED_OUT" | "SKIPPED_DO_NOT_FORWARD";
             /** Request */
             request?: {
                 [key: string]: unknown;
@@ -618,7 +618,7 @@ export interface components {
          *         },
          *         "response_body": "",
          *         "response_status": 202,
-         *         "status": "succeeded"
+         *         "status": "SUCCEEDED"
          *       },
          *       "id": "22222222-3333-4444-5555-666666666666",
          *       "type": "forwarder_delivery"
@@ -699,7 +699,7 @@ export interface components {
          *             "user.created"
          *           ]
          *         },
-         *         "forwarder_type": "datadog",
+         *         "forwarder_type": "DATADOG",
          *         "http": {
          *           "headers": [
          *             {
@@ -745,12 +745,15 @@ export interface components {
          *     prior ``str`` field — no migration of stored ``forwarder.type``
          *     values needed.
          *
+         *     Values are SCREAMING_SNAKE_CASE per ADR-014. The Forwarder schema
+         *     accepts any casing on input via _normalize_forwarder_type.
+         *
          *     Adding a new destination here requires a corresponding implementation
          *     in ``app.services.forwarding`` and a regeneration of the OpenAPI
          *     spec so the SDK clients pick up the new variant.
          * @enum {string}
          */
-        ForwarderType: "http" | "datadog" | "splunk_hec" | "sumo_logic" | "new_relic" | "honeycomb" | "elastic";
+        ForwarderType: "HTTP" | "DATADOG" | "SPLUNK_HEC" | "SUMO_LOGIC" | "NEW_RELIC" | "HONEYCOMB" | "ELASTIC";
         /**
          * HttpHeader
          * @description A single header on a forwarder's HTTP destination.
@@ -1207,6 +1210,7 @@ export interface operations {
             query?: {
                 "filter[status]"?: string | null;
                 "filter[created_at]"?: string | null;
+                "filter[event_id]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
             };
