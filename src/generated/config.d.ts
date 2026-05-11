@@ -13,13 +13,19 @@ export interface paths {
         };
         /**
          * List Configs
-         * @description List all configurations for the authenticated account.
+         * @description List configs for this account.
+         *
+         *     Pass `filter[parent]=<parent_key>` to return only the direct children
+         *     of a specific config.
          */
         get: operations["list_configs"];
         put?: never;
         /**
          * Create Config
-         * @description Create a new configuration. The caller provides the id (key) in the request body.
+         * @description Create a config for this account.
+         *
+         *     The caller supplies the config's key as `data.id`. Keys are unique
+         *     within an account and immutable for the lifetime of the config.
          */
         post: operations["create_config"];
         delete?: never;
@@ -37,18 +43,22 @@ export interface paths {
         };
         /**
          * Get Config
-         * @description Return a configuration by its key.
+         * @description Retrieve a single config by its key.
          */
         get: operations["get_config"];
         /**
          * Update Config
-         * @description Replace a configuration entirely.
+         * @description Replace a config entirely. Every writable field is overwritten.
          */
         put: operations["update_config"];
         post?: never;
         /**
          * Delete Config
-         * @description Delete a configuration by its key.
+         * @description Delete a config by its key.
+         *
+         *     A config that is referenced as `parent` by another config cannot be
+         *     deleted; reparent or remove the parent reference on every child
+         *     first. The `common` config cannot be deleted.
          */
         delete: operations["delete_config"];
         options?: never;
@@ -65,7 +75,7 @@ export interface paths {
         };
         /**
          * List Config Usage
-         * @description Return current resource usage counts for the authenticated account.
+         * @description Report the current-period usage counters for this account.
          */
         get: operations["list_config_usage"];
         put?: never;
@@ -82,9 +92,16 @@ export interface components {
     schemas: {
         /**
          * Config
+         * @description A named bag of configuration items, optionally inheriting from another config.
+         *
+         *     Items are typed key/value pairs (`STRING`, `NUMBER`, `BOOLEAN`,
+         *     `JSON`). Configs may declare per-environment overrides for any item
+         *     declared on the config itself or anywhere in its inheritance chain;
+         *     resolving a config against an environment merges the chain top-down
+         *     and then applies the matching overrides.
          * @example {
-         *       "created_at": "2026-03-27T10:00:00Z",
-         *       "description": "Database configuration",
+         *       "created_at": "2026-05-11T12:00:00Z",
+         *       "description": "Database connection settings.",
          *       "environments": {
          *         "prod": {
          *           "values": {
@@ -99,75 +116,122 @@ export interface components {
          *       },
          *       "items": {
          *         "host": {
-         *           "description": "Primary database hostname",
+         *           "description": "Primary database hostname.",
          *           "type": "STRING",
          *           "value": "db.internal"
          *         },
          *         "pool_size": {
-         *           "description": "Connection pool size",
+         *           "description": "Connection pool size.",
          *           "type": "NUMBER",
          *           "value": 10
          *         }
          *       },
          *       "name": "Database",
-         *       "updated_at": "2026-03-27T10:00:00Z"
+         *       "parent": "common",
+         *       "updated_at": "2026-05-11T12:00:00Z"
          *     }
          */
         Config: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable name for the config.
+             */
             name: string;
-            /** Description */
+            /**
+             * Description
+             * @description Optional human-readable description of what this config holds.
+             */
             description?: string | null;
-            /** Parent */
+            /**
+             * Parent
+             * @description Key of another config to inherit items from. Inherited items appear as if declared on this config; locally declared items with the same key shadow them. Omit or set to `null` for a standalone config with no parent.
+             */
             parent?: string | null;
-            /** Items */
+            /**
+             * Items
+             * @description Map of item keys to item definitions declared on this config. Keys must be unique within the config; declared types are immutable once set and must match any type declared for the same key on an ancestor.
+             */
             items?: {
                 [key: string]: components["schemas"]["ConfigItemDefinition"];
             } | null;
-            /** Environments */
+            /**
+             * Environments
+             * @description Map of environment keys to per-environment override sets. An environment override applies when this config is resolved against that environment.
+             */
             environments?: {
                 [key: string]: components["schemas"]["EnvironmentOverride"];
             } | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the config was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the config was last modified.
+             */
             readonly updated_at?: string | null;
         };
         /**
          * ConfigItemDefinition
-         * @description Schema for a single config item.
+         * @description Type-declared item within a config.
          *
-         *     ``value`` may be ``None`` to represent a cleared (typed but unset)
-         *     slot — e.g. after a type change that could not coerce the previous
-         *     value. See ADR-024.
+         *     Each item carries a value plus a declared type that constrains the
+         *     value and any per-environment overrides for the same key.
          */
         ConfigItemDefinition: {
-            /** Value */
+            /**
+             * Value
+             * @description Current value for the item. May be `null` to represent a cleared (typed but unset) slot — for example, after a type change where the prior value could not be coerced.
+             */
             value?: unknown;
-            /** Type */
+            /**
+             * Type
+             * @description Declared value type. Constrains the JSON shape of `value` and of every override of this key in the `environments` map.
+             */
             type?: ("STRING" | "NUMBER" | "BOOLEAN" | "JSON") | null;
-            /** Description */
+            /**
+             * Description
+             * @description Optional human-readable explanation of what this item controls.
+             */
             description?: string | null;
         };
         /**
          * ConfigItemOverride
-         * @description Schema for an environment override — value only, no type/description.
+         * @description Per-environment override of a single item value.
          */
         ConfigItemOverride: {
-            /** Value */
+            /**
+             * Value
+             * @description Override value for this environment. Must conform to the type declared for the item in the inheritance chain.
+             */
             value?: unknown;
         };
-        /** ConfigListResponse */
+        /**
+         * ConfigListResponse
+         * @description JSON:API collection response for configs.
+         */
         ConfigListResponse: {
             /** Data */
             data: components["schemas"]["ConfigResource"][];
         };
         /**
+         * ConfigRequest
+         * @description JSON:API request envelope for creating or updating a config.
+         */
+        ConfigRequest: {
+            data: components["schemas"]["ConfigResource"];
+        };
+        /**
          * ConfigResource
+         * @description JSON:API resource envelope for a config.
+         *
+         *     `id` is the human-readable key for the config and must be supplied
+         *     by the caller on create. It is unique within the account.
          * @example {
          *       "attributes": {
-         *         "created_at": "2026-03-27T10:00:00Z",
-         *         "description": "Database configuration",
+         *         "created_at": "2026-05-11T12:00:00Z",
+         *         "description": "Database connection settings.",
          *         "environments": {
          *           "prod": {
          *             "values": {
@@ -179,14 +243,14 @@ export interface components {
          *         },
          *         "items": {
          *           "host": {
-         *             "description": "Primary database hostname",
+         *             "description": "Primary database hostname.",
          *             "type": "STRING",
          *             "value": "db.internal"
          *           }
          *         },
          *         "name": "Database",
          *         "parent": "common",
-         *         "updated_at": "2026-03-27T10:00:00Z"
+         *         "updated_at": "2026-05-11T12:00:00Z"
          *       },
          *       "id": "database",
          *       "type": "config"
@@ -202,31 +266,50 @@ export interface components {
             type: "config";
             attributes: components["schemas"]["Config"];
         };
-        /** ConfigResponse */
+        /**
+         * ConfigResponse
+         * @description JSON:API single-resource response envelope for a config.
+         */
         ConfigResponse: {
             data: components["schemas"]["ConfigResource"];
         };
         /**
          * EnvironmentOverride
-         * @description Schema for per-environment overrides.
+         * @description Per-environment override set for a config.
          */
         EnvironmentOverride: {
-            /** Values */
+            /**
+             * Values
+             * @description Map of item keys to override values that apply when this environment is resolved. Each key must already be declared (with a type) on this config or one of its ancestors.
+             */
             values?: {
                 [key: string]: components["schemas"]["ConfigItemOverride"];
             } | null;
         };
-        /** UsageAttributes */
+        /**
+         * UsageAttributes
+         * @description Usage counter for a single metered limit.
+         */
         UsageAttributes: {
-            /** Limit Key */
+            /**
+             * Limit Key
+             * @description Identifier of the metered limit, e.g. `config.items` or `config.inheritance_depth`.
+             */
             limit_key: string;
-            /** Period */
+            /**
+             * Period
+             * @description Period the counter covers. `current` is the only supported value.
+             */
             period: string;
-            /** Value */
+            /**
+             * Value
+             * @description Count for the period.
+             */
             value: number;
         };
         /**
          * UsageListResponse
+         * @description JSON:API collection response for usage counters.
          * @example {
          *       "data": [
          *         {
@@ -256,6 +339,7 @@ export interface components {
         };
         /**
          * UsageResource
+         * @description JSON:API resource envelope for a usage counter.
          * @example {
          *       "attributes": {
          *         "limit_key": "config.items",
@@ -316,7 +400,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ConfigResponse"];
+                "application/vnd.api+json": components["schemas"]["ConfigRequest"];
             };
         };
         responses: {
@@ -364,7 +448,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ConfigResponse"];
+                "application/vnd.api+json": components["schemas"]["ConfigRequest"];
             };
         };
         responses: {
@@ -402,6 +486,7 @@ export interface operations {
     list_config_usage: {
         parameters: {
             query?: {
+                /** @description Period to report. `current` is the only supported value. */
                 "filter[period]"?: string | null;
             };
             header?: never;
