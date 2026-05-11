@@ -13,27 +13,25 @@ export interface paths {
         };
         /**
          * List Events
-         * @description List audit events for the authenticated account.
+         * @description List audit events for this account.
          *
-         *     Default sort is ``-created_at``; cursor pagination via ``page[after]``
-         *     (the opaque cursor returned in ``links.next``). Filters are exact-match
-         *     except ``filter[occurred_at]`` which uses the platform's range
-         *     notation (``[2026-01-01T00:00:00Z,*)``) and ``filter[search]`` which
-         *     is a case-insensitive substring match (per ADR-014; targets
-         *     ``resource_id`` only at this revision).
+         *     Default sort is newest first. Filters are exact-match except
+         *     `filter[occurred_at]`, which uses interval notation
+         *     (e.g. `[2026-01-01T00:00:00Z,*)`), and `filter[search]`, which is a
+         *     case-insensitive substring match against `resource_id`.
          */
         get: operations["list_events"];
         put?: never;
         /**
          * Record Event
-         * @description Record an audit event for the authenticated account.
+         * @description Record an audit event for this account.
          *
-         *     Returns ``201 Created`` on first write, ``200 OK`` if the request was a
-         *     duplicate (matched by ``Idempotency-Key`` or auto-derived key).
+         *     Returns `201 Created` on first write, `200 OK` if the request was a
+         *     duplicate (matched by `Idempotency-Key` or a key derived from the
+         *     event's content).
          *
-         *     Customers may not emit events whose ``resource_type`` starts with
-         *     ``smpl.`` — that namespace is reserved for smplkit-emitted events
-         *     about platform resources.
+         *     `resource_type` values beginning with `smpl.` are reserved for events
+         *     that smplkit emits about its own resources and cannot be used here.
          */
         post: operations["record_event"];
         delete?: never;
@@ -52,10 +50,6 @@ export interface paths {
         /**
          * Get Event
          * @description Retrieve a single audit event by id.
-         *
-         *     Returns 404 if no event with that id exists in the caller's account —
-         *     RLS enforces tenant isolation; this endpoint never leaks the existence
-         *     of another tenant's event.
          */
         get: operations["get_event"];
         put?: never;
@@ -75,10 +69,7 @@ export interface paths {
         };
         /**
          * List Usage
-         * @description Current-period usage and quota for the audit product.
-         *
-         *     Only ``filter[period]=current`` is supported; historical usage is a
-         *     follow-up.
+         * @description Report the current-period usage counters for this account.
          */
         get: operations["list_usage"];
         put?: never;
@@ -98,17 +89,13 @@ export interface paths {
         };
         /**
          * List Forwarders
-         * @description List forwarders for the authenticated account.
-         *
-         *     Reads do not require the entitlement — a downgraded account can still
-         *     inspect what they configured, they just can't create new ones.
+         * @description List forwarders for this account.
          */
         get: operations["list_forwarders"];
         put?: never;
         /**
          * Create Forwarder
-         * @description Create a forwarder. Requires the ``audit.siem_streaming`` entitlement
-         *     on the account; lower-tier accounts get 402.
+         * @description Create a forwarder for this account.
          */
         post: operations["create_forwarder"];
         delete?: never;
@@ -128,29 +115,22 @@ export interface paths {
          * Get Forwarder
          * @description Retrieve a single forwarder by id.
          *
-         *     Returns 404 if no forwarder with that id exists in the caller's
-         *     account, including if the forwarder is soft-deleted. Header values
-         *     in the response are returned in plaintext so callers can perform a
-         *     GET-modify-PUT round-trip without re-entering secrets (ADR-014).
-         *     The persisted ``forwarder_delivery.request`` log column is what
-         *     keeps redaction; that read path is unaffected by this route.
+         *     Header values are returned in plaintext so the resource can be
+         *     round-tripped with `GET`, mutate, `PUT` without re-entering secrets.
          */
         get: operations["get_forwarder"];
         /**
          * Update Forwarder
-         * @description Full-replace update. PUT semantics — every field is overwritten.
-         *
-         *     The GET path returns plaintext header values, so the standard
-         *     get-mutate-put round-trip (ADR-014) preserves secrets without any
-         *     extra work from the caller: GET, change one field, PUT the result.
+         * @description Replace an existing forwarder. Every writable field is overwritten.
          */
         put: operations["update_forwarder"];
         post?: never;
         /**
          * Delete Forwarder
-         * @description Soft-delete a forwarder. Delivery rows are retained per the normal
-         *     forwarder_delivery retention; a future create with the same slug is
-         *     allowed (the unique index is partial on deleted_at IS NULL).
+         * @description Delete a forwarder.
+         *
+         *     Past delivery log entries are retained. A new forwarder may be
+         *     created later under the same name.
          */
         delete: operations["delete_forwarder"];
         options?: never;
@@ -167,14 +147,12 @@ export interface paths {
         };
         /**
          * List Forwarder Deliveries
-         * @description List delivery rows for a forwarder.
+         * @description List delivery log entries for a forwarder.
          *
-         *     Default sort is ``-created_at``. Cursor pagination via ``page[after]``.
-         *     Filter by status (``SUCCEEDED`` / ``FAILED`` / ``FILTERED_OUT`` /
-         *     ``SKIPPED_DO_NOT_FORWARD``, case-insensitive) or by a ``created_at`` range using the
-         *     platform's interval notation (``[2026-01-01T00:00:00Z,*)``). Reads do
-         *     not require the entitlement — a downgraded account can still inspect
-         *     historical deliveries from when the forwarder was active.
+         *     Default sort is newest first. Filter by `status` (one of `SUCCEEDED`,
+         *     `FAILED`, `FILTERED_OUT`, `SKIPPED_DO_NOT_FORWARD` — case-insensitive),
+         *     by `event_id`, or by a `created_at` range using interval notation
+         *     (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
         put?: never;
@@ -196,8 +174,9 @@ export interface paths {
         put?: never;
         /**
          * Retry Forwarder Delivery
-         * @description Retry a single failed delivery. Returns the new delivery row with
-         *     its outcome. Prior delivery rows are not modified.
+         * @description Retry a single failed delivery.
+         *
+         *     Returns the new delivery log entry. The prior entry is left in place.
          */
         post: operations["retry_forwarder_delivery"];
         delete?: never;
@@ -217,10 +196,10 @@ export interface paths {
         put?: never;
         /**
          * Retry Failed Forwarder Deliveries
-         * @description Retry every failed delivery for the forwarder.
+         * @description Retry every failed delivery for this forwarder.
          *
-         *     For each failed delivery row, re-attempt with the latest forwarder
-         *     configuration and the original event payload. Returns counts.
+         *     Each failed delivery is re-attempted using the forwarder's current
+         *     configuration and the original event. Returns the counts.
          */
         post: operations["retry_failed_forwarder_deliveries"];
         delete?: never;
@@ -240,12 +219,12 @@ export interface paths {
         put?: never;
         /**
          * Execute Test Forwarder
-         * @description Execute a prepared HTTP request server-side and return the response.
+         * @description Send a test HTTP request to a forwarder destination and return the result.
          *
-         *     The same SSRF guard that gates the in-line forwarder loop is applied
-         *     here — internal/private addresses, link-local IPs (including the EC2
-         *     metadata service at 169.254.169.254), unique-local IPv6, and ports
-         *     outside the configured allowlist are all rejected.
+         *     Useful for verifying a destination URL, credentials, or transform
+         *     before saving the forwarder. The same network-safety rules that
+         *     apply to live deliveries (private/internal address blocking, port
+         *     allowlist) apply here.
          */
         post: operations["execute_test_forwarder"];
         delete?: never;
@@ -263,11 +242,10 @@ export interface paths {
         };
         /**
          * List Resource Types
-         * @description List the distinct ``resource_type`` slugs seen in the account.
+         * @description List the distinct `resource_type` slugs recorded for this account.
          *
-         *     Each row's ``id`` is the slug itself, mirroring the smplkit
-         *     convention of using customer-provided identifiers as the
-         *     public-facing resource id (ADR-014).
+         *     The resource `id` is the slug itself. Useful for populating filter
+         *     dropdowns in a UI.
          */
         get: operations["list_resource_types"];
         put?: never;
@@ -287,15 +265,11 @@ export interface paths {
         };
         /**
          * List Actions
-         * @description List the distinct ``action`` slugs seen in the account.
+         * @description List the distinct `action` slugs recorded for this account.
          *
-         *     Without ``filter[resource_type]``, returns one row per distinct
-         *     action — the same action may have been recorded with multiple
-         *     resource types and the unfiltered dropdown shows it once.
-         *
-         *     With ``filter[resource_type]``, returns the actions seen with
-         *     that specific resource type, powering the Activity tab's
-         *     cascading filter behavior.
+         *     Without `filter[resource_type]`, returns one row per distinct
+         *     action. With `filter[resource_type]`, returns the actions recorded
+         *     for that specific resource type.
          */
         get: operations["list_actions"];
         put?: never;
@@ -317,12 +291,11 @@ export interface paths {
         put?: never;
         /**
          * Execute Wipe
-         * @description Delete every audit-database row scoped to the authenticated account.
+         * @description Delete every audit record this account has stored.
          *
-         *     Returns the per-table row counts that were deleted along with the
-         *     completion timestamp. The action is atomic within the audit
-         *     database — either every account-scoped row is gone, or none is.
-         *     The body is required to be ``{}``; no parameters are accepted.
+         *     Atomic: either every record is deleted, or none is. Returns the
+         *     per-table counts and the completion timestamp. The request body
+         *     must be `{}`.
          */
         post: operations["execute_wipe"];
         delete?: never;
@@ -392,52 +365,71 @@ export interface components {
         };
         /**
          * Event
-         * @description Public-facing event resource.
+         * @description An audit event — a record that something happened, attributed to
+         *     an actor and a resource.
          *
-         *     Attribute set on POST /api/v1/events:
-         *         - action (required)
-         *         - resource_type (required)
-         *         - resource_id (required)
-         *         - occurred_at (optional; defaults to ``created_at``)
-         *         - data (optional; defaults to ``{}``)
-         *
-         *     There is no top-level ``snapshot`` attribute. Customers wishing to
-         *     record a resource snapshot place it inside ``data`` -- smplkit's
-         *     internal convention nests it at ``data.snapshot``, but customers may
-         *     follow their own convention.
-         *
-         *     Attribute set on GET responses includes everything above plus the
-         *     server-populated fields: ``created_at``, ``actor_type``, ``actor_id``,
-         *     ``actor_label``, ``idempotency_key``.
+         *     When recording a snapshot of the resource at the time of the event,
+         *     place it inside `data`. smplkit's own integrations nest it under
+         *     `data.snapshot`, but the slot is yours to use however you like.
          */
         Event: {
-            /** Action */
+            /**
+             * Action
+             * @description Slug for what happened, e.g. `user.created`. Lowercase, dot-separated.
+             */
             action: string;
-            /** Resource Type */
+            /**
+             * Resource Type
+             * @description Slug for the kind of resource the event is about, e.g. `user`. Lowercase, dot-separated.
+             */
             resource_type: string;
-            /** Resource Id */
+            /**
+             * Resource Id
+             * @description Identifier of the specific resource the event is about.
+             */
             resource_id: string;
-            /** Occurred At */
+            /**
+             * Occurred At
+             * @description When the event actually happened. Defaults to the server receipt time (`created_at`).
+             */
             occurred_at?: string | null;
-            /** Data */
+            /**
+             * Data
+             * @description Free-form payload attached to the event. Use it for resource snapshots (by convention under `data.snapshot`), request identifiers, or any other context the event needs to carry.
+             */
             data?: {
                 [key: string]: unknown;
             };
             /**
              * Do Not Forward
-             * @description When true, this event is recorded normally but is not forwarded to any configured SIEM forwarder. A forwarder_delivery row with status=skipped_do_not_forward is recorded for each enabled forwarder so the skip is visible in the delivery log.
+             * @description When `true`, the event is recorded but not delivered to any forwarder. A delivery log entry with status `SKIPPED_DO_NOT_FORWARD` is written for each enabled forwarder so the skip is visible in the delivery log.
              * @default false
              */
             do_not_forward: boolean;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the event was received and recorded.
+             */
             readonly created_at?: string | null;
-            /** Actor Type */
+            /**
+             * Actor Type
+             * @description Kind of credential that emitted the event, e.g. `USER` or `API_KEY`. Resolved server-side from the request credential.
+             */
             readonly actor_type?: string | null;
-            /** Actor Id */
+            /**
+             * Actor Id
+             * @description Identifier of the actor that emitted the event.
+             */
             readonly actor_id?: string | null;
-            /** Actor Label */
+            /**
+             * Actor Label
+             * @description Human-readable label for the actor (e.g. the user's email address or the API key name) at the time the event was recorded.
+             */
             readonly actor_label?: string | null;
-            /** Idempotency Key */
+            /**
+             * Idempotency Key
+             * @description The idempotency key used to deduplicate the record. Echoes the `Idempotency-Key` header if one was supplied, otherwise a key derived from the event's content.
+             */
             readonly idempotency_key?: string | null;
         };
         /** EventListLinks */
@@ -452,7 +444,7 @@ export interface components {
         };
         /**
          * EventListResponse
-         * @description JSON:API collection response with cursor pagination metadata.
+         * @description JSON:API collection response for audit events.
          */
         EventListResponse: {
             /** Data */
@@ -461,8 +453,17 @@ export interface components {
             links?: components["schemas"]["EventListLinks"] | null;
         };
         /**
+         * EventRequest
+         * @description JSON:API request envelope for recording an audit event.
+         */
+        EventRequest: {
+            data: components["schemas"]["EventResource"];
+        };
+        /**
          * EventResource
          * @description JSON:API resource envelope for an audit event.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "action": "user.created",
@@ -488,7 +489,7 @@ export interface components {
          */
         EventResource: {
             /** Id */
-            id: string;
+            id?: string | null;
             /**
              * Type
              * @default event
@@ -498,98 +499,140 @@ export interface components {
         };
         /**
          * EventResponse
-         * @description JSON:API single-resource response.
+         * @description JSON:API single-resource response for an audit event.
          */
         EventResponse: {
             data: components["schemas"]["EventResource"];
         };
         /**
          * Forwarder
-         * @description Public-facing forwarder resource.
+         * @description A destination that receives audit events recorded for the account.
          *
-         *     Attribute set on POST /api/v1/forwarders:
-         *         - name (required)
-         *         - forwarder_type (required)
-         *         - http (required)
-         *         - enabled (optional, defaults true)
-         *         - filter (optional, JSON Logic)
-         *         - transform (optional, JSONata)
-         *
-         *     The slug is server-derived from name on create; it is immutable on
-         *     update because consumers (UI, observability) key off it.
+         *     Each event recorded for the account is evaluated against every enabled
+         *     forwarder. If the filter expression evaluates truthy — or is absent —
+         *     the event is delivered to the destination using the configured HTTP
+         *     request. The slug, derived from `name` at create time, is the stable
+         *     identifier used by the console and other tooling.
          */
         Forwarder: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable name for the forwarder.
+             */
             name: string;
+            /** @description Destination type. */
             forwarder_type: components["schemas"]["ForwarderType"];
             /**
              * Enabled
+             * @description Whether the forwarder is currently delivering events. Set to `false` to pause deliveries without deleting the forwarder.
              * @default true
              */
             enabled: boolean;
-            /** Filter */
+            /**
+             * Filter
+             * @description JSON Logic expression evaluated against each event. The event is delivered only if the expression returns truthy. Omit to deliver every event.
+             */
             filter?: {
                 [key: string]: unknown;
             } | null;
-            /** Transform */
+            /**
+             * Transform
+             * @description JSONata template applied to each event before delivery. Omit to deliver the event unchanged.
+             */
             transform?: string | null;
+            /** @description HTTP request used to deliver each event to the destination. */
             http: components["schemas"]["ForwarderHttp"];
-            /** Slug */
-            slug?: string | null;
-            /** Created At */
+            /**
+             * Slug
+             * @description URL-safe identifier derived from `name` at create time. Stable for the lifetime of the forwarder.
+             */
+            readonly slug?: string | null;
+            /**
+             * Created At
+             * @description When the forwarder was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the forwarder was last modified.
+             */
             readonly updated_at?: string | null;
-            /** Deleted At */
+            /**
+             * Deleted At
+             * @description When the forwarder was deleted. `null` for active forwarders.
+             */
             readonly deleted_at?: string | null;
-            /** Version */
+            /**
+             * Version
+             * @description Monotonic counter incremented on every update, starting at 1.
+             */
             readonly version?: number | null;
-            /** Data */
-            data?: {
-                [key: string]: unknown;
-            };
         };
         /**
          * ForwarderDelivery
-         * @description Read-only delivery log row.
-         *
-         *     All fields are server-populated. Headers in ``request`` always show
-         *     redacted values, regardless of who configured them.
+         * @description A log entry for one attempt to deliver an event to a forwarder.
          */
         ForwarderDelivery: {
             /**
              * Forwarder Id
              * Format: uuid
+             * @description Forwarder the delivery belongs to.
              */
             forwarder_id: string;
             /**
              * Event Id
              * Format: uuid
+             * @description Event that was being delivered.
              */
             event_id: string;
-            /** Attempt Number */
+            /**
+             * Attempt Number
+             * @description 1 for the initial delivery, incremented for each retry.
+             */
             attempt_number: number;
             /**
              * Status
+             * @description Delivery outcome. `SUCCEEDED` and `FAILED` are the live-delivery outcomes; `FILTERED_OUT` is recorded when the forwarder's filter rejected the event; `SKIPPED_DO_NOT_FORWARD` is recorded when the event was emitted with `do_not_forward=true`.
              * @enum {string}
              */
             status: "SUCCEEDED" | "FAILED" | "FILTERED_OUT" | "SKIPPED_DO_NOT_FORWARD";
-            /** Request */
+            /**
+             * Request
+             * @description The HTTP request as it was sent to the destination. Header values are redacted.
+             */
             request?: {
                 [key: string]: unknown;
             } | null;
-            /** Response Status */
+            /**
+             * Response Status
+             * @description HTTP status code returned by the destination.
+             */
             response_status?: number | null;
-            /** Response Body */
+            /**
+             * Response Body
+             * @description Response body returned by the destination.
+             */
             response_body?: string | null;
-            /** Latency Ms */
+            /**
+             * Latency Ms
+             * @description Elapsed time of the delivery attempt in milliseconds.
+             */
             latency_ms?: number | null;
-            /** Error */
+            /**
+             * Error
+             * @description Error message if the delivery did not complete.
+             */
             error?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the delivery attempt was recorded.
+             */
             created_at?: string | null;
         };
-        /** ForwarderDeliveryListResponse */
+        /**
+         * ForwarderDeliveryListResponse
+         * @description JSON:API collection response for forwarder deliveries.
+         */
         ForwarderDeliveryListResponse: {
             /** Data */
             data: components["schemas"]["ForwarderDeliveryResource"][];
@@ -598,6 +641,7 @@ export interface components {
         };
         /**
          * ForwarderDeliveryResource
+         * @description JSON:API resource envelope for a forwarder delivery log entry.
          * @example {
          *       "attributes": {
          *         "attempt_number": 1,
@@ -634,35 +678,43 @@ export interface components {
             type: string;
             attributes: components["schemas"]["ForwarderDelivery"];
         };
-        /** ForwarderDeliveryResponse */
+        /**
+         * ForwarderDeliveryResponse
+         * @description JSON:API single-resource response for a forwarder delivery.
+         */
         ForwarderDeliveryResponse: {
             data: components["schemas"]["ForwarderDeliveryResource"];
         };
         /**
          * ForwarderHttp
-         * @description The destination HTTP request shape stored encrypted on a forwarder.
-         *
-         *     ``success_status`` is a string: either a single status code (e.g.
-         *     ``"200"``, ``"204"``) or a class (e.g. ``"2xx"``, ``"3xx"``). The
-         *     string-only contract is intentional — a Pydantic ``int | str`` union
-         *     confused several SDK code generators (Java in particular wrote the
-         *     default ``"2xx"`` unquoted into a typed enum). String covers both
-         *     shapes universally with a single wire type.
+         * @description HTTP request configuration used to deliver an event to the destination.
          */
         ForwarderHttp: {
             /**
              * Method
+             * @description HTTP method used when delivering an event.
              * @default POST
+             * @enum {string}
              */
-            method: string;
-            /** Url */
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+            /**
+             * Url
+             * @description Destination URL.
+             */
             url: string;
-            /** Headers */
+            /**
+             * Headers
+             * @description HTTP headers attached to each delivery request.
+             */
             headers?: components["schemas"]["HttpHeader"][];
-            /** Body */
+            /**
+             * Body
+             * @description Request body sent to the destination. If omitted, the event JSON is sent as the body.
+             */
             body?: string | null;
             /**
              * Success Status
+             * @description HTTP response status that indicates a successful delivery. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
              * @default 2xx
              */
             success_status: string;
@@ -677,7 +729,10 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
-        /** ForwarderListResponse */
+        /**
+         * ForwarderListResponse
+         * @description JSON:API collection response for forwarders.
+         */
         ForwarderListResponse: {
             /** Data */
             data: components["schemas"]["ForwarderResource"][];
@@ -685,11 +740,20 @@ export interface components {
             links?: components["schemas"]["ForwarderListLinks"] | null;
         };
         /**
+         * ForwarderRequest
+         * @description JSON:API request envelope for creating or updating a forwarder.
+         */
+        ForwarderRequest: {
+            data: components["schemas"]["ForwarderResource"];
+        };
+        /**
          * ForwarderResource
+         * @description JSON:API resource envelope for a forwarder.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-05-07T12:00:00Z",
-         *         "data": {},
          *         "enabled": true,
          *         "filter": {
          *           "==": [
@@ -722,7 +786,7 @@ export interface components {
          */
         ForwarderResource: {
             /** Id */
-            id: string;
+            id?: string | null;
             /**
              * Type
              * @default forwarder
@@ -730,38 +794,33 @@ export interface components {
             type: string;
             attributes: components["schemas"]["Forwarder"];
         };
-        /** ForwarderResponse */
+        /**
+         * ForwarderResponse
+         * @description JSON:API single-resource response envelope for a forwarder.
+         */
         ForwarderResponse: {
             data: components["schemas"]["ForwarderResource"];
         };
         /**
          * ForwarderType
          * @description Supported forwarder destination types.
-         *
-         *     Carried as a typed enum so the OpenAPI spec emits an ``enum``
-         *     constraint and the auto-generated SDK clients (in all 6 languages)
-         *     surface a typed enum to customers rather than free-form strings.
-         *     Subclassing ``str`` keeps JSON serialization byte-identical to the
-         *     prior ``str`` field — no migration of stored ``forwarder.type``
-         *     values needed.
-         *
-         *     Values are SCREAMING_SNAKE_CASE per ADR-014. The Forwarder schema
-         *     accepts any casing on input via _normalize_forwarder_type.
-         *
-         *     Adding a new destination here requires a corresponding implementation
-         *     in ``app.services.forwarding`` and a regeneration of the OpenAPI
-         *     spec so the SDK clients pick up the new variant.
          * @enum {string}
          */
         ForwarderType: "HTTP" | "DATADOG" | "SPLUNK_HEC" | "SUMO_LOGIC" | "NEW_RELIC" | "HONEYCOMB" | "ELASTIC";
         /**
          * HttpHeader
-         * @description A single header on a forwarder's HTTP destination.
+         * @description A single HTTP header attached to a forwarder delivery request.
          */
         HttpHeader: {
-            /** Name */
+            /**
+             * Name
+             * @description Header name.
+             */
             name: string;
-            /** Value */
+            /**
+             * Value
+             * @description Header value.
+             */
             value: string;
         };
         /** ResourceTypeAttributes */
@@ -819,79 +878,126 @@ export interface components {
             type: string;
             attributes: components["schemas"]["ResourceTypeAttributes"];
         };
-        /** RetryFailedDeliveriesSummary */
+        /**
+         * RetryFailedDeliveriesSummary
+         * @description Counts returned by the retry-failed-deliveries action.
+         */
         RetryFailedDeliveriesSummary: {
-            /** Attempted */
+            /**
+             * Attempted
+             * @description Number of failed deliveries that were re-attempted.
+             */
             attempted: number;
-            /** Succeeded */
+            /**
+             * Succeeded
+             * @description Number of re-attempts that succeeded.
+             */
             succeeded: number;
-            /** Failed */
+            /**
+             * Failed
+             * @description Number of re-attempts that failed again.
+             */
             failed: number;
         };
         /**
          * TestForwarderRequest
-         * @description Plain-JSON body for the test_forwarder execute action.
+         * @description Inputs to the test-forwarder action.
          *
-         *     Mirrors the encrypted ``ForwarderHttp`` shape with one addition —
-         *     ``timeout_ms``, capped server-side.
+         *     Mirrors a forwarder's HTTP destination configuration with one
+         *     addition: `timeout_ms`, applied per-request and capped server-side.
          */
         TestForwarderRequest: {
             /**
              * Method
+             * @description HTTP method used for the test request.
              * @default POST
+             * @enum {string}
              */
-            method: string;
-            /** Url */
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+            /**
+             * Url
+             * @description Destination URL.
+             */
             url: string;
-            /** Headers */
+            /**
+             * Headers
+             * @description HTTP headers attached to the test request.
+             */
             headers?: components["schemas"]["HttpHeader"][];
-            /** Body */
+            /**
+             * Body
+             * @description Request body. If omitted, an empty body is sent.
+             */
             body?: string | null;
             /**
              * Success Status
+             * @description HTTP response status that indicates success. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
              * @default 2xx
              */
             success_status: string;
-            /** Timeout Ms */
+            /**
+             * Timeout Ms
+             * @description Per-request timeout in milliseconds. Capped at 30 seconds.
+             */
             timeout_ms?: number | null;
         };
         /**
          * TestForwarderResponse
-         * @description Plain-JSON response body. Headers are echoed back unredacted because
-         *     the caller already supplied them — the response is for the caller, not
-         *     persisted into the delivery log.
+         * @description Result of a test-forwarder execution.
          */
         TestForwarderResponse: {
-            /** Succeeded */
+            /**
+             * Succeeded
+             * @description True if the destination responded with a status matching `success_status`.
+             */
             succeeded: boolean;
-            /** Response Status */
+            /**
+             * Response Status
+             * @description HTTP status code returned by the destination.
+             */
             response_status: number | null;
-            /** Response Headers */
+            /**
+             * Response Headers
+             * @description Headers returned by the destination.
+             */
             response_headers?: {
                 [key: string]: string;
             };
-            /** Response Body */
+            /**
+             * Response Body
+             * @description Response body returned by the destination.
+             */
             response_body?: string | null;
-            /** Latency Ms */
+            /**
+             * Latency Ms
+             * @description Elapsed time of the request in milliseconds.
+             */
             latency_ms: number | null;
-            /** Error */
+            /**
+             * Error
+             * @description Error message if the request did not complete.
+             */
             error?: string | null;
         };
         /**
          * UsageAttributes
-         * @description Attribute set for a usage resource.
-         *
-         *     The shape mirrors the ``/api/v1/usage`` contract used by config, flags,
-         *     and logging — three fields, no per-product extras. Per-period limits
-         *     live in the product catalog (``GET /api/v1/products``); the usage
-         *     endpoint reports counts only.
+         * @description Usage counter for a single metered limit.
          */
         UsageAttributes: {
-            /** Limit Key */
+            /**
+             * Limit Key
+             * @description Identifier of the metered limit, e.g. `audit.customer_events_per_month`.
+             */
             limit_key: string;
-            /** Period */
+            /**
+             * Period
+             * @description Period the counter covers. `current` is the only supported value.
+             */
             period: string;
-            /** Value */
+            /**
+             * Value
+             * @description Count for the period.
+             */
             value: number;
         };
         /**
@@ -923,11 +1029,12 @@ export interface components {
         };
         /**
          * WipeRequest
-         * @description Empty body — the action requires no parameters.
+         * @description Empty body — the action takes no parameters.
          */
         WipeRequest: Record<string, never>;
         /**
          * WipeResponse
+         * @description Summary of a completed wipe action.
          * @example {
          *       "completed_at": "2026-05-08T19:31:24Z",
          *       "tables": {
@@ -944,6 +1051,7 @@ export interface components {
         WipeResponse: {
             /**
              * Wiped
+             * @description Always `true` for a successful wipe.
              * @default true
              */
             wiped: boolean;
@@ -951,22 +1059,44 @@ export interface components {
             /**
              * Completed At
              * Format: date-time
+             * @description When the wipe completed.
              */
             completed_at: string;
         };
-        /** WipeTablesSummary */
+        /**
+         * WipeTablesSummary
+         * @description Counts of records deleted, broken down by record kind.
+         */
         WipeTablesSummary: {
-            /** Audit Event */
+            /**
+             * Audit Event
+             * @description Number of audit events deleted.
+             */
             audit_event: number;
-            /** Audit Event Quota */
+            /**
+             * Audit Event Quota
+             * @description Number of monthly usage-quota counters deleted.
+             */
             audit_event_quota: number;
-            /** Forwarder */
+            /**
+             * Forwarder
+             * @description Number of forwarders deleted.
+             */
             forwarder: number;
-            /** Forwarder Delivery */
+            /**
+             * Forwarder Delivery
+             * @description Number of forwarder delivery log entries deleted.
+             */
             forwarder_delivery: number;
-            /** Resource Type */
+            /**
+             * Resource Type
+             * @description Number of distinct `resource_type` entries deleted.
+             */
             resource_type: number;
-            /** Action */
+            /**
+             * Action
+             * @description Number of distinct `action` entries deleted.
+             */
             action: number;
         };
     };
@@ -987,7 +1117,7 @@ export interface operations {
                 "filter[action]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 "filter[resource_id]"?: string | null;
-                /** @description Case-insensitive substring match. Searches against ``resource_id`` only — see ADR-014 for the platform-wide ``filter[search]`` convention. Use ``filter[resource_id]`` for an exact match. */
+                /** @description Case-insensitive substring match against `resource_id`. Use `filter[resource_id]` for an exact match. */
                 "filter[search]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
@@ -1020,7 +1150,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["EventResponse"];
+                "application/vnd.api+json": components["schemas"]["EventRequest"];
             };
         };
         responses: {
@@ -1069,6 +1199,7 @@ export interface operations {
     list_usage: {
         parameters: {
             query: {
+                /** @description Period to report. `current` is the only supported value. */
                 "filter[period]": string;
             };
             header?: never;
@@ -1122,7 +1253,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+                "application/vnd.api+json": components["schemas"]["ForwarderRequest"];
             };
         };
         responses: {
@@ -1170,7 +1301,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ForwarderResponse"];
+                "application/vnd.api+json": components["schemas"]["ForwarderRequest"];
             };
         };
         responses: {
