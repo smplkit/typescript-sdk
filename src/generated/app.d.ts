@@ -2381,7 +2381,7 @@ export interface components {
          * RegisterRequest
          * @example {
          *       "email": "jane@example.com",
-         *       "entry_point": "get_started",
+         *       "entry_point": "GET_STARTED",
          *       "password": "correct-horse-battery-staple"
          *     }
          */
@@ -2395,10 +2395,10 @@ export interface components {
             password: string;
             /**
              * Entry Point
-             * @description Registration entry point. Allowed: login, get_started, live_demo, unknown. Defaults to unknown when omitted.
+             * @description Registration entry point. Allowed: LOGIN, GET_STARTED, LIVE_DEMO, UNKNOWN. Defaults to UNKNOWN when omitted. Case-insensitive.
              * @enum {string|null}
              */
-            entry_point?: "login" | "get_started" | "live_demo" | "unknown" | null;
+            entry_point?: "LOGIN" | "GET_STARTED" | "LIVE_DEMO" | "UNKNOWN" | null;
         };
         /**
          * ServiceResource
@@ -2542,7 +2542,7 @@ export interface components {
              * Discount Source
              * @enum {string}
              */
-            discount_source: "volume" | "override";
+            discount_source: "VOLUME" | "OVERRIDE";
             /** Total Cents */
             total_cents: number;
             next_tier?: components["schemas"]["NextTierMeta"];
