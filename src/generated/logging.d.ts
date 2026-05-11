@@ -13,8 +13,12 @@ export interface paths {
         };
         /**
          * List Loggers
-         * @description List all loggers for the authenticated account. Optionally filter by managed status,
-         *     service, or last-seen time window.
+         * @description List loggers for this account.
+         *
+         *     Supports `filter[managed]` to narrow to managed (or unmanaged) loggers,
+         *     `filter[service]` to keep only loggers observed in a specific service,
+         *     and `filter[last_seen]` (interval notation `[<from>,*)`) to keep only
+         *     loggers with a source observation at or after the given timestamp.
          */
         get: operations["list_loggers"];
         put?: never;
@@ -34,19 +38,23 @@ export interface paths {
         };
         /**
          * Get Logger
-         * @description Return a logger by its key.
+         * @description Retrieve a logger by its key.
          */
         get: operations["get_logger"];
         /**
          * Update or Create Logger
-         * @description Create or update a logger (upsert). If the logger does not exist it is created.
-         *     Fields absent from the body are preserved on update; explicit null clears them.
+         * @description Create or replace a logger at the given key.
+         *
+         *     If the logger does not yet exist, it is created. Fields omitted from
+         *     the request body are preserved; explicit `null` clears them. Setting
+         *     `level`, `group`, or `environments` on an unmanaged logger promotes
+         *     it to managed automatically.
          */
         put: operations["update_logger"];
         post?: never;
         /**
          * Delete Logger
-         * @description Delete a logger by its key.
+         * @description Delete a logger.
          */
         delete: operations["delete_logger"];
         options?: never;
@@ -65,7 +73,11 @@ export interface paths {
         put?: never;
         /**
          * Bulk Register Loggers
-         * @description Register loggers discovered by an SDK. Creates new loggers or updates source observations on existing ones.
+         * @description Register loggers discovered by an SDK.
+         *
+         *     Creates new logger entries for previously unseen keys and refreshes
+         *     the per-(service, environment) observation for keys already known.
+         *     Returns the number of items processed.
          */
         post: operations["bulk_register_loggers"];
         delete?: never;
@@ -83,13 +95,16 @@ export interface paths {
         };
         /**
          * List Log Groups
-         * @description List all log groups for the authenticated account.
+         * @description List log groups for this account.
          */
         get: operations["list_log_groups"];
         put?: never;
         /**
          * Create Log Group
-         * @description Create a new log group. The caller provides the key in data.id, or it is auto-generated from name.
+         * @description Create a log group.
+         *
+         *     The caller may supply a key in `data.id`; if omitted, the server
+         *     generates one from `name`.
          */
         post: operations["create_log_group"];
         delete?: never;
@@ -107,18 +122,21 @@ export interface paths {
         };
         /**
          * Get Log Group
-         * @description Return a log group by its key.
+         * @description Retrieve a log group by its key.
          */
         get: operations["get_log_group"];
         /**
          * Update Log Group
-         * @description Replace a log group entirely.
+         * @description Replace a log group. Every writable field is overwritten.
          */
         put: operations["update_log_group"];
         post?: never;
         /**
          * Delete Log Group
-         * @description Delete a log group by its key.
+         * @description Delete a log group.
+         *
+         *     Loggers that referenced this group are detached; they remain in the
+         *     account with no group assignment.
          */
         delete: operations["delete_log_group"];
         options?: never;
@@ -135,7 +153,7 @@ export interface paths {
         };
         /**
          * List Logger Sources
-         * @description List all sources (service/environment observations) for a specific logger.
+         * @description List the service / environment observations recorded for a logger.
          */
         get: operations["list_logger_sources"];
         put?: never;
@@ -155,7 +173,10 @@ export interface paths {
         };
         /**
          * List All Logger Sources
-         * @description List all logger sources across all loggers. Optionally filter by environment or service.
+         * @description List every logger source observation for this account.
+         *
+         *     Supports `filter[environment]` and `filter[service]` to narrow to a
+         *     specific environment or service.
          */
         get: operations["list_all_logger_sources"];
         put?: never;
@@ -175,7 +196,7 @@ export interface paths {
         };
         /**
          * List Services
-         * @description Return the distinct service names observed across all logger sources for the account.
+         * @description List the services that have reported a logger for this account.
          */
         get: operations["list_services"];
         put?: never;
@@ -195,7 +216,7 @@ export interface paths {
         };
         /**
          * List Logging Usage
-         * @description Return current resource usage counts for the authenticated account.
+         * @description Report the current-period usage counters for this account.
          */
         get: operations["list_logging_usage"];
         put?: never;
@@ -236,6 +257,11 @@ export interface components {
         };
         /**
          * LogGroup
+         * @description A named collection of loggers that share a level configuration.
+         *
+         *     Assigning a logger to a group ties the logger's effective level to
+         *     the group's level (and per-environment overrides). Loggers can move
+         *     between groups or be detached from a group entirely.
          * @example {
          *       "created_at": "2026-04-01T10:00:00Z",
          *       "environments": {
@@ -249,28 +275,61 @@ export interface components {
          *     }
          */
         LogGroup: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable label for the group.
+             */
             name: string;
-            /** Level */
-            level?: string | null;
-            /** Parent Id */
+            /**
+             * Level
+             * @description Default level applied to every logger in the group. `null` leaves member loggers to inherit from elsewhere.
+             */
+            level?: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT") | null;
+            /**
+             * Parent Id
+             * @description Reserved for nested groups. Must be `null` in this version; nested groups are not yet supported.
+             */
             parent_id?: string | null;
-            /** Environments */
+            /**
+             * Environments
+             * @description Per-environment level overrides keyed by environment name. Each value is an object with an optional `level` field, e.g. `{"production": {"level": "ERROR"}}`. Member loggers inherit the per-environment level unless they set their own override.
+             */
             environments?: {
                 [key: string]: unknown;
             } | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the group was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the group was last modified.
+             */
             readonly updated_at?: string | null;
         };
-        /** LogGroupListResponse */
+        /**
+         * LogGroupListResponse
+         * @description JSON:API collection response for log groups.
+         */
         LogGroupListResponse: {
             /** Data */
             data: components["schemas"]["LogGroupResource"][];
         };
         /**
+         * LogGroupRequest
+         * @description JSON:API request envelope for creating or updating a log group.
+         */
+        LogGroupRequest: {
+            data: components["schemas"]["LogGroupResource"];
+        };
+        /**
          * LogGroupResource
+         * @description JSON:API resource envelope for a log group.
+         *
+         *     `id` is the group's key (e.g. `database-loggers`). On a create
+         *     request the id may be supplied; if omitted, the server generates
+         *     one from `name`.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-04-01T10:00:00Z",
@@ -297,12 +356,22 @@ export interface components {
             type: "log_group";
             attributes: components["schemas"]["LogGroup"];
         };
-        /** LogGroupResponse */
+        /**
+         * LogGroupResponse
+         * @description JSON:API single-resource response envelope for a log group.
+         */
         LogGroupResponse: {
             data: components["schemas"]["LogGroupResource"];
         };
         /**
          * Logger
+         * @description A logger configured for the account.
+         *
+         *     Loggers are organized by dot-separated key (for example, `sqlalchemy.engine`),
+         *     matching the hierarchical naming convention used by most logging
+         *     frameworks. A managed logger applies the configured level to every
+         *     runtime where the logger appears; unmanaged loggers are tracked only
+         *     as observations from SDKs.
          * @example {
          *       "created_at": "2026-04-01T10:00:00Z",
          *       "environments": {
@@ -321,33 +390,61 @@ export interface components {
          *     }
          */
         Logger: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable label for the logger.
+             */
             name: string;
-            /** Level */
-            level?: string | null;
-            /** Group */
+            /**
+             * Level
+             * @description Account-wide log level applied to this logger. `null` means no override at the logger level — the level is inherited from the logger's group or the framework default.
+             */
+            level?: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT") | null;
+            /**
+             * Group
+             * @description Key of the log group this logger belongs to, or `null` if the logger is not grouped. Assigning a logger to a group promotes it to managed; assigning a group cascades to unmanaged descendants by clearing their group reference.
+             */
             group?: string | null;
-            /** Managed */
+            /**
+             * Managed
+             * @description When `true`, the logger is part of the account's managed configuration and counts toward the managed-loggers usage counter. Setting `level`, `group`, or `environments` on an unmanaged logger promotes it to managed automatically.
+             */
             managed?: boolean | null;
-            /** Sources */
+            /**
+             * Sources
+             * @description Service / environment observations reported by SDKs for this logger. Each entry carries the service name, environment, the level the SDK saw, the resolved level after framework inheritance, and timestamps for the first and most recent sighting.
+             */
             readonly sources?: {
                 [key: string]: unknown;
             }[] | null;
-            /** Environments */
+            /**
+             * Environments
+             * @description Per-environment level overrides keyed by environment name. Each value is an object with an optional `level` field, e.g. `{"production": {"level": "WARN"}}`. An environment may be present with no `level` to record that the logger applies there without changing the resolved level.
+             */
             environments?: {
                 [key: string]: unknown;
             } | null;
-            /** Effective Levels */
+            /**
+             * Effective Levels
+             * @description Per-environment summary of what runtimes are reporting for this logger. Keyed by environment name; each entry is one of `{"status": "none"}`, `{"status": "agrees", "level": "<LEVEL>"}`, or `{"status": "varies"}`. `agrees` means every observed source in that environment reports the same resolved level; `varies` means at least two sources disagree.
+             */
             readonly effective_levels?: {
                 [key: string]: unknown;
             } | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the logger was first created or discovered.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the logger was last modified.
+             */
             readonly updated_at?: string | null;
         };
         /**
          * LoggerBulkItem
+         * @description One logger discovered by an SDK during a bulk registration call.
          * @example {
          *       "environment": "production",
          *       "id": "sqlalchemy.engine",
@@ -359,32 +456,33 @@ export interface components {
         LoggerBulkItem: {
             /**
              * Id
-             * @description Normalized logger name
+             * @description Dot-separated logger key as the SDK saw it.
              */
             id: string;
             /**
              * Level
-             * @description The explicitly-set level on this logger. Null if inherited.
+             * @description Level explicitly set on the logger by application code. `null` when the level is inherited.
              */
             level?: string | null;
             /**
              * Resolved Level
-             * @description The effective level after framework inheritance. Never null in compliant SDKs.
+             * @description Effective level after framework inheritance. SDKs should always report this; the server falls back to `level` when `resolved_level` is missing.
              */
             resolved_level?: string | null;
             /**
              * Service
-             * @description Service name that discovered this logger
+             * @description Service name that observed the logger.
              */
             service?: string | null;
             /**
              * Environment
-             * @description Environment where this logger was observed
+             * @description Environment where the logger was observed.
              */
             environment?: string | null;
         };
         /**
          * LoggerBulkRequest
+         * @description Payload for bulk registration of loggers discovered by an SDK.
          * @example {
          *       "loggers": [
          *         {
@@ -403,26 +501,48 @@ export interface components {
          *     }
          */
         LoggerBulkRequest: {
-            /** Loggers */
+            /**
+             * Loggers
+             * @description Loggers to register or refresh observations for.
+             */
             loggers: components["schemas"]["LoggerBulkItem"][];
         };
         /**
          * LoggerBulkResponse
+         * @description Result of a bulk registration call.
          * @example {
          *       "registered": 5
          *     }
          */
         LoggerBulkResponse: {
-            /** Registered */
+            /**
+             * Registered
+             * @description Number of loggers that were created or had a source observation refreshed.
+             */
             registered: number;
         };
-        /** LoggerListResponse */
+        /**
+         * LoggerListResponse
+         * @description JSON:API collection response for loggers.
+         */
         LoggerListResponse: {
             /** Data */
             data: components["schemas"]["LoggerResource"][];
         };
         /**
+         * LoggerRequest
+         * @description JSON:API request envelope for creating or updating a logger.
+         */
+        LoggerRequest: {
+            data: components["schemas"]["LoggerResource"];
+        };
+        /**
          * LoggerResource
+         * @description JSON:API resource envelope for a logger.
+         *
+         *     `id` is the logger's dot-separated key (e.g. `sqlalchemy.engine`).
+         *     On a `PUT /api/v1/loggers/{id}` create, the id is taken from the URL
+         *     path; on update, an `id` in the body renames the logger.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-04-01T10:00:00Z",
@@ -454,12 +574,20 @@ export interface components {
             type: "logger";
             attributes: components["schemas"]["Logger"];
         };
-        /** LoggerResponse */
+        /**
+         * LoggerResponse
+         * @description JSON:API single-resource response envelope for a logger.
+         */
         LoggerResponse: {
             data: components["schemas"]["LoggerResource"];
         };
         /**
          * LoggerSource
+         * @description A single service / environment observation of a logger.
+         *
+         *     A source row exists for every (service, environment) pair that has
+         *     reported the logger via the bulk registration endpoint. The row's
+         *     levels reflect what the SDK saw on the most recent report.
          * @example {
          *       "created_at": "2026-04-01T10:00:00Z",
          *       "environment": "production",
@@ -471,30 +599,58 @@ export interface components {
          *     }
          */
         LoggerSource: {
-            /** Service */
+            /**
+             * Service
+             * @description Service that reported the logger.
+             */
             readonly service?: string;
-            /** Environment */
+            /**
+             * Environment
+             * @description Environment the service was running in when it reported the logger.
+             */
             readonly environment?: string;
-            /** Level */
+            /**
+             * Level
+             * @description Level explicitly set on the logger in the source runtime. `null` when the runtime inherits its level.
+             */
             readonly level?: string | null;
-            /** Resolved Level */
+            /**
+             * Resolved Level
+             * @description Effective level the runtime resolved for the logger.
+             */
             readonly resolved_level?: string;
-            /** First Observed */
+            /**
+             * First Observed
+             * @description When this service / environment combination first reported the logger.
+             */
             readonly first_observed?: string | null;
-            /** Last Seen */
+            /**
+             * Last Seen
+             * @description Most recent report received for this service / environment combination.
+             */
             readonly last_seen?: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the source row was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the source row was last refreshed.
+             */
             readonly updated_at?: string | null;
         };
-        /** LoggerSourceListResponse */
+        /**
+         * LoggerSourceListResponse
+         * @description JSON:API collection response for logger sources.
+         */
         LoggerSourceListResponse: {
             /** Data */
             data: components["schemas"]["LoggerSourceResource"][];
         };
         /**
          * LoggerSourceResource
+         * @description JSON:API resource envelope for a logger source observation.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-04-01T10:00:00Z",
@@ -519,15 +675,27 @@ export interface components {
             type: "logger_source";
             attributes: components["schemas"]["LoggerSource"];
         };
-        /** ServiceAttributes */
+        /**
+         * ServiceAttributes
+         * @description A discovered service has no attributes beyond its name (the `id`).
+         */
         ServiceAttributes: Record<string, never>;
-        /** ServiceListResponse */
+        /**
+         * ServiceListResponse
+         * @description JSON:API collection response for discovered services.
+         */
         ServiceListResponse: {
             /** Data */
             data: components["schemas"]["ServiceResource"][];
         };
         /**
          * ServiceResource
+         * @description JSON:API resource envelope for a discovered service.
+         *
+         *     `id` is the service name as reported by an SDK during bulk
+         *     registration. The resource carries no additional attributes — it
+         *     represents the existence of the service in the account's
+         *     observations, nothing more.
          * @example {
          *       "attributes": {},
          *       "id": "api-gateway",
@@ -545,17 +713,30 @@ export interface components {
             /** @default {} */
             attributes: components["schemas"]["ServiceAttributes"];
         };
-        /** UsageAttributes */
+        /**
+         * UsageAttributes
+         * @description Usage counter for a single metered limit.
+         */
         UsageAttributes: {
-            /** Limit Key */
+            /**
+             * Limit Key
+             * @description Identifier of the metered limit, e.g. `logging.managed_loggers` or `logging.groups`.
+             */
             limit_key: string;
-            /** Period */
+            /**
+             * Period
+             * @description Period the counter covers. `current` is the only supported value.
+             */
             period: string;
-            /** Value */
+            /**
+             * Value
+             * @description Count for the period.
+             */
             value: number;
         };
         /**
          * UsageListResponse
+         * @description JSON:API collection response for usage counters.
          * @example {
          *       "data": [
          *         {
@@ -585,6 +766,7 @@ export interface components {
         };
         /**
          * UsageResource
+         * @description JSON:API resource envelope for a single usage counter.
          * @example {
          *       "attributes": {
          *         "limit_key": "logging.managed_loggers",
@@ -743,7 +925,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["LoggerResponse"];
+                "application/vnd.api+json": components["schemas"]["LoggerRequest"];
             };
         };
         responses: {
@@ -975,7 +1157,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["LogGroupResponse"];
+                "application/vnd.api+json": components["schemas"]["LogGroupRequest"];
             };
         };
         responses: {
@@ -1095,7 +1277,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["LogGroupResponse"];
+                "application/vnd.api+json": components["schemas"]["LogGroupRequest"];
             };
         };
         responses: {
