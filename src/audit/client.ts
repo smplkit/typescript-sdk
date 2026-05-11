@@ -164,7 +164,7 @@ function _deliveryFromResource(resource: {
     forwarderId: String(a.forwarder_id ?? ""),
     eventId: String(a.event_id ?? ""),
     attemptNumber: Number(a.attempt_number ?? 1),
-    status: (a.status as ForwarderDeliveryStatus) ?? "failed",
+    status: (a.status as ForwarderDeliveryStatus) ?? "FAILED",
     request: (a.request as Record<string, unknown> | null) ?? null,
     responseStatus: (a.response_status as number | null) ?? null,
     responseBody: (a.response_body as string | null) ?? null,
@@ -322,6 +322,7 @@ class DeliveriesClient {
     const query: Record<string, string | number> = {};
     if (params.status !== undefined) query["filter[status]"] = params.status;
     if (params.createdAtRange !== undefined) query["filter[created_at]"] = params.createdAtRange;
+    if (params.eventId !== undefined) query["filter[event_id]"] = params.eventId;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
 

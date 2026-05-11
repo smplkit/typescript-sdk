@@ -16,7 +16,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { strict as assert } from "node:assert";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { SmplClient } from "../src/index.js";
 import type { ConfigChangeEvent } from "../src/index.js";
@@ -125,8 +124,16 @@ async function main(): Promise<void> {
     // simulate someone making a change to trigger listeners
     await updateMaxRetries(client, 7);
 
-    // wait a moment for the event to be delivered
-    await sleep(200);
+    // wait for the WebSocket change event to be delivered (up to 10s)
+    await new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + 10_000;
+      const check = () => {
+        if (changes.length >= 1) return resolve();
+        if (Date.now() >= deadline) return reject(new Error("Timed out waiting for change event"));
+        setTimeout(check, 100);
+      };
+      check();
+    });
 
     // userSvcConfig always reflects the latest values
     console.log(`max_retries after update = ${userSvcConfig.max_retries}`);

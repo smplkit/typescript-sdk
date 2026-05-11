@@ -78,13 +78,13 @@ export interface HttpHeader {
  * {@link FORWARDER_TYPES} for callers that need to iterate.
  */
 export type ForwarderType =
-  | "http"
-  | "datadog"
-  | "splunk_hec"
-  | "sumo_logic"
-  | "new_relic"
-  | "honeycomb"
-  | "elastic";
+  | "HTTP"
+  | "DATADOG"
+  | "SPLUNK_HEC"
+  | "SUMO_LOGIC"
+  | "NEW_RELIC"
+  | "HONEYCOMB"
+  | "ELASTIC";
 
 /**
  * Runtime tuple of every {@link ForwarderType} value, in the same order
@@ -92,13 +92,13 @@ export type ForwarderType =
  * where a static type alone won't do.
  */
 export const FORWARDER_TYPES: readonly ForwarderType[] = [
-  "http",
-  "datadog",
-  "splunk_hec",
-  "sumo_logic",
-  "new_relic",
-  "honeycomb",
-  "elastic",
+  "HTTP",
+  "DATADOG",
+  "SPLUNK_HEC",
+  "SUMO_LOGIC",
+  "NEW_RELIC",
+  "HONEYCOMB",
+  "ELASTIC",
 ] as const;
 
 export interface ForwarderHttp {
@@ -158,10 +158,10 @@ export interface ListForwardersPage {
 }
 
 export type ForwarderDeliveryStatus =
-  | "succeeded"
-  | "failed"
-  | "filtered_out"
-  | "skipped_do_not_forward";
+  | "SUCCEEDED"
+  | "FAILED"
+  | "FILTERED_OUT"
+  | "SKIPPED_DO_NOT_FORWARD";
 
 export interface ForwarderDelivery {
   id: string;
@@ -181,6 +181,7 @@ export interface ListDeliveriesParams {
   status?: ForwarderDeliveryStatus;
   /** Range notation per ADR-014, e.g. `[2026-01-01T00:00:00Z,*)`. */
   createdAtRange?: string;
+  eventId?: string;
   pageSize?: number;
   pageAfter?: string;
 }
