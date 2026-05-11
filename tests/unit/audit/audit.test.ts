@@ -1,10 +1,11 @@
 /**
- * Tests for the audit namespace.
+ * Tests for the audit namespace — events, resource_types, actions.
  */
 
 import { describe, expect, test, vi } from "vitest";
 import * as auditIndex from "../../../src/audit/index.js";
 import { AuditClient } from "../../../src/audit/client.js";
+import { SmplNotFoundError, SmplError } from "../../../src/errors.js";
 
 // Cover the audit barrel export by referencing it.
 expect(auditIndex.AuditClient).toBe(AuditClient);
@@ -85,25 +86,31 @@ describe("AuditClient", () => {
     await client._close();
   });
 
-  test("get throws on non-2xx response", async () => {
-    const fetchMock = vi.fn(async () => new Response("not found", { status: 404 }));
+  test("get throws SmplNotFoundError on 404", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ errors: [{ status: "404", detail: "Event not found." }] }), {
+          status: 404,
+          headers: { "Content-Type": "application/vnd.api+json" },
+        }),
+    );
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
-    await expect(client.events.get("nonexistent")).rejects.toThrow(/audit get failed/);
+    await expect(client.events.get("nonexistent")).rejects.toBeInstanceOf(SmplNotFoundError);
     await client._close();
   });
 
-  test("list throws on non-2xx response", async () => {
+  test("list throws SmplError on 500", async () => {
     const fetchMock = vi.fn(async () => new Response("server error", { status: 500 }));
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
-    await expect(client.events.list()).rejects.toThrow(/audit list failed/);
+    await expect(client.events.list()).rejects.toBeInstanceOf(SmplError);
     await client._close();
   });
 
@@ -167,9 +174,6 @@ describe("AuditClient", () => {
   });
 
   test("post wrapper catches fetch exceptions and returns transient status", async () => {
-    // Forces the audit client's POST wrapper into its try/catch branch.
-    // events.flush() forces a synchronous drain pass — without it the
-    // worker timer wouldn't fire for several seconds.
     const calls: number[] = [];
     const fetchMock = vi.fn(async () => {
       calls.push(1);
@@ -181,10 +185,6 @@ describe("AuditClient", () => {
       fetch: fetchMock,
     });
     client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
-    // flush triggers a drain pass; the post wrapper's catch returns
-    // status: 0 → transient, item requeued with backoff. flush hits its
-    // 200ms timeout and returns. We just need to assert the post fn was
-    // invoked at least once.
     await client.events.flush(200);
     expect(calls.length).toBeGreaterThanOrEqual(1);
     await client._close();
@@ -275,5 +275,255 @@ describe("AuditClient — extraHeaders", () => {
     // SDK Authorization header still present
     expect(seen[0]!.get("authorization")).toMatch(/^Bearer sk_api_test$/);
     await client._close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// do_not_forward kwarg on event create
+// ---------------------------------------------------------------------------
+
+describe("AuditClient.events.record do_not_forward", () => {
+  test("forwards the do_not_forward flag in the request body", async () => {
+    let captured = "";
+    const c = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(async (input: unknown, init?: RequestInit) => {
+        const req = input instanceof Request ? input : new Request(input as string, init);
+        captured = await req.text();
+        return new Response(
+          JSON.stringify({
+            data: {
+              id: "33333333-4444-5555-6666-777777777777",
+              type: "event",
+              attributes: {
+                action: "user.created",
+                resource_type: "user",
+                resource_id: "u-1",
+                occurred_at: "2026-05-07T12:00:00+00:00",
+                created_at: "2026-05-07T12:00:01+00:00",
+                actor_type: "API_KEY",
+                actor_id: null,
+                actor_label: "",
+                data: {},
+                idempotency_key: "auto-abc",
+                do_not_forward: true,
+              },
+            },
+          }),
+          { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+        );
+      }) as typeof fetch,
+    });
+    c.events.record({
+      action: "user.created",
+      resourceType: "user",
+      resourceId: "u-1",
+      doNotForward: true,
+    });
+    await c.events.flush(2000);
+    expect(captured).toContain('"do_not_forward":true');
+    await c._close();
+  });
+
+  test("event from resource preserves doNotForward", async () => {
+    const c = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                id: "33333333-4444-5555-6666-777777777777",
+                type: "event",
+                attributes: {
+                  action: "x",
+                  resource_type: "y",
+                  resource_id: "z",
+                  occurred_at: "2026-05-07T12:00:00+00:00",
+                  created_at: "2026-05-07T12:00:01+00:00",
+                  actor_type: "API_KEY",
+                  actor_id: null,
+                  actor_label: "",
+                  data: {},
+                  idempotency_key: "auto",
+                  do_not_forward: true,
+                },
+              },
+            }),
+          ),
+      ) as typeof fetch,
+    });
+    const ev = await c.events.get("33333333-4444-5555-6666-777777777777");
+    expect(ev.doNotForward).toBe(true);
+    await c._close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resource_types
+// ---------------------------------------------------------------------------
+
+describe("AuditClient.resourceTypes", () => {
+  function _newClient(handler: (req: Request) => Promise<Response>): AuditClient {
+    return new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(async (input: unknown, init?: RequestInit) => {
+        const req = input instanceof Request ? input : new Request(input as string, init);
+        return handler(req);
+      }) as typeof fetch,
+    });
+  }
+
+  test("list returns resource type slugs", async () => {
+    const c = _newClient(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "invoice",
+                type: "resource_type",
+                attributes: { resource_type: "invoice", created_at: "2026-01-01T00:00:00Z" },
+              },
+              {
+                id: "user",
+                type: "resource_type",
+                attributes: { resource_type: "user", created_at: "2026-01-02T00:00:00Z" },
+              },
+            ],
+            meta: { page_size: 20 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        ),
+    );
+    const page = await c.resourceTypes.list();
+    expect(page.resourceTypes).toHaveLength(2);
+    expect(page.resourceTypes[0]!.id).toBe("invoice");
+    expect(page.resourceTypes[1]!.id).toBe("user");
+    expect(page.nextCursor).toBeNull();
+    await c._close();
+  });
+
+  test("list parses next cursor", async () => {
+    const c = _newClient(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "invoice",
+                type: "resource_type",
+                attributes: { resource_type: "invoice", created_at: "2026-01-01T00:00:00Z" },
+              },
+            ],
+            meta: { page_size: 1 },
+            links: { next: "/api/v1/resource_types?page[size]=1&page[after]=cursor-abc" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        ),
+    );
+    const page = await c.resourceTypes.list({ pageSize: 1 });
+    expect(page.nextCursor).toBe("cursor-abc");
+    await c._close();
+  });
+
+  test("list throws SmplError on 500", async () => {
+    const c = _newClient(async () => new Response("server error", { status: 500 }));
+    await expect(c.resourceTypes.list()).rejects.toBeInstanceOf(SmplError);
+    await c._close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// actions
+// ---------------------------------------------------------------------------
+
+describe("AuditClient.actions", () => {
+  function _newClient(handler: (req: Request) => Promise<Response>): AuditClient {
+    return new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(async (input: unknown, init?: RequestInit) => {
+        const req = input instanceof Request ? input : new Request(input as string, init);
+        return handler(req);
+      }) as typeof fetch,
+    });
+  }
+
+  test("list returns action slugs", async () => {
+    const c = _newClient(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "invoice.created",
+                type: "action",
+                attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
+              },
+              {
+                id: "user.updated",
+                type: "action",
+                attributes: { action: "user.updated", created_at: "2026-01-02T00:00:00Z" },
+              },
+            ],
+            meta: { page_size: 20 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        ),
+    );
+    const page = await c.actions.list();
+    expect(page.actions).toHaveLength(2);
+    expect(page.actions[0]!.id).toBe("invoice.created");
+    expect(page.actions[1]!.id).toBe("user.updated");
+    expect(page.nextCursor).toBeNull();
+    await c._close();
+  });
+
+  test("list passes filter[resource_type] when filterResourceType given", async () => {
+    let capturedUrl = "";
+    const c = _newClient(async (req) => {
+      capturedUrl = req.url;
+      return new Response(JSON.stringify({ data: [], meta: { page_size: 20 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/vnd.api+json" },
+      });
+    });
+    await c.actions.list({ filterResourceType: "invoice" });
+    // openapi-fetch may or may not percent-encode brackets; check for either form
+    expect(capturedUrl).toMatch(/filter(\[|%5B)resource_type(\]|%5D)=invoice/);
+    await c._close();
+  });
+
+  test("list parses next cursor", async () => {
+    const c = _newClient(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "invoice.created",
+                type: "action",
+                attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
+              },
+            ],
+            meta: { page_size: 1 },
+            links: { next: "/api/v1/actions?page[size]=1&page[after]=cursor-xyz" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        ),
+    );
+    const page = await c.actions.list({ pageSize: 1 });
+    expect(page.nextCursor).toBe("cursor-xyz");
+    await c._close();
+  });
+
+  test("list throws SmplError on 500", async () => {
+    const c = _newClient(async () => new Response("server error", { status: 500 }));
+    await expect(c.actions.list()).rejects.toBeInstanceOf(SmplError);
+    await c._close();
   });
 });

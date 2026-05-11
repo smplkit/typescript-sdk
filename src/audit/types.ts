@@ -61,7 +61,51 @@ export interface ListEventsPage {
 }
 
 // ---------------------------------------------------------------------------
-// Forwarders (SIEM streaming, Pro tier)
+// Resource types (distinct resource_type slugs seen in the account)
+// ---------------------------------------------------------------------------
+
+export interface ResourceType {
+  /** The resource_type slug. */
+  id: string;
+  createdAt: string;
+}
+
+export interface ListResourceTypesParams {
+  pageSize?: number;
+  pageAfter?: string;
+}
+
+export interface ListResourceTypesPage {
+  resourceTypes: ResourceType[];
+  /** Opaque cursor for the next page, or null if this is the last page. */
+  nextCursor: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Actions (distinct action slugs seen in the account)
+// ---------------------------------------------------------------------------
+
+export interface Action {
+  /** The action slug. */
+  id: string;
+  createdAt: string;
+}
+
+export interface ListActionsParams {
+  /** When set, returns only the actions seen with this resource_type. */
+  filterResourceType?: string;
+  pageSize?: number;
+  pageAfter?: string;
+}
+
+export interface ActionListPage {
+  actions: Action[];
+  /** Opaque cursor for the next page, or null if this is the last page. */
+  nextCursor: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Forwarders (SIEM streaming)
 // ---------------------------------------------------------------------------
 
 export interface HttpHeader {
@@ -123,7 +167,6 @@ export interface Forwarder {
   transform: string | null;
   /** Header values are returned redacted on reads. */
   http: ForwarderHttp;
-  data: Record<string, unknown>;
   createdAt: string | null;
   updatedAt: string | null;
   deletedAt: string | null;
@@ -137,7 +180,6 @@ export interface CreateForwarderInput {
   enabled?: boolean;
   filter?: Record<string, unknown>;
   transform?: string;
-  data?: Record<string, unknown>;
 }
 
 export interface UpdateForwarderInput extends CreateForwarderInput {
@@ -155,67 +197,4 @@ export interface ListForwardersParams {
 export interface ListForwardersPage {
   forwarders: Forwarder[];
   nextCursor: string | null;
-}
-
-export type ForwarderDeliveryStatus =
-  | "SUCCEEDED"
-  | "FAILED"
-  | "FILTERED_OUT"
-  | "SKIPPED_DO_NOT_FORWARD";
-
-export interface ForwarderDelivery {
-  id: string;
-  forwarderId: string;
-  eventId: string;
-  attemptNumber: number;
-  status: ForwarderDeliveryStatus;
-  request: Record<string, unknown> | null;
-  responseStatus: number | null;
-  responseBody: string | null;
-  latencyMs: number | null;
-  error: string | null;
-  createdAt: string | null;
-}
-
-export interface ListDeliveriesParams {
-  status?: ForwarderDeliveryStatus;
-  /** Range notation per ADR-014, e.g. `[2026-01-01T00:00:00Z,*)`. */
-  createdAtRange?: string;
-  eventId?: string;
-  pageSize?: number;
-  pageAfter?: string;
-}
-
-export interface ListDeliveriesPage {
-  deliveries: ForwarderDelivery[];
-  nextCursor: string | null;
-}
-
-export interface RetryFailedDeliveriesSummary {
-  attempted: number;
-  succeeded: number;
-  failed: number;
-}
-
-// ---------------------------------------------------------------------------
-// functions.test_forwarder
-// ---------------------------------------------------------------------------
-
-export interface TestForwarderRequest {
-  url: string;
-  method?: string;
-  headers?: HttpHeader[];
-  body?: string | null;
-  successStatus?: string;
-  /** Capped at 30s server-side. */
-  timeoutMs?: number;
-}
-
-export interface TestForwarderResult {
-  succeeded: boolean;
-  responseStatus: number | null;
-  responseHeaders: Record<string, string>;
-  responseBody: string;
-  latencyMs: number | null;
-  error: string | null;
 }

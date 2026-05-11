@@ -125,6 +125,20 @@ export class SmplValidationError extends SmplError {
   }
 }
 
+/** Raised when the server requires a higher plan tier (HTTP 402). */
+export class SmplPaymentRequiredError extends SmplError {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorDetail[],
+  ) {
+    super(message, statusCode ?? 402, responseBody, errors);
+    this.name = "SmplPaymentRequiredError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // `Smplkit*` aliases — added in PR #103 for callers that prefer the
 // longer prefix (matches the package name `@smplkit/sdk`). They are
@@ -137,6 +151,7 @@ export { SmplTimeoutError as SmplkitTimeoutError };
 export { SmplNotFoundError as SmplkitNotFoundError };
 export { SmplConflictError as SmplkitConflictError };
 export { SmplValidationError as SmplkitValidationError };
+export { SmplPaymentRequiredError as SmplkitPaymentRequiredError };
 
 /** @deprecated Use {@link ApiErrorDetail}. */
 export type ApiErrorObject = ApiErrorDetail;
@@ -199,6 +214,8 @@ export function throwForStatus(statusCode: number, body: string): never {
     case 400:
     case 422:
       throw new SmplValidationError(message, statusCode, body, errors);
+    case 402:
+      throw new SmplPaymentRequiredError(message, statusCode, body, errors);
     case 404:
       throw new SmplNotFoundError(message, statusCode, body, errors);
     case 409:

@@ -15,6 +15,7 @@ import {
   ContextTypesClient,
   ContextsClient,
   EnvironmentsClient,
+  ManagementAuditClient,
   SmplManagementClient,
 } from "../../../src/index.js";
 import { ContextRegistrationBuffer } from "../../../src/management/client.js";
@@ -49,7 +50,7 @@ describe("SmplManagementClient", () => {
     expect(fetchSpy).toEqual([]);
   });
 
-  it("exposes eight flat namespaces", () => {
+  it("exposes nine flat namespaces", () => {
     const mgmt = new SmplManagementClient();
     expect(mgmt.contexts).toBeInstanceOf(ContextsClient);
     expect(mgmt.contextTypes).toBeInstanceOf(ContextTypesClient);
@@ -59,6 +60,7 @@ describe("SmplManagementClient", () => {
     expect(mgmt.flags).toBeDefined();
     expect(mgmt.loggers).toBeDefined();
     expect(mgmt.logGroups).toBeDefined();
+    expect(mgmt.audit).toBeInstanceOf(ManagementAuditClient);
   });
 
   it("close() is idempotent and best-effort", async () => {

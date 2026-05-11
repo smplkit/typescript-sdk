@@ -13,10 +13,16 @@ export type { SmplManagementClientOptions } from "./management/client.js";
 // Audit
 export { AuditClient } from "./audit/client.js";
 export type {
+  Action as AuditAction,
+  ActionListPage as AuditActionListPage,
+  ListActionsParams as AuditListActionsParams,
   AuditEvent,
   CreateEventInput as CreateAuditEventInput,
   ListEventsPage as AuditEventListPage,
   ListEventsParams as AuditEventListParams,
+  ResourceType as AuditResourceType,
+  ListResourceTypesPage as AuditResourceTypeListPage,
+  ListResourceTypesParams as AuditListResourceTypesParams,
 } from "./audit/types.js";
 
 // Config
@@ -59,6 +65,10 @@ export {
   ContextsClient,
   AccountSettingsClient,
 } from "./management/client.js";
+export {
+  ManagementAuditClient,
+  ForwardersClient as AuditForwardersClient,
+} from "./management/audit.js";
 export { Environment, ContextType, AccountSettings } from "./management/models.js";
 export { EnvironmentClassification, Color } from "./management/types.js";
 
@@ -76,11 +86,13 @@ export {
   SmplNotFoundError,
   SmplConflictError,
   SmplValidationError,
+  SmplPaymentRequiredError,
   SmplkitError,
   SmplkitConnectionError,
   SmplkitTimeoutError,
   SmplkitNotFoundError,
   SmplkitConflictError,
   SmplkitValidationError,
+  SmplkitPaymentRequiredError,
 } from "./errors.js";
 export type { ApiErrorDetail, ApiErrorObject } from "./errors.js";

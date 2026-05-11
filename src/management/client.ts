@@ -9,7 +9,7 @@
  *
  * Right for setup scripts, CI, admin tooling, and one-off CRUD.
  *
- * Eight flat namespaces:
+ * Nine flat namespaces:
  *   - mgmt.contexts
  *   - mgmt.contextTypes
  *   - mgmt.environments
@@ -18,6 +18,7 @@
  *   - mgmt.flags
  *   - mgmt.loggers
  *   - mgmt.logGroups
+ *   - mgmt.audit            (SIEM forwarder CRUD)
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,6 +37,7 @@ import { Context } from "../flags/types.js";
 import { ManagementConfigClient } from "./config.js";
 import { ManagementFlagsClient } from "./flags.js";
 import { LoggersClient, LogGroupsClient } from "./logging.js";
+import { ManagementAuditClient } from "./audit.js";
 import { resolveManagementConfig, serviceUrl } from "../config.js";
 import type { ResolvedManagementConfig } from "../config.js";
 
@@ -43,6 +45,7 @@ type AppHttp = ReturnType<typeof createClient<import("../generated/app.d.ts").pa
 type ConfigHttp = ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
 type FlagsHttp = ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
 type LoggingHttp = ReturnType<typeof createClient<import("../generated/logging.d.ts").paths>>;
+type AuditHttp = ReturnType<typeof createClient<import("../generated/audit.d.ts").paths>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -696,6 +699,8 @@ export class SmplManagementClient {
   readonly loggers: LoggersClient;
   /** Log group CRUD. */
   readonly logGroups: LogGroupsClient;
+  /** Audit SIEM forwarder CRUD. */
+  readonly audit: ManagementAuditClient;
 
   /** @internal — shared HTTP transports (so SmplClient can alias them). */
   readonly _appHttp: AppHttp;
@@ -718,6 +723,7 @@ export class SmplManagementClient {
     this.flags = this._flagsRef;
     this.loggers = this._loggersRef;
     this.logGroups = this._logGroupsRef;
+    this.audit = this._auditRef;
     this._appHttp = this._appHttpRef;
     this._configHttp = this._configHttpRef;
     this._flagsHttp = this._flagsHttpRef;
@@ -735,6 +741,7 @@ export class SmplManagementClient {
   private _flagsRef!: ManagementFlagsClient;
   private _loggersRef!: LoggersClient;
   private _logGroupsRef!: LogGroupsClient;
+  private _auditRef!: ManagementAuditClient;
   private _appHttpRef!: AppHttp;
   private _configHttpRef!: ConfigHttp;
   private _flagsHttpRef!: FlagsHttp;
@@ -746,10 +753,17 @@ export class SmplManagementClient {
     const configBaseUrl = serviceUrl(cfg.scheme, "config", cfg.baseDomain);
     const flagsBaseUrl = serviceUrl(cfg.scheme, "flags", cfg.baseDomain);
     const loggingBaseUrl = serviceUrl(cfg.scheme, "logging", cfg.baseDomain);
+    const auditBaseUrl = serviceUrl(cfg.scheme, "audit", cfg.baseDomain);
 
     const headers = {
       Authorization: `Bearer ${cfg.apiKey}`,
       Accept: "application/json",
+    };
+
+    const auditHeaders = {
+      Authorization: `Bearer ${cfg.apiKey}`,
+      Accept: "application/vnd.api+json",
+      "Content-Type": "application/vnd.api+json",
     };
 
     this._appHttpRef = createClient<import("../generated/app.d.ts").paths>({
@@ -768,6 +782,10 @@ export class SmplManagementClient {
       baseUrl: loggingBaseUrl,
       headers,
     });
+    const auditHttpRef = createClient<import("../generated/audit.d.ts").paths>({
+      baseUrl: auditBaseUrl,
+      headers: auditHeaders,
+    });
 
     this._sharedContextBuffer = new ContextRegistrationBuffer();
 
@@ -779,6 +797,7 @@ export class SmplManagementClient {
     this._flagsRef = new ManagementFlagsClient(this._flagsHttpRef);
     this._loggersRef = new LoggersClient(this._loggingHttpRef);
     this._logGroupsRef = new LogGroupsClient(this._loggingHttpRef);
+    this._auditRef = new ManagementAuditClient(auditHttpRef as AuditHttp);
   }
 
   /** @internal — used by SmplClient to share the buffer. */

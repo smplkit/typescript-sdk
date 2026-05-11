@@ -6,6 +6,7 @@ import {
   SmplNotFoundError,
   SmplConflictError,
   SmplValidationError,
+  SmplPaymentRequiredError,
   throwForStatus,
 } from "../../src/errors.js";
 
@@ -99,6 +100,24 @@ describe("SmplConflictError", () => {
   it("should have the correct name", () => {
     const error = new SmplConflictError("fail");
     expect(error.name).toBe("SmplConflictError");
+  });
+});
+
+describe("SmplPaymentRequiredError", () => {
+  it("should extend SmplError", () => {
+    const error = new SmplPaymentRequiredError("plan required");
+    expect(error).toBeInstanceOf(SmplError);
+    expect(error).toBeInstanceOf(SmplPaymentRequiredError);
+  });
+
+  it("should default statusCode to 402", () => {
+    const error = new SmplPaymentRequiredError("plan required");
+    expect(error.statusCode).toBe(402);
+  });
+
+  it("should have the correct name", () => {
+    const error = new SmplPaymentRequiredError("plan required");
+    expect(error.name).toBe("SmplPaymentRequiredError");
   });
 });
 
@@ -267,6 +286,29 @@ describe("throwForStatus", () => {
       const e = error as SmplNotFoundError;
       expect(e.message).toBe("Config 'abc' does not exist.");
       expect(e.statusCode).toBe(404);
+      expect(e.errors).toHaveLength(1);
+    }
+  });
+
+  it("should throw SmplPaymentRequiredError with server's detail for 402", () => {
+    const body = JSON.stringify({
+      errors: [
+        {
+          status: "402",
+          title: "Payment Required",
+          detail: "Pro plan required for this feature.",
+        },
+      ],
+    });
+
+    try {
+      throwForStatus(402, body);
+      expect.fail("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SmplPaymentRequiredError);
+      const e = error as SmplPaymentRequiredError;
+      expect(e.message).toBe("Pro plan required for this feature.");
+      expect(e.statusCode).toBe(402);
       expect(e.errors).toHaveLength(1);
     }
   });
