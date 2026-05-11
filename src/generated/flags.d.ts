@@ -13,13 +13,13 @@ export interface paths {
         };
         /**
          * List Flags
-         * @description List all feature flags for the authenticated account.
+         * @description List feature flags for this account.
          */
         get: operations["list_flags"];
         put?: never;
         /**
          * Create Flag
-         * @description Create a new feature flag. The caller provides the id (key) in the request body.
+         * @description Create a new feature flag. The caller provides the id (the flag key) in the request body.
          */
         post: operations["create_flag"];
         delete?: never;
@@ -37,12 +37,12 @@ export interface paths {
         };
         /**
          * Get Flag
-         * @description Return a feature flag by its key.
+         * @description Retrieve a feature flag by its key.
          */
         get: operations["get_flag"];
         /**
          * Update Flag
-         * @description Replace a feature flag entirely.
+         * @description Replace a feature flag entirely. Every writable field is overwritten.
          */
         put: operations["update_flag"];
         post?: never;
@@ -67,7 +67,10 @@ export interface paths {
         put?: never;
         /**
          * Bulk Register Flags
-         * @description Register flags discovered by an SDK. Creates new flags or updates source observations on existing ones.
+         * @description Register flags discovered by an SDK.
+         *
+         *     Creates a new flag for each unreported key and refreshes the
+         *     service/environment source observation on each already-known key.
          */
         post: operations["bulk_register_flags"];
         delete?: never;
@@ -85,7 +88,7 @@ export interface paths {
         };
         /**
          * List Flag Sources
-         * @description List all sources (service/environment observations) for a specific flag.
+         * @description List the service/environment observations recorded for a single flag.
          */
         get: operations["list_flag_sources"];
         put?: never;
@@ -105,7 +108,9 @@ export interface paths {
         };
         /**
          * List All Flag Sources
-         * @description List all flag sources across all flags. Optionally filter by environment or service.
+         * @description List service/environment observations across all flags for this account.
+         *
+         *     Filter by `environment` or `service` (or both) to narrow the result.
          */
         get: operations["list_all_flag_sources"];
         put?: never;
@@ -127,10 +132,13 @@ export interface paths {
         put?: never;
         /**
          * Execute Remove References
-         * @description Bulk-remove context references from flag rules.
+         * @description Remove every rule that references a specific context across every flag.
          *
-         *     Traverses every flag in the account, removes rules that reference the
-         *     specified context, and emits a single flags_changed event when done.
+         *     Provide exactly one of `context` (matches a single instance,
+         *     formatted as `{type}:{key}`) or `context_type` (matches any
+         *     attribute of that context type). Rules whose reference sits inside
+         *     an AND expression are not removed automatically; they are returned
+         *     in `rules_needing_manual_review` for the caller to handle.
          */
         post: operations["remove_references"];
         delete?: never;
@@ -148,7 +156,7 @@ export interface paths {
         };
         /**
          * List Flags Usage
-         * @description Return current resource usage counts for the authenticated account.
+         * @description Report current-period usage counters for this account.
          */
         get: operations["list_flags_usage"];
         put?: never;
@@ -165,6 +173,15 @@ export interface components {
     schemas: {
         /**
          * Flag
+         * @description A feature flag whose value is resolved at runtime from environment
+         *     rules and a default.
+         *
+         *     A flag has a value type (`BOOLEAN`, `STRING`, `NUMERIC`, or `JSON`)
+         *     and either a fixed set of allowed values (constrained) or accepts
+         *     any value matching the type (unconstrained). Each environment can
+         *     enable or disable the flag, set its own default, and define
+         *     targeting rules that override the default for specific evaluation
+         *     contexts.
          * @example {
          *       "created_at": "2026-03-27T10:00:00Z",
          *       "default": false,
@@ -177,9 +194,12 @@ export interface components {
          *             {
          *               "description": "Beta users get dark mode",
          *               "logic": {
-         *                 "attribute": "beta",
-         *                 "op": "eq",
-         *                 "value": true
+         *                 "==": [
+         *                   {
+         *                     "var": "customer.beta"
+         *                   },
+         *                   true
+         *                 ]
          *               },
          *               "value": true
          *             }
@@ -210,46 +230,61 @@ export interface components {
         Flag: {
             /**
              * Name
-             * @description Human-readable display name
+             * @description Human-readable display name for the flag.
              */
             name: string;
-            /** Description */
+            /**
+             * Description
+             * @description Human-readable description of the flag's purpose.
+             */
             description?: string | null;
             /**
              * Type
-             * @description Value type: STRING, BOOLEAN, NUMERIC, or JSON
+             * @description Value type of the flag. Accepted case-insensitively. Changing the type cascades to `values`, `default`, and every environment's rules and default.
+             * @enum {string}
              */
-            type: string;
+            type: "BOOLEAN" | "STRING" | "NUMERIC" | "JSON";
             /**
              * Default
-             * @description Default value; must reference a value in the values array (constrained) or match the flag type (unconstrained)
+             * @description Default value returned when no environment rule fires and the environment has no `default`. For constrained flags (non-null `values`), must equal one of the entries in the `values` array. For unconstrained flags, must match `type`.
              */
             default: unknown;
             /**
              * Values
-             * @description Ordered set of allowed values (constrained), or null (unconstrained)
+             * @description Ordered set of allowed values for a constrained flag, or `null` for an unconstrained flag. `BOOLEAN` flags, if constrained, must declare exactly two values.
              */
             values?: components["schemas"]["FlagValue"][] | null;
-            /** Environments */
+            /**
+             * Environments
+             * @description Per-environment configuration keyed by environment name (`production`, `staging`, etc.). Environments not listed fall back to the flag's global `default`.
+             */
             environments?: {
                 [key: string]: components["schemas"]["FlagEnvironment"];
             };
             /**
              * Managed
-             * @description True if admin-managed, false if auto-discovered
+             * @description `true` when the flag was created through the API, `false` when it was auto-discovered from a bulk-register call. Auto-discovered flags can be edited and converted to managed by setting this to `true`.
              */
             managed?: boolean | null;
-            /** Sources */
-            readonly sources?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Created At */
+            /**
+             * Sources
+             * @description SDK-reported observations of this flag, grouped by service and environment. Populated automatically by the bulk-register endpoint.
+             */
+            readonly sources?: components["schemas"]["FlagSource"][] | null;
+            /**
+             * Created At
+             * @description When the flag was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the flag was last modified.
+             */
             readonly updated_at?: string | null;
         };
         /**
          * FlagBulkItem
+         * @description One flag declaration reported by an SDK during bulk registration.
          * @example {
          *       "default": false,
          *       "environment": "production",
@@ -261,32 +296,34 @@ export interface components {
         FlagBulkItem: {
             /**
              * Id
-             * @description Flag key as declared in code
+             * @description Flag key as declared in code. URL-safe and stable for the lifetime of the flag.
              */
             id: string;
             /**
              * Type
-             * @description Flag type: BOOLEAN, STRING, NUMERIC, or JSON
+             * @description Value type the SDK declared for the flag. Accepted case-insensitively.
+             * @enum {string}
              */
-            type: string;
+            type: "BOOLEAN" | "STRING" | "NUMERIC" | "JSON";
             /**
              * Default
-             * @description Default value declared in code
+             * @description Default value the SDK declared for the flag. Used to create the flag if it does not already exist.
              */
             default: unknown;
             /**
              * Service
-             * @description Service that declared this flag
+             * @description Service reporting the declaration. Defaults to `unknown`.
              */
             service?: string | null;
             /**
              * Environment
-             * @description Environment where observed
+             * @description Environment reporting the declaration. Defaults to `unknown`.
              */
             environment?: string | null;
         };
         /**
          * FlagBulkRequest
+         * @description Inputs to the bulk-register-flags action.
          * @example {
          *       "flags": [
          *         {
@@ -307,38 +344,70 @@ export interface components {
          *     }
          */
         FlagBulkRequest: {
-            /** Flags */
+            /**
+             * Flags
+             * @description Flags reported by the SDK in this batch.
+             */
             flags: components["schemas"]["FlagBulkItem"][];
         };
         /**
          * FlagBulkResponse
+         * @description Result of a bulk-register-flags action.
          * @example {
          *       "registered": 5
          *     }
          */
         FlagBulkResponse: {
-            /** Registered */
+            /**
+             * Registered
+             * @description Number of items in the batch that were registered or refreshed.
+             */
             registered: number;
         };
-        /** FlagEnvironment */
+        /**
+         * FlagEnvironment
+         * @description Per-environment evaluation configuration for a flag.
+         */
         FlagEnvironment: {
             /**
              * Enabled
+             * @description Whether the flag is active in this environment. When `false`, evaluation skips rules and returns the flag's global `default`.
              * @default true
              */
             enabled: boolean;
-            /** Default */
+            /**
+             * Default
+             * @description Environment-level default returned when no rule fires. If `null`, evaluation falls back to the flag's global `default`.
+             */
             default?: unknown | null;
-            /** Rules */
+            /**
+             * Rules
+             * @description Targeting rules evaluated top-down. The first rule whose logic returns truthy provides the result.
+             */
             rules?: components["schemas"]["FlagRule"][];
         };
-        /** FlagListResponse */
+        /**
+         * FlagListResponse
+         * @description JSON:API collection response envelope for flags.
+         */
         FlagListResponse: {
             /** Data */
             data: components["schemas"]["FlagResource"][];
         };
         /**
+         * FlagRequest
+         * @description JSON:API request envelope for creating or updating a flag.
+         */
+        FlagRequest: {
+            data: components["schemas"]["FlagResource"];
+        };
+        /**
          * FlagResource
+         * @description JSON:API resource envelope for a flag.
+         *
+         *     `id` is the flag key. For create requests, `id` is required and is
+         *     chosen by the caller. For update requests, `id` may be omitted (the
+         *     server reads the key from the URL) or supplied to rename the flag.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-27T10:00:00Z",
@@ -352,9 +421,12 @@ export interface components {
          *               {
          *                 "description": "Beta users get dark mode",
          *                 "logic": {
-         *                   "attribute": "beta",
-         *                   "op": "eq",
-         *                   "value": true
+         *                   "==": [
+         *                     {
+         *                       "var": "customer.beta"
+         *                     },
+         *                     true
+         *                   ]
          *                 },
          *                 "value": true
          *               }
@@ -390,68 +462,110 @@ export interface components {
             type: "flag";
             attributes: components["schemas"]["Flag"];
         };
-        /** FlagResponse */
+        /**
+         * FlagResponse
+         * @description JSON:API single-resource response envelope for a flag.
+         */
         FlagResponse: {
             data: components["schemas"]["FlagResource"];
         };
-        /** FlagRule */
+        /**
+         * FlagRule
+         * @description A targeting rule that overrides the default within an environment.
+         */
         FlagRule: {
-            /** Description */
+            /**
+             * Description
+             * @description Human-readable description of the rule.
+             */
             description?: string | null;
-            /** Logic */
+            /**
+             * Logic
+             * @description JSON Logic expression evaluated against the evaluation context. The rule fires when the expression is truthy.
+             */
             logic: {
                 [key: string]: unknown;
             };
-            /** Value */
+            /**
+             * Value
+             * @description Value returned when the rule fires. Must reference a value from the flag's `values` array (constrained flags) or match the flag's `type` (unconstrained flags).
+             */
             value: unknown;
         };
         /**
          * FlagSource
-         * @example {
-         *       "created_at": "2026-04-17T10:00:00Z",
-         *       "data": {
-         *         "default": true,
-         *         "type": "BOOLEAN"
-         *       },
-         *       "environment": "production",
-         *       "first_observed": "2026-04-17T10:00:00Z",
-         *       "last_seen": "2026-04-17T15:30:00Z",
-         *       "service": "api-gateway",
-         *       "updated_at": "2026-04-17T15:30:00Z"
-         *     }
+         * @description A record of an SDK observing a feature flag from a particular
+         *     service and environment.
+         *
+         *     The flags service auto-registers a source the first time an SDK
+         *     reports a flag from a given service/environment pair and refreshes
+         *     `last_seen` on every subsequent report. Each source captures the
+         *     value type and default value the SDK declared in source code at
+         *     that location, which makes it possible to detect when service code
+         *     has drifted from the flag's authoritative configuration.
          */
         FlagSource: {
-            /** Service */
-            readonly service?: string;
-            /** Environment */
-            readonly environment?: string;
-            /** First Observed */
+            /**
+             * Service
+             * @description Service that declared the flag.
+             */
+            readonly service?: string | null;
+            /**
+             * Environment
+             * @description Environment in which the service declared the flag.
+             */
+            readonly environment?: string | null;
+            /**
+             * Declared Type
+             * @description Value type the SDK reported when registering the flag from this service/environment. May differ from the flag's authoritative `type` if the service is running stale code.
+             */
+            readonly declared_type?: ("BOOLEAN" | "STRING" | "NUMERIC" | "JSON") | null;
+            /**
+             * Declared Default
+             * @description Default value the SDK reported when registering the flag from this service/environment. May differ from the flag's authoritative `default` if the service is running stale code.
+             */
+            readonly declared_default?: unknown;
+            /**
+             * First Observed
+             * @description When this source was first observed.
+             */
             readonly first_observed?: string | null;
-            /** Last Seen */
+            /**
+             * Last Seen
+             * @description Most recent time the SDK re-registered this source.
+             */
             readonly last_seen?: string | null;
-            /** Data */
-            readonly data?: {
-                [key: string]: unknown;
-            } | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the source record was created.
+             */
             readonly created_at?: string | null;
-            /** Updated At */
+            /**
+             * Updated At
+             * @description When the source record was last modified.
+             */
             readonly updated_at?: string | null;
         };
-        /** FlagSourceListResponse */
+        /**
+         * FlagSourceListResponse
+         * @description JSON:API collection response envelope for flag sources.
+         */
         FlagSourceListResponse: {
             /** Data */
             data: components["schemas"]["FlagSourceResource"][];
         };
         /**
          * FlagSourceResource
+         * @description JSON:API resource envelope for a flag source.
+         *
+         *     `id` is the source record's UUID. Sources are not created or
+         *     modified directly — the flags service registers and refreshes them
+         *     in response to SDK bulk-register requests.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-04-17T10:00:00Z",
-         *         "data": {
-         *           "default": true,
-         *           "type": "BOOLEAN"
-         *         },
+         *         "declared_default": true,
+         *         "declared_type": "BOOLEAN",
          *         "environment": "production",
          *         "first_observed": "2026-04-17T10:00:00Z",
          *         "last_seen": "2026-04-17T15:30:00Z",
@@ -472,46 +586,99 @@ export interface components {
             type: "flag_source";
             attributes: components["schemas"]["FlagSource"];
         };
-        /** FlagValue */
+        /**
+         * FlagValue
+         * @description A named value in a constrained flag's value set.
+         */
         FlagValue: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable label for the value.
+             */
             name: string;
-            /** Value */
+            /**
+             * Value
+             * @description The value itself. Must match the flag's `type`.
+             */
             value: unknown;
         };
-        /** ManualReviewItem */
+        /**
+         * ManualReviewItem
+         * @description A flag rule that could not be safely modified by the bulk
+         *     remove-references action.
+         */
         ManualReviewItem: {
-            /** Flag */
+            /**
+             * Flag
+             * @description Key of the flag containing the rule.
+             */
             flag: string;
-            /** Environment */
+            /**
+             * Environment
+             * @description Environment containing the rule.
+             */
             environment: string;
-            /** Rule Index */
+            /**
+             * Rule Index
+             * @description Position of the rule within the environment's `rules` array.
+             */
             rule_index: number;
-            /** Reason */
+            /**
+             * Reason
+             * @description Why the rule needs manual review.
+             */
             reason: string;
         };
-        /** RemoveReferencesAttributes */
+        /**
+         * RemoveReferencesAttributes
+         * @description Counts and follow-ups returned by the remove-references action.
+         */
         RemoveReferencesAttributes: {
-            /** Flags Modified */
+            /**
+             * Flags Modified
+             * @description Keys of flags whose rules were modified.
+             */
             flags_modified: string[];
-            /** Rules Removed */
+            /**
+             * Rules Removed
+             * @description Total number of rules removed across all flags.
+             */
             rules_removed: number;
-            /** Rules Needing Manual Review */
+            /**
+             * Rules Needing Manual Review
+             * @description Rules that referenced the context but could not be removed automatically (typically because the reference is inside an `and` expression where removal would broaden the rule).
+             */
             rules_needing_manual_review: components["schemas"]["ManualReviewItem"][];
         };
-        /** RemoveReferencesRequest */
+        /**
+         * RemoveReferencesRequest
+         * @description Inputs to the remove-references action.
+         *
+         *     Exactly one of `context` or `context_type` must be provided.
+         */
         RemoveReferencesRequest: {
-            /** Context */
+            /**
+             * Context
+             * @description Identifier of the context instance to remove references to, formatted as `{type}:{key}` (e.g. `customer:c-123`).
+             */
             context?: string | null;
-            /** Context Type */
+            /**
+             * Context Type
+             * @description Context type to remove all references to (any attribute of this type).
+             */
             context_type?: string | null;
         };
-        /** RemoveReferencesResultEnvelope */
+        /**
+         * RemoveReferencesResultEnvelope
+         * @description JSON:API single-resource response envelope for the
+         *     remove-references action.
+         */
         RemoveReferencesResultEnvelope: {
             data: components["schemas"]["RemoveReferencesResultResource"];
         };
         /**
          * RemoveReferencesResultResource
+         * @description JSON:API resource envelope for the remove-references result.
          * @example {
          *       "attributes": {
          *         "flags_modified": [
@@ -540,17 +707,30 @@ export interface components {
             type: "remove_references_result";
             attributes: components["schemas"]["RemoveReferencesAttributes"];
         };
-        /** UsageAttributes */
+        /**
+         * UsageAttributes
+         * @description Usage counter for a single metered limit.
+         */
         UsageAttributes: {
-            /** Limit Key */
+            /**
+             * Limit Key
+             * @description Identifier of the metered limit, e.g. `flags.items`.
+             */
             limit_key: string;
-            /** Period */
+            /**
+             * Period
+             * @description Period the counter covers. `current` is the only supported value.
+             */
             period: string;
-            /** Value */
+            /**
+             * Value
+             * @description Count for the period.
+             */
             value: number;
         };
         /**
          * UsageListResponse
+         * @description JSON:API collection response envelope for usage counters.
          * @example {
          *       "data": [
          *         {
@@ -571,6 +751,7 @@ export interface components {
         };
         /**
          * UsageResource
+         * @description JSON:API resource envelope for a usage counter.
          * @example {
          *       "attributes": {
          *         "limit_key": "flags.items",
@@ -636,7 +817,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["FlagResponse"];
+                "application/vnd.api+json": components["schemas"]["FlagRequest"];
             };
         };
         responses: {
@@ -684,7 +865,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["FlagResponse"];
+                "application/vnd.api+json": components["schemas"]["FlagRequest"];
             };
         };
         responses: {
