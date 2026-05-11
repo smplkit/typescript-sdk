@@ -18,7 +18,9 @@ export interface paths {
          *     Default sort is ``-created_at``; cursor pagination via ``page[after]``
          *     (the opaque cursor returned in ``links.next``). Filters are exact-match
          *     except ``filter[occurred_at]`` which uses the platform's range
-         *     notation (``[2026-01-01T00:00:00Z,*)``).
+         *     notation (``[2026-01-01T00:00:00Z,*)``) and ``filter[search]`` which
+         *     is a case-insensitive substring match (per ADR-014; targets
+         *     ``resource_id`` only at this revision).
          */
         get: operations["list_events"];
         put?: never;
@@ -982,6 +984,8 @@ export interface operations {
                 "filter[action]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 "filter[resource_id]"?: string | null;
+                /** @description Case-insensitive substring match. Searches against ``resource_id`` only — see ADR-014 for the platform-wide ``filter[search]`` convention. Use ``filter[resource_id]`` for an exact match. */
+                "filter[search]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
             };
