@@ -155,8 +155,10 @@ async function main(): Promise<void> {
     // simulate someone making changes to a flag to trigger listeners
     await updateRules(client);
 
-    // wait a moment for the event to be delivered
-    await sleep(200);
+    // wait a moment for the event to be delivered (typical WS round-trip
+    // is well under 200ms; 400ms is plenty of headroom and anything past
+    // that is a real signal rather than noise to absorb).
+    await sleep(400);
 
     // verify both listeners fired
     assert.ok(
