@@ -242,7 +242,7 @@ class FlagRegistrationBuffer {
 
   add(
     id: string,
-    type: string,
+    type: components["schemas"]["FlagBulkItem"]["type"],
     defaultValue: unknown,
     service: string | null,
     environment: string | null,
