@@ -187,7 +187,7 @@ export interface paths {
         put?: never;
         /**
          * Wipe Account Data
-         * @description Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The ``common`` config is preserved as a structural anchor but its items are reset. Requires ``OWNER`` role and a ``{"confirm": true}`` body — anything else returns 400. Pass ``"generate_sample_data": true`` to re-seed the account with the standard sample dataset after the wipe completes (best-effort; seed failures are logged but do not fail the wipe). Returns 204 on success; if any sub-delete fails the response is 500.
+         * @description Delete every config, flag, logger, log group, context, context type, environment, and customer API key (except the caller's current key) on the account. The `common` config is preserved as a structural anchor but its items are reset. Requires `OWNER` role and a body of `{"confirm": true}` — any other value returns 400. Pass `"generate_sample_data": true` to re-seed the account with the standard sample dataset after the wipe (best-effort; seeding failures are logged but do not fail the wipe). Returns 204 on success; 500 if any sub-delete fails.
          */
         post: operations["wipe_account_data"];
         delete?: never;
@@ -494,7 +494,7 @@ export interface paths {
         get: operations["get_context"];
         /**
          * Update Context
-         * @description Update a context instance by composite id (type:key). Only the human-readable display name is mutable through this endpoint; context_type and observed attributes are written by the SDK ingestion path.
+         * @description Update a context instance by composite id (type:key). Only the human-readable display name is mutable here; `context_type` and observed `attributes` are written by SDK registration and ignored on this endpoint.
          */
         put: operations["update_context"];
         post?: never;
@@ -693,10 +693,9 @@ export interface paths {
         };
         /**
          * List Metric Names
-         * @description Return distinct metric names (with a representative unit) for this account.
-         *
-         *     Used by the dashboard to discover which product sections to render.
-         *     Plain JSON response (not JSON:API) — this is metadata, not a metric resource.
+         * @description Return distinct metric names recorded for the account, each with a
+         *     representative unit. Plain-JSON response (not JSON:API) — this is
+         *     metadata for discovery, not a metric resource.
          */
         get: operations["list_metric_names"];
         put?: never;
@@ -994,7 +993,7 @@ export interface paths {
         put?: never;
         /**
          * Add Payment Method
-         * @description Register a Stripe payment method (``pm_...``) as a persistent resource. The frontend obtains the Stripe ID via SetupIntent + Stripe Elements, then POSTs it here. Body shape and server behavior per ADR-044 §5.1.
+         * @description Register a Stripe payment method (`pm_...`) on the account. The client first creates the Stripe payment method using a SetupIntent and Stripe Elements, then submits its identifier here to persist it.
          */
         post: operations["create_payment_method"];
         delete?: never;
@@ -1017,13 +1016,13 @@ export interface paths {
         get: operations["get_payment_method"];
         /**
          * Update Payment Method
-         * @description Update the mutable fields (``billing_details``, ``exp_month``, ``exp_year``). The ``default`` field is not mutable via PUT — see ADR-044 §5.2; use the ``set_default`` action instead.
+         * @description Update the mutable fields of a payment method (`billing_details`, `exp_month`, `exp_year`). The `default` flag is not mutable via PUT — use the `set_default` action instead.
          */
         put: operations["update_payment_method"];
         post?: never;
         /**
          * Delete Payment Method
-         * @description Detach the payment method from Stripe and soft-delete the local row. Returns 409 if this is the only PM and the account has an active paid subscription. If the deleted row was default, the oldest remaining row is promoted.
+         * @description Delete a payment method. Returns 409 if this is the only payment method on file and the account has an active paid subscription. If the deleted payment method was the default, the oldest remaining payment method is promoted to default.
          */
         delete: operations["delete_payment_method"];
         options?: never;
@@ -1042,7 +1041,7 @@ export interface paths {
         put?: never;
         /**
          * Set Default Payment Method
-         * @description Mark this payment method as the account's default. Idempotent — a no-op 200 if already default.
+         * @description Mark this payment method as the account's default. Idempotent: returns 200 with no changes when the payment method is already the default.
          */
         post: operations["set_default_payment_method"];
         delete?: never;
@@ -1080,11 +1079,13 @@ export interface paths {
         };
         /**
          * Get Invoice
-         * @description Return a single invoice by ID. Supports content negotiation via Accept header:
+         * @description Return a single invoice by id. Supports content negotiation via the
+         *     `Accept` header:
          *
-         *     - ``application/pdf`` — PDF bytes proxy-streamed from Stripe
-         *     - ``application/vnd.api+json`` / ``application/json`` / absent — JSON:API resource
-         *     - Any other value — 406 Not Acceptable
+         *     - `application/pdf` — streams the invoice PDF.
+         *     - `application/vnd.api+json`, `application/json`, or absent — returns
+         *       the JSON:API invoice resource.
+         *     - Any other value — `406 Not Acceptable`.
          */
         get: operations["get_invoice"];
         put?: never;
@@ -1106,11 +1107,9 @@ export interface paths {
         put?: never;
         /**
          * Execute Setup Intent
-         * @description Create a Stripe SetupIntent for saving a payment method.
-         *
-         *     Returns a ``client_secret`` that the frontend passes to Stripe's
-         *     Payment Element so the customer can securely enter card details
-         *     without an immediate charge.
+         * @description Create a Stripe SetupIntent for adding a payment method without an
+         *     immediate charge. Returns the `client_secret` to pass to Stripe Elements
+         *     in the browser.
          */
         post: operations["execute_setup_intent"];
         delete?: never;
@@ -1125,6 +1124,8 @@ export interface components {
     schemas: {
         /**
          * Account
+         * @description A tenant of smplkit — the unit of isolation that owns all of a
+         *     customer's resources (environments, contexts, API keys, and so on).
          * @example {
          *       "created_at": "2026-03-20T11:02:16.616Z",
          *       "has_stripe_customer": false,
@@ -1133,47 +1134,60 @@ export interface components {
          *     }
          */
         Account: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable name for the account.
+             */
             name: string;
-            /** Key */
-            key: string;
+            /**
+             * Key
+             * @description Stable URL-safe identifier for the account, derived from the account name at creation. Used in console URLs and other places that prefer a human-readable handle.
+             */
+            readonly key?: string | null;
             /**
              * Has Stripe Customer
+             * @description `true` once the account has been linked to a billing provider customer record.
              * @default false
              */
             readonly has_stripe_customer: boolean;
             /**
              * Expires At
              * Format: date-time
+             * @description When the account is scheduled to expire. `null` for accounts with no expiry.
              */
             readonly expires_at?: string | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the account was created.
              */
             readonly created_at?: string | null;
             /**
              * Deleted At
              * Format: date-time
+             * @description When the account was deleted. `null` for active accounts.
              */
             readonly deleted_at?: string | null;
-            /** Product Subscriptions */
+            /**
+             * Product Subscriptions
+             * @description Map of product key to the account's subscription summary for that product, including plan, status, and entitlement limits.
+             */
             readonly product_subscriptions?: {
                 [key: string]: unknown;
             } | null;
             /**
              * Entry Point
-             * @description Registration entry point (from account.data)
+             * @description How the account first reached smplkit (e.g. `LOGIN`, `GET_STARTED`, `LIVE_DEMO`).
              */
             readonly entry_point?: string | null;
             /**
              * Show Sample Data
-             * @description Whether sample data is active (from account.settings)
+             * @description Whether the account is currently configured to display the sample dataset alongside the customer's own resources.
              */
             readonly show_sample_data?: boolean | null;
             /**
              * Discount Override Pct
-             * @description Custom discount percentage that overrides the volume schedule. Null means the volume schedule applies.
+             * @description Custom discount percentage applied to the account in place of the volume-based discount schedule. `null` means the volume schedule applies.
              */
             readonly discount_override_pct?: number | null;
             /**
@@ -1183,18 +1197,28 @@ export interface components {
             readonly discount_override_reason?: string | null;
             /**
              * Discount Override Set By User Id
-             * @description UUID of the admin user who set the override.
+             * @description UUID of the user who set the override.
              */
             readonly discount_override_set_by_user_id?: string | null;
             /**
              * Discount Override Set At
              * Format: date-time
-             * @description Timestamp when the override was last changed.
+             * @description When the override was last changed.
              */
             readonly discount_override_set_at?: string | null;
         };
         /**
+         * AccountRequest
+         * @description JSON:API request envelope for creating or updating an account.
+         */
+        AccountRequest: {
+            data: components["schemas"]["AccountResource"];
+        };
+        /**
          * AccountResource
+         * @description JSON:API resource envelope for an account.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
@@ -1216,13 +1240,16 @@ export interface components {
             type: "account";
             attributes: components["schemas"]["Account"];
         };
-        /** AccountResponse */
+        /**
+         * AccountResponse
+         * @description JSON:API single-resource response envelope for an account.
+         */
         AccountResponse: {
             data: components["schemas"]["AccountResource"];
         };
         /**
          * AccountWipeRequest
-         * @description Confirmation envelope for ``POST /accounts/current/actions/wipe``.
+         * @description Confirmation envelope for the wipe-account action.
          * @example {
          *       "confirm": true,
          *       "generate_sample_data": false
@@ -1231,39 +1258,44 @@ export interface components {
         AccountWipeRequest: {
             /**
              * Confirm
-             * @description Must be ``true`` to proceed. Anything else returns 400. The frontend gates the call behind a confirmation dialog; this field is the server-side seatbelt.
+             * @description Must be `true` for the wipe to proceed. Any other value returns 400.
              */
             confirm: boolean;
             /**
              * Generate Sample Data
-             * @description When ``true``, the wipe re-seeds the account with the same Acme Commerce sample dataset that new accounts are bootstrapped with. Best-effort: any seeding failures are logged but do not fail the wipe.
+             * @description When `true`, re-seed the account with the standard sample dataset after wiping. Best-effort: any seeding failure is logged but does not fail the wipe.
              * @default false
              */
             generate_sample_data: boolean;
         };
         /**
          * AddPaymentMethodAttributes
-         * @description Attributes for POST /api/v1/payment_methods.
+         * @description Attributes accepted when registering a new payment method.
          *
-         *     Distinct from ``PaymentMethod`` because this shape takes the Stripe
-         *     ``pm_...`` ID at registration time; the persistent resource does not
-         *     expose that ID.
+         *     The customer first creates a Stripe payment method client-side using
+         *     Stripe Elements, then submits its `pm_...` identifier here to persist
+         *     it on the account.
          * @example {
          *       "default": false,
          *       "stripe_payment_method_id": "pm_1234567890abcdef"
          *     }
          */
         AddPaymentMethodAttributes: {
-            /** Stripe Payment Method Id */
+            /**
+             * Stripe Payment Method Id
+             * @description Identifier of the Stripe payment method to register on the account, e.g. `pm_1234567890abcdef`.
+             */
             stripe_payment_method_id: string;
             /**
              * Default
+             * @description When `true`, make the newly registered payment method the account's default. The first payment method on an account is always set as default regardless of this field.
              * @default false
              */
             default: boolean;
         };
         /**
          * AddPaymentMethodBody
+         * @description JSON:API request envelope for registering a new payment method.
          * @example {
          *       "data": {
          *         "attributes": {
@@ -1277,7 +1309,10 @@ export interface components {
         AddPaymentMethodBody: {
             data: components["schemas"]["AddPaymentMethodData"];
         };
-        /** AddPaymentMethodData */
+        /**
+         * AddPaymentMethodData
+         * @description Resource object for the add-payment-method request.
+         */
         AddPaymentMethodData: {
             /**
              * Type
@@ -1288,6 +1323,12 @@ export interface components {
         };
         /**
          * ApiKey
+         * @description An API key used by SDKs, scripts, and other programmatic clients to
+         *     authenticate with the smplkit API on behalf of the account.
+         *
+         *     The full key value is returned in plaintext on the create response and
+         *     is otherwise unavailable — record it somewhere safe immediately after
+         *     creation.
          * @example {
          *       "created_at": "2026-03-20T11:02:16.616Z",
          *       "created_by": "d290f1ee-6c54-4b01-90e6-d701748f0851",
@@ -1301,50 +1342,78 @@ export interface components {
          *     }
          */
         ApiKey: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable name for the key.
+             */
             name: string;
-            /** Status */
+            /**
+             * Status
+             * @description Lifecycle state of the key. `ACTIVE` keys may be used to authenticate; `REVOKED` keys are rejected.
+             */
             readonly status?: string | null;
-            /** Key */
+            /**
+             * Key
+             * @description The bearer token value. Returned in plaintext on the create response so the caller can capture it; subsequent reads return the same value for round-tripping.
+             */
             readonly key?: string | null;
-            /** Scopes */
+            /**
+             * Scopes
+             * @description Scope restrictions applied to the key. Empty object grants full account access; populated forms are reserved for future scope syntax.
+             */
             scopes?: {
                 [key: string]: unknown;
             };
-            /** Created By */
+            /**
+             * Created By
+             * @description UUID of the user who created the key.
+             */
             readonly created_by?: string | null;
             /**
              * Expires At
              * Format: date-time
+             * @description Optional expiry timestamp. After this time, the key is rejected. Omit for keys that do not expire.
              */
             expires_at?: string | null;
             /**
              * Last Used At
              * Format: date-time
+             * @description When the key was most recently used to authenticate.
              */
             readonly last_used_at?: string | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the key was created.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the key was last modified.
              */
             readonly updated_at?: string | null;
-            /** Data */
-            readonly data?: {
-                [key: string]: unknown;
-            };
         };
-        /** ApiKeyListResponse */
+        /**
+         * ApiKeyListResponse
+         * @description JSON:API collection response for API keys.
+         */
         ApiKeyListResponse: {
             /** Data */
             data: components["schemas"]["ApiKeyResource"][];
         };
         /**
+         * ApiKeyRequest
+         * @description JSON:API request envelope for creating or updating an API key.
+         */
+        ApiKeyRequest: {
+            data: components["schemas"]["ApiKeyResource"];
+        };
+        /**
          * ApiKeyResource
+         * @description JSON:API resource envelope for an API key.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
@@ -1371,25 +1440,42 @@ export interface components {
             type: "api_key";
             attributes: components["schemas"]["ApiKey"];
         };
-        /** ApiKeyResponse */
+        /**
+         * ApiKeyResponse
+         * @description JSON:API single-resource response envelope for an API key.
+         */
         ApiKeyResponse: {
             data: components["schemas"]["ApiKeyResource"];
         };
-        /** AuthTokenResponse */
+        /**
+         * AuthTokenResponse
+         * @description Authentication token issued on successful login or registration.
+         */
         AuthTokenResponse: {
-            /** Token */
+            /**
+             * Token
+             * @description Bearer token to pass in the `Authorization` header.
+             */
             token: string;
-            /** Expires In */
+            /**
+             * Expires In
+             * @description Seconds until the token expires.
+             */
             expires_in: number;
         };
         /**
          * ContactTopic
-         * @description Server-validated contact-us topics. Frontend dropdown values must match.
+         * @description Topic options accepted on contact-us submissions.
          * @enum {string}
          */
         ContactTopic: "billing" | "technical" | "feature_request" | "account" | "other";
         /**
          * Context
+         * @description A specific instance of a context type — for example, a particular
+         *     user, account, or device — together with the attributes observed on it.
+         *
+         *     Context instances are addressed by a composite identifier of the form
+         *     `context_type:key` (e.g. `user:alice-123`).
          * @example {
          *       "attributes": {
          *         "first_name": "Alice",
@@ -1404,17 +1490,17 @@ export interface components {
         Context: {
             /**
              * Name
-             * @description Human-readable display name
+             * @description Human-readable display name for the context instance.
              */
             name?: string | null;
             /**
              * Context Type
-             * @description Context type key (e.g., 'user', 'account')
+             * @description Key of the context type this instance belongs to (e.g. `user`, `account`).
              */
             context_type: string;
             /**
              * Attributes
-             * @description Observed attributes
+             * @description Observed attribute values for this context instance. The key set is conventionally aligned with the parent context type's known attribute keys, but additional keys are accepted.
              */
             attributes?: {
                 [key: string]: unknown;
@@ -1422,21 +1508,30 @@ export interface components {
             /**
              * Created At
              * Format: date-time
+             * @description When the context instance was first registered.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the context instance was last modified.
              */
             readonly updated_at?: string | null;
         };
-        /** ContextBatchResponse */
+        /**
+         * ContextBatchResponse
+         * @description Summary returned by the bulk context registration endpoint.
+         */
         ContextBatchResponse: {
-            /** Registered */
+            /**
+             * Registered
+             * @description Number of context instances that were created or updated.
+             */
             registered: number;
         };
         /**
          * ContextBulkItem
+         * @description One context instance in a bulk registration payload.
          * @example {
          *       "attributes": {
          *         "first_name": "Alice",
@@ -1449,31 +1544,54 @@ export interface components {
         ContextBulkItem: {
             /**
              * Type
-             * @description Context type key: 'user', 'account', 'device'
+             * @description Key of the context type this instance belongs to (e.g. `user`, `account`, `device`).
              */
             type: string;
             /**
              * Key
-             * @description Entity identifier: 'user-123', 'acme-corp'
+             * @description Entity identifier within the context type, e.g. `user-123`.
              */
             key: string;
-            /** Attributes */
+            /**
+             * Attributes
+             * @description Observed attribute values for this context instance.
+             */
             attributes?: {
                 [key: string]: unknown;
             };
         };
-        /** ContextBulkRegister */
+        /**
+         * ContextBulkRegister
+         * @description Bulk registration request body for the contexts endpoint.
+         */
         ContextBulkRegister: {
-            /** Contexts */
+            /**
+             * Contexts
+             * @description One context instance per entry.
+             */
             contexts: components["schemas"]["ContextBulkItem"][];
         };
-        /** ContextListResponse */
+        /**
+         * ContextListResponse
+         * @description JSON:API collection response for context instances.
+         */
         ContextListResponse: {
             /** Data */
             data: components["schemas"]["ContextResource"][];
         };
         /**
+         * ContextRequest
+         * @description JSON:API request envelope for creating or updating a context instance.
+         */
+        ContextRequest: {
+            data: components["schemas"]["ContextResource"];
+        };
+        /**
          * ContextResource
+         * @description JSON:API resource envelope for a context instance.
+         *
+         *     `id` is the composite identifier `context_type:key`. It must not be
+         *     specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "attributes": {
@@ -1499,12 +1617,20 @@ export interface components {
             type: "context";
             attributes: components["schemas"]["Context"];
         };
-        /** ContextResponse */
+        /**
+         * ContextResponse
+         * @description JSON:API single-resource response envelope for a context instance.
+         */
         ContextResponse: {
             data: components["schemas"]["ContextResource"];
         };
         /**
          * ContextType
+         * @description A kind of context — for example, `user`, `account`, or `device` — that
+         *     groups together context instances sharing a common set of attributes.
+         *
+         *     The known attribute keys for the type accumulate as instances are
+         *     registered; each key carries an optional metadata object describing it.
          * @example {
          *       "attributes": {
          *         "beta_tester": {},
@@ -1519,12 +1645,12 @@ export interface components {
         ContextType: {
             /**
              * Name
-             * @description Display label: User, Account, Device
+             * @description Display label for the context type, e.g. `User`, `Account`, or `Device`.
              */
             name: string;
             /**
              * Attributes
-             * @description Known attribute keys with metadata objects
+             * @description Map of known attribute key to per-attribute metadata. The metadata object is free-form and may be empty. Keys grow as new attributes are observed on context instances of this type.
              */
             attributes?: {
                 [key: string]: unknown;
@@ -1532,21 +1658,36 @@ export interface components {
             /**
              * Created At
              * Format: date-time
+             * @description When the context type was created.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the context type was last modified.
              */
             readonly updated_at?: string | null;
         };
-        /** ContextTypeListResponse */
+        /**
+         * ContextTypeListResponse
+         * @description JSON:API collection response for context types.
+         */
         ContextTypeListResponse: {
             /** Data */
             data: components["schemas"]["ContextTypeResource"][];
         };
         /**
+         * ContextTypeRequest
+         * @description JSON:API request envelope for creating or updating a context type.
+         */
+        ContextTypeRequest: {
+            data: components["schemas"]["ContextTypeResource"];
+        };
+        /**
          * ContextTypeResource
+         * @description JSON:API resource envelope for a context type.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "attributes": {
@@ -1572,12 +1713,16 @@ export interface components {
             type: "context_type";
             attributes: components["schemas"]["ContextType"];
         };
-        /** ContextTypeResponse */
+        /**
+         * ContextTypeResponse
+         * @description JSON:API single-resource response envelope for a context type.
+         */
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
         };
         /**
          * CreateSubscriptionAttributes
+         * @description Attributes accepted when creating a new subscription.
          * @example {
          *       "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
          *       "plan": "pro",
@@ -1585,15 +1730,25 @@ export interface components {
          *     }
          */
         CreateSubscriptionAttributes: {
-            /** Product */
+            /**
+             * Product
+             * @description Product key to subscribe to, e.g. `flags`.
+             */
             product: string;
-            /** Plan */
+            /**
+             * Plan
+             * @description Plan key to subscribe on, e.g. `pro`.
+             */
             plan: string;
-            /** Payment Method */
+            /**
+             * Payment Method
+             * @description UUID of a payment method on file to bill against. If omitted, the account's default payment method is used.
+             */
             payment_method?: string | null;
         };
         /**
          * CreateSubscriptionBody
+         * @description JSON:API request envelope for creating a subscription.
          * @example {
          *       "data": {
          *         "attributes": {
@@ -1610,6 +1765,7 @@ export interface components {
         };
         /**
          * CreateSubscriptionData
+         * @description Resource object for the create-subscription request.
          * @example {
          *       "attributes": {
          *         "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -1620,33 +1776,43 @@ export interface components {
          *     }
          */
         CreateSubscriptionData: {
-            /** Type */
+            /**
+             * Type
+             * @description Resource type; must be `subscription`.
+             */
             type: string;
             attributes: components["schemas"]["CreateSubscriptionAttributes"];
         };
         /**
          * Email
-         * @description Contact-us email resource attributes.
-         *
-         *     This resource is a pure action — it is not persisted. The id returned in
-         *     the response is a per-request uuid4 for correlation only.
+         * @description A contact-us submission. Sending the resource delivers a support
+         *     ticket and an auto-response email; nothing is persisted. The `id`
+         *     returned on the response is a per-request correlation identifier.
          * @example {
          *       "body": "Hi, I have a question about the pro plan pricing...",
          *       "topic": "billing"
          *     }
          */
         Email: {
+            /** @description Categorization of the message used to route it to the right inbox. */
             topic: components["schemas"]["ContactTopic"];
-            /** Body */
+            /**
+             * Body
+             * @description Free-form text of the message. Trimmed before validation.
+             */
             body: string;
             /**
              * Sent At
              * Format: date-time
+             * @description When the message was accepted by the server.
              */
             readonly sent_at?: string | null;
         };
         /**
          * EmailResource
+         * @description JSON:API resource envelope for a contact-us submission.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "body": "Hi, I have a question about the pro plan pricing...",
@@ -1667,12 +1833,18 @@ export interface components {
             type: "email";
             attributes: components["schemas"]["Email"];
         };
-        /** EmailResponse */
+        /**
+         * EmailResponse
+         * @description JSON:API single-resource response envelope for a contact-us message.
+         */
         EmailResponse: {
             data: components["schemas"]["EmailResource"];
         };
         /**
          * Environment
+         * @description A named deployment context — for example, `production`, `staging`, or
+         *     `development`. Resources scoped to an environment (such as config items
+         *     and feature flags) are evaluated against environment-specific values.
          * @example {
          *       "classification": "STANDARD",
          *       "color": "#2ecc71",
@@ -1682,12 +1854,19 @@ export interface components {
          *     }
          */
         Environment: {
-            /** Name */
+            /**
+             * Name
+             * @description Human-readable name for the environment.
+             */
             name: string;
-            /** Color */
+            /**
+             * Color
+             * @description Display color used by the console to badge the environment. Accepts any CSS color string.
+             */
             color?: string | null;
             /**
              * Classification
+             * @description `STANDARD` for environments the customer explicitly manages; `AD_HOC` for environments auto-created from SDK traffic. Case-insensitive on input.
              * @default AD_HOC
              * @enum {string}
              */
@@ -1695,21 +1874,36 @@ export interface components {
             /**
              * Created At
              * Format: date-time
+             * @description When the environment was created.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the environment was last modified.
              */
             readonly updated_at?: string | null;
         };
-        /** EnvironmentListResponse */
+        /**
+         * EnvironmentListResponse
+         * @description JSON:API collection response for environments.
+         */
         EnvironmentListResponse: {
             /** Data */
             data: components["schemas"]["EnvironmentResource"][];
         };
         /**
+         * EnvironmentRequest
+         * @description JSON:API request envelope for creating or updating an environment.
+         */
+        EnvironmentRequest: {
+            data: components["schemas"]["EnvironmentResource"];
+        };
+        /**
          * EnvironmentResource
+         * @description JSON:API resource envelope for an environment.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "classification": "STANDARD",
@@ -1732,7 +1926,10 @@ export interface components {
             type: "environment";
             attributes: components["schemas"]["Environment"];
         };
-        /** EnvironmentResponse */
+        /**
+         * EnvironmentResponse
+         * @description JSON:API single-resource response envelope for an environment.
+         */
         EnvironmentResponse: {
             data: components["schemas"]["EnvironmentResource"];
         };
@@ -1762,6 +1959,10 @@ export interface components {
         };
         /**
          * Invitation
+         * @description An invitation for a person to join an account.
+         *
+         *     Invitations carry a time-limited token; the recipient redeems the
+         *     token to become a member of the inviting account at the assigned role.
          * @example {
          *       "created_at": "2026-03-20T11:02:16.616Z",
          *       "email": "mike@example.com",
@@ -1773,48 +1974,77 @@ export interface components {
          *     }
          */
         Invitation: {
-            /** Email */
+            /**
+             * Email
+             * @description Email address the invitation was sent to.
+             */
             readonly email?: string | null;
-            /** Role */
+            /**
+             * Role
+             * @description Role to assign on acceptance. One of `ADMIN`, `MEMBER`, or `VIEWER`.
+             */
             readonly role?: string | null;
-            /** Status */
+            /**
+             * Status
+             * @description Lifecycle state of the invitation. One of `PENDING`, `ACCEPTED`, `REVOKED`, or `EXPIRED`.
+             */
             readonly status?: string | null;
-            /** Invited By */
+            /**
+             * Invited By
+             * @description UUID of the user who sent the invitation.
+             */
             readonly invited_by?: string | null;
-            /** Account Name */
+            /**
+             * Account Name
+             * @description Name of the account the recipient is being invited to join.
+             */
             readonly account_name?: string | null;
-            /** Inviter Display Name */
+            /**
+             * Inviter Display Name
+             * @description Display name of the user who sent the invitation.
+             */
             readonly inviter_display_name?: string | null;
-            /** Token */
+            /**
+             * Token
+             * @description Single-use token that the recipient redeems to accept the invitation. Echoed on responses so the inviting client can construct the acceptance link.
+             */
             readonly token?: string | null;
             /**
              * Expires At
              * Format: date-time
+             * @description When the invitation token stops being redeemable.
              */
             readonly expires_at?: string | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the invitation was issued.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the invitation record was last modified.
              */
             readonly updated_at?: string | null;
         };
         /**
          * InvitationAcceptRequest
+         * @description Body for the invitation-accept endpoint.
          * @example {
          *       "token": "eyJhbGciOiJIUzI1NiJ9..."
          *     }
          */
         InvitationAcceptRequest: {
-            /** Token */
+            /**
+             * Token
+             * @description Invitation token from the email link.
+             */
             token: string;
         };
         /**
          * InvitationBulkCreateRequest
+         * @description Bulk-create request body for the invitations endpoint.
          * @example {
          *       "invitations": [
          *         {
@@ -1829,11 +2059,15 @@ export interface components {
          *     }
          */
         InvitationBulkCreateRequest: {
-            /** Invitations */
+            /**
+             * Invitations
+             * @description One to fifty invitations to send in a single request.
+             */
             invitations: components["schemas"]["InvitationCreateItem"][];
         };
         /**
          * InvitationCreateItem
+         * @description One invitation in a bulk-create request.
          * @example {
          *       "email": "alice@example.com",
          *       "role": "MEMBER"
@@ -1843,21 +2077,29 @@ export interface components {
             /**
              * Email
              * Format: email
+             * @description Email address to send the invitation to.
              */
             email: string;
             /**
              * Role
+             * @description Role to assign on acceptance. One of `ADMIN`, `MEMBER`, or `VIEWER`. `OWNER` cannot be assigned via invitation. Case-insensitive on input.
              * @default MEMBER
              */
             role: string;
         };
-        /** InvitationListResponse */
+        /**
+         * InvitationListResponse
+         * @description JSON:API collection response for invitations.
+         */
         InvitationListResponse: {
             /** Data */
             data: components["schemas"]["InvitationResource"][];
         };
         /**
          * InvitationResource
+         * @description JSON:API resource envelope for an invitation.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
@@ -1882,44 +2124,90 @@ export interface components {
             type: "invitation";
             attributes: components["schemas"]["Invitation"];
         };
-        /** InvitationResponse */
+        /**
+         * InvitationResponse
+         * @description JSON:API single-resource response envelope for an invitation.
+         */
         InvitationResponse: {
             data: components["schemas"]["InvitationResource"];
         };
-        /** Invoice */
+        /**
+         * Invoice
+         * @description A billing invoice issued for the account.
+         */
         Invoice: {
-            /** Number */
+            /**
+             * Number
+             * @description Invoice number assigned by the billing provider.
+             */
             number: string | null;
-            /** Status */
+            /**
+             * Status
+             * @description Invoice lifecycle state, e.g. `draft`, `open`, `paid`, `uncollectible`, `void`.
+             */
             status: string;
-            /** Amount Due */
+            /**
+             * Amount Due
+             * @description Amount owed on the invoice in the smallest currency unit (e.g. cents).
+             */
             amount_due: number;
-            /** Amount Paid */
+            /**
+             * Amount Paid
+             * @description Amount paid against the invoice in the smallest currency unit.
+             */
             amount_paid: number;
-            /** Currency */
+            /**
+             * Currency
+             * @description ISO 4217 currency code, e.g. `usd`.
+             */
             currency: string;
-            /** Description */
+            /**
+             * Description
+             * @description Human-readable summary of the invoice's line items.
+             */
             description: string | null;
-            /** Period Start */
+            /**
+             * Period Start
+             * @description Start of the service period the invoice covers (ISO 8601).
+             */
             period_start: string | null;
-            /** Period End */
+            /**
+             * Period End
+             * @description End of the service period the invoice covers (ISO 8601).
+             */
             period_end: string | null;
-            /** Created At */
+            /**
+             * Created At
+             * @description When the invoice was created (ISO 8601).
+             */
             created_at: string | null;
-            /** Paid At */
+            /**
+             * Paid At
+             * @description When the invoice was paid in full (ISO 8601), or `null` if unpaid.
+             */
             paid_at: string | null;
-            /** Hosted Invoice Url */
+            /**
+             * Hosted Invoice Url
+             * @description Link to the hosted invoice page.
+             */
             hosted_invoice_url: string | null;
-            /** Invoice Pdf */
+            /**
+             * Invoice Pdf
+             * @description Link to the PDF rendering of the invoice.
+             */
             invoice_pdf: string | null;
         };
-        /** InvoiceListResponse */
+        /**
+         * InvoiceListResponse
+         * @description JSON:API collection response for invoices.
+         */
         InvoiceListResponse: {
             /** Data */
             data: components["schemas"]["InvoiceResource"][];
         };
         /**
          * InvoiceResource
+         * @description JSON:API resource envelope for an invoice.
          * @example {
          *       "attributes": {
          *         "amount_due": 2900,
@@ -1949,23 +2237,42 @@ export interface components {
             type: "invoice";
             attributes: components["schemas"]["Invoice"];
         };
-        /** InvoiceSingleResponse */
+        /**
+         * InvoiceSingleResponse
+         * @description JSON:API single-resource response envelope for an invoice.
+         */
         InvoiceSingleResponse: {
             data: components["schemas"]["InvoiceResource"];
         };
-        /** LimitDefinition */
+        /**
+         * LimitDefinition
+         * @description Description of a single metered limit on a product.
+         */
         LimitDefinition: {
-            /** Display Name */
+            /**
+             * Display Name
+             * @description Human-readable name for the limit.
+             */
             display_name: string;
-            /** Description */
+            /**
+             * Description
+             * @description Long-form description of what the limit controls.
+             */
             description: string;
-            /** Unit */
+            /**
+             * Unit
+             * @description Unit the limit is measured in, e.g. `flags`, `events`.
+             */
             unit: string;
-            /** Display Format */
+            /**
+             * Display Format
+             * @description Optional formatter hint for rendering the limit value in customer-facing UI.
+             */
             display_format?: string | null;
         };
         /**
          * LoginRequest
+         * @description Body for the email + password login endpoint.
          * @example {
          *       "email": "jane@example.com",
          *       "password": "correct-horse-battery-staple"
@@ -1975,38 +2282,63 @@ export interface components {
             /**
              * Email
              * Format: email
+             * @description Email address of the user signing in.
              */
             email: string;
-            /** Password */
+            /**
+             * Password
+             * @description Password supplied for authentication.
+             */
             password: string;
         };
-        /** MetricAttributes */
+        /**
+         * MetricAttributes
+         * @description A pre-aggregated metric data point recorded for the account.
+         */
         MetricAttributes: {
-            /** Name */
+            /**
+             * Name
+             * @description Metric series name, e.g. `flags.evaluations`. Dot-separated.
+             */
             name: string;
-            /** Value */
+            /**
+             * Value
+             * @description Aggregated value for this data point over `period_seconds`.
+             */
             value: number | string;
-            /** Unit */
+            /**
+             * Unit
+             * @description Unit the value is expressed in, e.g. `evaluations`, `ms`, `bytes`.
+             */
             unit?: string | null;
-            /** Period Seconds */
+            /**
+             * Period Seconds
+             * @description Length of the aggregation window in seconds (e.g. `60` for a one-minute roll-up).
+             */
             period_seconds: number;
-            /** Dimensions */
+            /**
+             * Dimensions
+             * @description Optional dimension keys that scope the data point, e.g. `environment`, `service`. Used as filter targets on the list endpoint via `filter[dimensions.<key>]=...`.
+             */
             dimensions?: {
                 [key: string]: string;
             };
             /**
              * Recorded At
              * Format: date-time
+             * @description Start of the aggregation window this data point covers.
              */
             recorded_at: string;
             /**
              * Created At
              * Format: date-time
+             * @description When the data point was ingested.
              */
             readonly created_at?: string | null;
         };
         /**
          * MetricBulkRequest
+         * @description Bulk-ingest request envelope for metric data points.
          * @example {
          *       "data": [
          *         {
@@ -2026,28 +2358,49 @@ export interface components {
          *     }
          */
         MetricBulkRequest: {
-            /** Data */
+            /**
+             * Data
+             * @description Metric data points to ingest in a single request.
+             */
             data: components["schemas"]["MetricResource"][];
         };
-        /** MetricListResponse */
+        /**
+         * MetricListResponse
+         * @description JSON:API collection response for metric data points.
+         */
         MetricListResponse: {
             /** Data */
             data: components["schemas"]["MetricResource"][];
         };
-        /** MetricNameItem */
+        /**
+         * MetricNameItem
+         * @description One distinct metric name with a representative unit.
+         */
         MetricNameItem: {
-            /** Name */
+            /**
+             * Name
+             * @description Distinct metric series name.
+             */
             name: string;
-            /** Unit */
+            /**
+             * Unit
+             * @description Representative unit observed for this series.
+             */
             unit?: string | null;
         };
-        /** MetricNamesResponse */
+        /**
+         * MetricNamesResponse
+         * @description Plain-JSON response listing distinct metric names for the account.
+         */
         MetricNamesResponse: {
             /** Data */
             data: components["schemas"]["MetricNameItem"][];
         };
         /**
          * MetricResource
+         * @description JSON:API resource envelope for a metric data point.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-04-10T18:00:01Z",
@@ -2075,29 +2428,49 @@ export interface components {
             type: "metric";
             attributes: components["schemas"]["MetricAttributes"];
         };
-        /** MetricRollupAttributes */
+        /**
+         * MetricRollupAttributes
+         * @description An aggregated metric value over a fixed-size time bucket.
+         */
         MetricRollupAttributes: {
-            /** Name */
+            /**
+             * Name
+             * @description Metric series name the rollup is computed from.
+             */
             name: string;
-            /** Value */
+            /**
+             * Value
+             * @description Sum of the underlying metric values over the bucket.
+             */
             value: string;
-            /** Unit */
+            /**
+             * Unit
+             * @description Unit the value is expressed in.
+             */
             unit?: string | null;
             /**
              * Bucket
              * Format: date-time
+             * @description Start of the time bucket this rollup covers.
              */
             bucket: string;
-            /** Rollup */
+            /**
+             * Rollup
+             * @description Rollup interval. One of `1m`, `5m`, `15m`, `1h`, `6h`, `1d`.
+             */
             rollup: string;
         };
-        /** MetricRollupListResponse */
+        /**
+         * MetricRollupListResponse
+         * @description JSON:API collection response for metric rollups.
+         */
         MetricRollupListResponse: {
             /** Data */
             data: components["schemas"]["MetricRollupResource"][];
         };
         /**
          * MetricRollupResource
+         * @description JSON:API resource envelope for a metric rollup.
          * @example {
          *       "attributes": {
          *         "bucket": "2026-04-10T15:00:00Z",
@@ -2117,13 +2490,25 @@ export interface components {
             type: "metric_rollup";
             attributes: components["schemas"]["MetricRollupAttributes"];
         };
-        /** NextTierMeta */
+        /**
+         * NextTierMeta
+         * @description Information about the next volume-discount tier.
+         */
         NextTierMeta: {
-            /** Products Needed */
+            /**
+             * Products Needed
+             * @description Number of additional subscribed products needed to reach the next tier.
+             */
             products_needed: number;
-            /** Discount Pct */
+            /**
+             * Discount Pct
+             * @description Discount percentage that would apply at the next tier.
+             */
             discount_pct: number;
-            /** Additional Savings Cents */
+            /**
+             * Additional Savings Cents
+             * @description Additional monthly savings in cents at the next tier.
+             */
             additional_savings_cents: number;
         };
         /**
@@ -2131,35 +2516,39 @@ export interface components {
          * @enum {string}
          */
         OidcProvider: "google" | "microsoft";
-        /** PageMeta */
+        /**
+         * PageMeta
+         * @description Pagination metadata returned with a collection response.
+         */
         PageMeta: {
             /**
              * Size
-             * @description Page size used for this response
+             * @description Page size used for this response.
              */
             size: number;
             /**
              * Number
-             * @description 1-based page number returned
+             * @description 1-based page number returned.
              */
             number: number;
             /**
              * Total Items
-             * @description Total number of matching items across all pages
+             * @description Total number of matching items across all pages.
              */
             total_items: number;
             /**
              * Total Pages
-             * @description Total number of pages at the current page size
+             * @description Total number of pages at the current page size.
              */
             total_pages: number;
         };
         /**
          * PaymentMethod
-         * @description Attributes for a saved card payment method.
+         * @description A saved card on file for the account, used to charge subscription
+         *     invoices.
          *
-         *     ``default`` is the API-facing name; the underlying column is ``is_default``
-         *     per ADR-013 (reserved-word exception) and ADR-014 (unprefixed API fields).
+         *     The default payment method is changed via the `set_default` action
+         *     rather than by updating this field through PUT.
          * @example {
          *       "billing_details": {
          *         "address": {
@@ -2182,38 +2571,71 @@ export interface components {
          *     }
          */
         PaymentMethod: {
-            /** Brand */
+            /**
+             * Brand
+             * @description Card network brand, e.g. `visa`, `mastercard`, `amex`.
+             */
             readonly brand?: string | null;
-            /** Last4 */
+            /**
+             * Last4
+             * @description Last four digits of the card number.
+             */
             readonly last4?: string | null;
-            /** Exp Month */
+            /**
+             * Exp Month
+             * @description Expiry month (1-12).
+             */
             exp_month?: number | null;
-            /** Exp Year */
+            /**
+             * Exp Year
+             * @description Expiry year (four-digit).
+             */
             exp_year?: number | null;
-            /** Default */
+            /**
+             * Default
+             * @description Whether this payment method is the account's default for subscription charges. Use the `set_default` action to change which payment method is default — this field is not writable via PUT.
+             */
             default?: boolean | null;
-            /** Billing Details */
+            /**
+             * Billing Details
+             * @description Billing details (name, email, phone, address) associated with the card.
+             */
             billing_details?: {
                 [key: string]: unknown;
             } | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the payment method was registered.
              */
             readonly created_at?: string | null;
             /**
              * Updated At
              * Format: date-time
+             * @description When the payment method was last modified.
              */
             readonly updated_at?: string | null;
         };
-        /** PaymentMethodListResponse */
+        /**
+         * PaymentMethodListResponse
+         * @description JSON:API collection response for payment methods.
+         */
         PaymentMethodListResponse: {
             /** Data */
             data: components["schemas"]["PaymentMethodResource"][];
         };
         /**
+         * PaymentMethodRequest
+         * @description JSON:API request envelope for updating a payment method.
+         */
+        PaymentMethodRequest: {
+            data: components["schemas"]["PaymentMethodResource"];
+        };
+        /**
          * PaymentMethodResource
+         * @description JSON:API resource envelope for a payment method.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "billing_details": {
@@ -2242,40 +2664,74 @@ export interface components {
             type: "payment_method";
             attributes: components["schemas"]["PaymentMethod"];
         };
-        /** PaymentMethodResponse */
+        /**
+         * PaymentMethodResponse
+         * @description JSON:API single-resource response envelope for a payment method.
+         */
         PaymentMethodResponse: {
             data: components["schemas"]["PaymentMethodResource"];
         };
-        /** Plan */
+        /**
+         * Plan
+         * @description A plan tier offered across smplkit products.
+         */
         Plan: {
-            /** Display Name */
+            /**
+             * Display Name
+             * @description Human-readable plan name.
+             */
             display_name: string;
-            /** Description */
+            /**
+             * Description
+             * @description Long-form plan description.
+             */
             description: string;
-            /** Sort Order */
+            /**
+             * Sort Order
+             * @description Order in which the plan should be shown in customer-facing lists. Lower values sort first.
+             */
             sort_order: number;
         };
-        /** PlanChangeRequest */
+        /**
+         * PlanChangeRequest
+         * @description Body for the subscription upgrade and downgrade actions.
+         */
         PlanChangeRequest: {
-            /** Plan */
+            /**
+             * Plan
+             * @description Plan key to change the subscription to.
+             */
             plan: string;
         };
-        /** PlanDefinition */
+        /**
+         * PlanDefinition
+         * @description Per-plan pricing and limits for a product.
+         */
         PlanDefinition: {
-            /** Price Monthly Cents */
+            /**
+             * Price Monthly Cents
+             * @description Monthly list price in cents. `0` for free plans.
+             */
             price_monthly_cents: number;
-            /** Limits */
+            /**
+             * Limits
+             * @description Map of limit key to the cap that applies on this plan. `-1` indicates an unlimited cap.
+             */
             limits: {
                 [key: string]: number;
             };
         };
-        /** PlanListResponse */
+        /**
+         * PlanListResponse
+         * @description JSON:API collection response for plan tiers.
+         */
         PlanListResponse: {
             /** Data */
             data: components["schemas"]["PlanResource"][];
         };
         /**
          * PlanResource
+         * @description JSON:API resource envelope for a plan tier.
          * @example {
          *       "attributes": {
          *         "description": "Get started with essential features at no cost",
@@ -2296,40 +2752,63 @@ export interface components {
             type: "plan";
             attributes: components["schemas"]["Plan"];
         };
-        /** Product */
+        /**
+         * Product
+         * @description A smplkit product, with its plans, metered limits, and marketing copy.
+         */
         Product: {
-            /** Display Name */
+            /**
+             * Display Name
+             * @description Human-readable product name.
+             */
             display_name: string;
-            /** Description */
+            /**
+             * Description
+             * @description Long-form product description.
+             */
             description: string;
-            /** Tagline */
+            /**
+             * Tagline
+             * @description Short marketing tagline shown on plan-selection surfaces.
+             */
             tagline?: string | null;
             /**
              * Features
-             * @default []
+             * @description Bullet-list feature highlights for the product.
              */
-            features: string[];
+            features?: string[];
             /**
              * Coming Soon
+             * @description When `true`, the product is listed but not yet available for subscription.
              * @default false
              */
             coming_soon: boolean;
-            /** Limits */
+            /**
+             * Limits
+             * @description Map of limit key to limit definition for this product.
+             */
             limits: {
                 [key: string]: components["schemas"]["LimitDefinition"];
             };
-            /** Plans */
+            /**
+             * Plans
+             * @description Map of plan key to plan definition for this product.
+             */
             plans: {
                 [key: string]: components["schemas"]["PlanDefinition"];
             };
         };
-        /** ProductListResponse */
+        /**
+         * ProductListResponse
+         * @description JSON:API collection response for products.
+         */
         ProductListResponse: {
             /** Data */
             data: components["schemas"]["ProductResource"][];
         };
         /**
          * ProductResource
+         * @description JSON:API resource envelope for a product catalog entry.
          * @example {
          *       "attributes": {
          *         "coming_soon": false,
@@ -2379,6 +2858,7 @@ export interface components {
         };
         /**
          * RegisterRequest
+         * @description Body for the email + password registration endpoint.
          * @example {
          *       "email": "jane@example.com",
          *       "entry_point": "GET_STARTED",
@@ -2389,19 +2869,70 @@ export interface components {
             /**
              * Email
              * Format: email
+             * @description Email address that becomes the new user's login identifier.
              */
             email: string;
-            /** Password */
+            /**
+             * Password
+             * @description Password for the new account. Must be at least 8 characters.
+             */
             password: string;
             /**
              * Entry Point
-             * @description Registration entry point. Allowed: LOGIN, GET_STARTED, LIVE_DEMO, UNKNOWN. Defaults to UNKNOWN when omitted. Case-insensitive.
+             * @description How the customer arrived at the registration page. Allowed values: `LOGIN`, `GET_STARTED`, `LIVE_DEMO`, `UNKNOWN`. Defaults to `UNKNOWN` when omitted. Case-insensitive on input.
              * @enum {string|null}
              */
             entry_point?: "LOGIN" | "GET_STARTED" | "LIVE_DEMO" | "UNKNOWN" | null;
         };
         /**
+         * Service
+         * @description A service that contexts can be evaluated against — for example, a
+         *     backend application or microservice in the customer's stack.
+         * @example {
+         *       "created_at": "2026-03-20T11:02:16.616Z",
+         *       "name": "User Service",
+         *       "updated_at": "2026-03-20T11:02:16.616Z"
+         *     }
+         */
+        Service: {
+            /**
+             * Name
+             * @description Human-readable name for the service.
+             */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the service was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the service was last modified.
+             */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * ServiceListResponse
+         * @description JSON:API collection response for services.
+         */
+        ServiceListResponse: {
+            /** Data */
+            data: components["schemas"]["ServiceResource"][];
+        };
+        /**
+         * ServiceRequest
+         * @description JSON:API request envelope for creating or updating a service.
+         */
+        ServiceRequest: {
+            data: components["schemas"]["ServiceResource"];
+        };
+        /**
          * ServiceResource
+         * @description JSON:API resource envelope for a service.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
@@ -2423,7 +2954,255 @@ export interface components {
             attributes: components["schemas"]["Service"];
         };
         /**
+         * ServiceResponse
+         * @description JSON:API single-resource response envelope for a service.
+         */
+        ServiceResponse: {
+            data: components["schemas"]["ServiceResource"];
+        };
+        /**
+         * SetupIntentAttributes
+         * @description Result of executing the setup-intent function.
+         */
+        SetupIntentAttributes: {
+            /**
+             * Client Secret
+             * @description Client secret to pass to Stripe Elements so the customer can complete payment-method setup in the browser.
+             */
+            client_secret: string;
+        };
+        /**
+         * SetupIntentResource
+         * @example {
+         *       "attributes": {
+         *         "client_secret": "seti_1234567890abcdef_secret_xyz"
+         *       },
+         *       "type": "setup_intent"
+         *     }
+         */
+        SetupIntentResource: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "setup_intent";
+            attributes: components["schemas"]["SetupIntentAttributes"];
+        };
+        /**
+         * SetupIntentResponse
+         * @description JSON:API single-resource response envelope for a setup-intent result.
+         */
+        SetupIntentResponse: {
+            data: components["schemas"]["SetupIntentResource"];
+        };
+        /**
+         * SubscriptionAttributes
+         * @description A subscription that grants the account access to a product on a plan.
+         */
+        SubscriptionAttributes: {
+            /**
+             * Product
+             * @description Product key the subscription is for, e.g. `flags`.
+             */
+            product: string;
+            /**
+             * Plan
+             * @description Plan key the subscription is on, e.g. `pro`.
+             */
+            plan: string;
+            /**
+             * Status
+             * @description Lifecycle state of the subscription, e.g. `active`, `trialing`, `past_due`, `canceled`.
+             */
+            status?: string | null;
+            /**
+             * Comped
+             * @description When `true`, the subscription is complimentary and is not billed through the billing provider.
+             */
+            comped: boolean;
+            /**
+             * Stripe Managed
+             * @description When `true`, the subscription is billed through Stripe; otherwise it is a free or complimentary subscription that does not produce invoices.
+             */
+            stripe_managed: boolean;
+            /**
+             * Current Period End
+             * @description End of the current billing period (ISO 8601 timestamp).
+             */
+            current_period_end?: string | null;
+            /**
+             * Client Secret
+             * @description Stripe payment intent client secret returned when a subscription create requires additional authentication (3DS). Returned only on create.
+             */
+            client_secret?: string | null;
+        };
+        /**
+         * SubscriptionListMeta
+         * @description Discount and totals summary attached to a subscription collection response.
+         */
+        SubscriptionListMeta: {
+            /**
+             * Subtotal Cents
+             * @description Sum of list prices across all subscriptions in cents.
+             */
+            subtotal_cents: number;
+            /**
+             * Discount Pct
+             * @description Effective discount percentage applied.
+             */
+            discount_pct: number;
+            /**
+             * Discount Amount Cents
+             * @description Discount amount in cents.
+             */
+            discount_amount_cents: number;
+            /**
+             * Discount Source
+             * @description Source of the discount. `VOLUME` indicates the standard volume-discount schedule; `OVERRIDE` indicates a custom discount set on the account.
+             * @enum {string}
+             */
+            discount_source: "VOLUME" | "OVERRIDE";
+            /**
+             * Total Cents
+             * @description Final monthly total in cents after the discount.
+             */
+            total_cents: number;
+            /** @description Information about the next volume-discount tier, or `null` if the account is already at the top tier or on an override. */
+            next_tier?: components["schemas"]["NextTierMeta"];
+        };
+        /**
+         * SubscriptionListResponse
+         * @description JSON:API collection response for subscriptions.
+         */
+        SubscriptionListResponse: {
+            /** Data */
+            data: components["schemas"]["SubscriptionResource"][];
+            meta?: components["schemas"]["SubscriptionListMeta"];
+        };
+        /**
+         * SubscriptionResource
+         * @description JSON:API resource envelope for a subscription.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
+         * @example {
+         *       "attributes": {
+         *         "comped": false,
+         *         "current_period_end": "2026-05-01T00:00:00Z",
+         *         "plan": "pro",
+         *         "product": "flags",
+         *         "status": "active",
+         *         "stripe_managed": true
+         *       },
+         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+         *       "type": "subscription"
+         *     }
+         */
+        SubscriptionResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "subscription";
+            attributes: components["schemas"]["SubscriptionAttributes"];
+        };
+        /**
+         * SubscriptionResponse
+         * @description JSON:API single-resource response envelope for a subscription.
+         */
+        SubscriptionResponse: {
+            data: components["schemas"]["SubscriptionResource"];
+        };
+        /**
+         * User
+         * @description A person with access to one or more accounts in smplkit.
+         * @example {
+         *       "account": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+         *       "auth_provider": "GOOGLE",
+         *       "created_at": "2026-03-20T11:02:16.616Z",
+         *       "display_name": "Jane Smith",
+         *       "email": "jane@example.com",
+         *       "email_verified": true,
+         *       "profile_pic": "https://lh3.googleusercontent.com/a/example",
+         *       "role": "OWNER"
+         *     }
+         */
+        User: {
+            /**
+             * Email
+             * Format: email
+             * @description Email address used to sign in to the user account.
+             */
+            readonly email?: string | null;
+            /**
+             * Display Name
+             * @description Human-readable display name shown in the console and on shared resources.
+             */
+            display_name: string;
+            /**
+             * Profile Pic
+             * @description URL of an external profile picture (e.g. the value supplied by the user's identity provider).
+             */
+            profile_pic?: string | null;
+            /**
+             * Avatar Url
+             * @description Server-generated `data:` URL containing the user's avatar image bytes when one has been captured. `null` when no avatar is available — callers should fall back to Gravatar or initials.
+             */
+            readonly avatar_url?: string | null;
+            /**
+             * Auth Provider
+             * @description Identity provider that authenticates the user, e.g. `google`, `microsoft`, or `email`.
+             */
+            readonly auth_provider?: string | null;
+            /**
+             * Email Verified
+             * @description Whether the user has completed email verification.
+             * @default false
+             */
+            readonly email_verified: boolean;
+            /**
+             * Role
+             * @description Role the user holds in the current account context. One of `OWNER`, `ADMIN`, `MEMBER`, or `VIEWER`.
+             */
+            role?: string | null;
+            /**
+             * Account
+             * @description UUID of the account the user is acting within.
+             */
+            readonly account?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the user record was created.
+             */
+            readonly created_at?: string | null;
+        };
+        /** UserListMeta */
+        UserListMeta: {
+            page: components["schemas"]["PageMeta"];
+        };
+        /**
+         * UserListResponse
+         * @description JSON:API collection response for users.
+         */
+        UserListResponse: {
+            /** Data */
+            data: components["schemas"]["UserResource"][];
+            meta?: components["schemas"]["UserListMeta"];
+        };
+        /**
+         * UserRequest
+         * @description JSON:API request envelope for creating or updating a user.
+         */
+        UserRequest: {
+            data: components["schemas"]["UserResource"];
+        };
+        /**
          * UserResource
+         * @description JSON:API resource envelope for a user.
+         *
+         *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
          *         "account": "d290f1ee-6c54-4b01-90e6-d701748f0851",
@@ -2449,209 +3228,25 @@ export interface components {
             type: "user";
             attributes: components["schemas"]["User"];
         };
-        /** ServiceResponse */
-        ServiceResponse: {
-            data: components["schemas"]["ServiceResource"];
-        };
-        /** UserResponse */
+        /**
+         * UserResponse
+         * @description JSON:API single-resource response envelope for a user.
+         */
         UserResponse: {
             data: components["schemas"]["UserResource"];
         };
         /**
-         * Service
-         * @example {
-         *       "created_at": "2026-03-20T11:02:16.616Z",
-         *       "name": "User Service",
-         *       "updated_at": "2026-03-20T11:02:16.616Z"
-         *     }
-         */
-        Service: {
-            /** Name */
-            name: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            readonly created_at?: string | null;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            readonly updated_at?: string | null;
-        };
-        /** ServiceListResponse */
-        ServiceListResponse: {
-            /** Data */
-            data: components["schemas"]["ServiceResource"][];
-        };
-        /** SetupIntentAttributes */
-        SetupIntentAttributes: {
-            /** Client Secret */
-            client_secret: string;
-        };
-        /**
-         * SetupIntentResource
-         * @example {
-         *       "attributes": {
-         *         "client_secret": "seti_1234567890abcdef_secret_xyz"
-         *       },
-         *       "type": "setup_intent"
-         *     }
-         */
-        SetupIntentResource: {
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "setup_intent";
-            attributes: components["schemas"]["SetupIntentAttributes"];
-        };
-        /** SetupIntentResponse */
-        SetupIntentResponse: {
-            data: components["schemas"]["SetupIntentResource"];
-        };
-        /** SubscriptionAttributes */
-        SubscriptionAttributes: {
-            /** Product */
-            product: string;
-            /** Plan */
-            plan: string;
-            /** Status */
-            status?: string | null;
-            /** Comped */
-            comped: boolean;
-            /** Stripe Managed */
-            stripe_managed: boolean;
-            /** Current Period End */
-            current_period_end?: string | null;
-            /** Client Secret */
-            client_secret?: string | null;
-        };
-        /**
-         * SubscriptionListMeta
-         * @description Discount and totals summary attached to GET /api/v1/subscriptions.
-         */
-        SubscriptionListMeta: {
-            /** Subtotal Cents */
-            subtotal_cents: number;
-            /** Discount Pct */
-            discount_pct: number;
-            /** Discount Amount Cents */
-            discount_amount_cents: number;
-            /**
-             * Discount Source
-             * @enum {string}
-             */
-            discount_source: "VOLUME" | "OVERRIDE";
-            /** Total Cents */
-            total_cents: number;
-            next_tier?: components["schemas"]["NextTierMeta"];
-        };
-        /** SubscriptionListResponse */
-        SubscriptionListResponse: {
-            /** Data */
-            data: components["schemas"]["SubscriptionResource"][];
-            meta?: components["schemas"]["SubscriptionListMeta"];
-        };
-        /**
-         * SubscriptionResource
-         * @example {
-         *       "attributes": {
-         *         "comped": false,
-         *         "current_period_end": "2026-05-01T00:00:00Z",
-         *         "plan": "pro",
-         *         "product": "flags",
-         *         "status": "active",
-         *         "stripe_managed": true
-         *       },
-         *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-         *       "type": "subscription"
-         *     }
-         */
-        SubscriptionResource: {
-            /** Id */
-            id?: string | null;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "subscription";
-            attributes: components["schemas"]["SubscriptionAttributes"];
-        };
-        /** SubscriptionResponse */
-        SubscriptionResponse: {
-            data: components["schemas"]["SubscriptionResource"];
-        };
-        /**
-         * User
-         * @example {
-         *       "account": "d290f1ee-6c54-4b01-90e6-d701748f0851",
-         *       "auth_provider": "GOOGLE",
-         *       "created_at": "2026-03-20T11:02:16.616Z",
-         *       "display_name": "Jane Smith",
-         *       "email": "jane@example.com",
-         *       "email_verified": true,
-         *       "profile_pic": "https://lh3.googleusercontent.com/a/example",
-         *       "role": "OWNER"
-         *     }
-         */
-        User: {
-            /**
-             * Email
-             * Format: email
-             * @description User's email address
-             */
-            email: string;
-            /** Display Name */
-            display_name: string;
-            /** Profile Pic */
-            profile_pic?: string | null;
-            /**
-             * Avatar Url
-             * @description Server-computed ``data:`` URL when an OIDC provider supplied a profile picture. Null otherwise — callers should fall back to Gravatar or initials.
-             */
-            readonly avatar_url?: string | null;
-            /** Auth Provider */
-            readonly auth_provider?: string | null;
-            /**
-             * Email Verified
-             * @default false
-             */
-            readonly email_verified: boolean;
-            /**
-             * Role
-             * @description Role in current account context
-             */
-            role?: string | null;
-            /**
-             * Account
-             * @description Account UUID
-             */
-            readonly account?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            readonly created_at?: string | null;
-        };
-        /** UserListMeta */
-        UserListMeta: {
-            page: components["schemas"]["PageMeta"];
-        };
-        /** UserListResponse */
-        UserListResponse: {
-            /** Data */
-            data: components["schemas"]["UserResource"][];
-            meta?: components["schemas"]["UserListMeta"];
-        };
-        /**
          * VerifyEmailRequest
+         * @description Body for the email-verification endpoint.
          * @example {
          *       "token": "eyJhbGciOiJIUzI1NiJ9..."
          *     }
          */
         VerifyEmailRequest: {
-            /** Token */
+            /**
+             * Token
+             * @description Verification token previously delivered to the user's email.
+             */
             token: string;
         };
     };
@@ -3083,7 +3678,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["UserResponse"];
+                "application/vnd.api+json": components["schemas"]["UserRequest"];
             };
         };
         responses: {
@@ -3199,7 +3794,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["AccountResponse"];
+                "application/vnd.api+json": components["schemas"]["AccountRequest"];
             };
         };
         responses: {
@@ -3719,7 +4314,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["EnvironmentResponse"];
+                "application/vnd.api+json": components["schemas"]["EnvironmentRequest"];
             };
         };
         responses: {
@@ -3839,7 +4434,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["EnvironmentResponse"];
+                "application/vnd.api+json": components["schemas"]["EnvironmentRequest"];
             };
         };
         responses: {
@@ -4013,7 +4608,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ApiKeyResponse"];
+                "application/vnd.api+json": components["schemas"]["ApiKeyRequest"];
             };
         };
         responses: {
@@ -4133,7 +4728,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ApiKeyResponse"];
+                "application/vnd.api+json": components["schemas"]["ApiKeyRequest"];
             };
         };
         responses: {
@@ -4363,7 +4958,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+                "application/vnd.api+json": components["schemas"]["ContextTypeRequest"];
             };
         };
         responses: {
@@ -4483,7 +5078,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ContextTypeResponse"];
+                "application/vnd.api+json": components["schemas"]["ContextTypeRequest"];
             };
         };
         responses: {
@@ -4777,7 +5372,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ContextResponse"];
+                "application/vnd.api+json": components["schemas"]["ContextRequest"];
             };
         };
         responses: {
@@ -4949,7 +5544,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ServiceResponse"];
+                "application/vnd.api+json": components["schemas"]["ServiceRequest"];
             };
         };
         responses: {
@@ -5069,7 +5664,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ServiceResponse"];
+                "application/vnd.api+json": components["schemas"]["ServiceRequest"];
             };
         };
         responses: {
@@ -5987,7 +6582,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["UserResponse"];
+                "application/vnd.api+json": components["schemas"]["UserRequest"];
             };
         };
         responses: {
@@ -6805,7 +7400,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["PaymentMethodResponse"];
+                "application/vnd.api+json": components["schemas"]["PaymentMethodRequest"];
             };
         };
         responses: {
