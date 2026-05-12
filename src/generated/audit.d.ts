@@ -280,30 +280,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/functions/wipe/actions/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute Wipe
-         * @description Delete every audit record this account has stored.
-         *
-         *     Atomic: either every record is deleted, or none is. Returns the
-         *     per-table counts and the completion timestamp. The request body
-         *     must be `{}`.
-         */
-        post: operations["execute_wipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1027,78 +1003,6 @@ export interface components {
             /** Data */
             data: components["schemas"]["UsageResource"][];
         };
-        /**
-         * WipeRequest
-         * @description Empty body — the action takes no parameters.
-         */
-        WipeRequest: Record<string, never>;
-        /**
-         * WipeResponse
-         * @description Summary of a completed wipe action.
-         * @example {
-         *       "completed_at": "2026-05-08T19:31:24Z",
-         *       "tables": {
-         *         "action": 11,
-         *         "audit_event": 1432,
-         *         "audit_event_quota": 5,
-         *         "forwarder": 2,
-         *         "forwarder_delivery": 312,
-         *         "resource_type": 4
-         *       },
-         *       "wiped": true
-         *     }
-         */
-        WipeResponse: {
-            /**
-             * Wiped
-             * @description Always `true` for a successful wipe.
-             * @default true
-             */
-            wiped: boolean;
-            tables: components["schemas"]["WipeTablesSummary"];
-            /**
-             * Completed At
-             * Format: date-time
-             * @description When the wipe completed.
-             */
-            completed_at: string;
-        };
-        /**
-         * WipeTablesSummary
-         * @description Counts of records deleted, broken down by record kind.
-         */
-        WipeTablesSummary: {
-            /**
-             * Audit Event
-             * @description Number of audit events deleted.
-             */
-            audit_event: number;
-            /**
-             * Audit Event Quota
-             * @description Number of monthly usage-quota counters deleted.
-             */
-            audit_event_quota: number;
-            /**
-             * Forwarder
-             * @description Number of forwarders deleted.
-             */
-            forwarder: number;
-            /**
-             * Forwarder Delivery
-             * @description Number of forwarder delivery log entries deleted.
-             */
-            forwarder_delivery: number;
-            /**
-             * Resource Type
-             * @description Number of distinct `resource_type` entries deleted.
-             */
-            resource_type: number;
-            /**
-             * Action
-             * @description Number of distinct `action` entries deleted.
-             */
-            action: number;
-        };
     };
     responses: never;
     parameters: never;
@@ -1476,30 +1380,6 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["ActionListResponse"];
-                };
-            };
-        };
-    };
-    execute_wipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WipeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WipeResponse"];
                 };
             };
         };
