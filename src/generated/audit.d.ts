@@ -17,8 +17,17 @@ export interface paths {
          *
          *     Default sort is newest first. Filters are exact-match except
          *     `filter[occurred_at]`, which uses interval notation
-         *     (e.g. `[2026-01-01T00:00:00Z,*)`), and `filter[search]`, which is a
-         *     case-insensitive substring match against `resource_id`.
+         *     (e.g. `[2026-01-01T00:00:00Z,2026-01-31T00:00:00Z)`), and
+         *     `filter[search]`, which is a case-insensitive substring match against
+         *     `resource_id` or `description`.
+         *
+         *     To bound the rows scanned per request, the endpoint requires either:
+         *
+         *     - `filter[resource_id]` (which must be accompanied by
+         *       `filter[resource_type]`), or
+         *     - `filter[occurred_at]` with a span no greater than 30 days.
+         *
+         *     `page[size]` defaults to 50 and must not exceed 1000.
          */
         get: operations["list_events"];
         put?: never;
@@ -365,6 +374,11 @@ export interface components {
              */
             resource_id: string;
             /**
+             * Description
+             * @description Free-text description of the event. Included alongside `resource_id` in the `filter[search]` substring target.
+             */
+            description?: string | null;
+            /**
              * Occurred At
              * @description When the event actually happened. Defaults to the server receipt time (`created_at`).
              */
@@ -453,6 +467,7 @@ export interface components {
          *             "email": "alice@example.com"
          *           }
          *         },
+         *         "description": "Alice signed up via the marketing site.",
          *         "do_not_forward": false,
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
@@ -1021,7 +1036,7 @@ export interface operations {
                 "filter[action]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 "filter[resource_id]"?: string | null;
-                /** @description Case-insensitive substring match against `resource_id`. Use `filter[resource_id]` for an exact match. */
+                /** @description Case-insensitive substring match against `resource_id` or `description`. Use `filter[resource_id]` for an exact match on `resource_id`. */
                 "filter[search]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
