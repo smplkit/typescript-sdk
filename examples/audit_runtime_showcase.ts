@@ -42,7 +42,10 @@ async function main(): Promise<void> {
     console.log(`Recorded events for invoice ${someResourceId}`);
 
     // list events
-    const page = await client.audit.events.list({ resourceId: someResourceId });
+    const page = await client.audit.events.list({
+      resourceType: "invoice",
+      resourceId: someResourceId,
+    });
     assert(
       page.events.some((e) => e.resourceId === someResourceId),
       `Expected event with resourceId ${someResourceId} in list`,
