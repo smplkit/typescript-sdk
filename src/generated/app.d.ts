@@ -308,9 +308,29 @@ export interface paths {
         post?: never;
         /**
          * Delete Environment
-         * @description Delete an environment by id.
+         * @description Delete an environment by id. When `cascade=true` is set, also remove every per-environment reference held by flags, configs, and loggers in the corresponding services before deleting the environment row. The default `cascade=false` deletes only the environment row, leaving downstream references in place.
          */
         delete: operations["delete_environment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/environments/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report Environment Usage
+         * @description Report how many flag rules, env-level flag defaults, config overrides, and logger overrides reference this environment. Used by the console's delete dialog so the user can see what would survive a non-cascading delete.
+         */
+        get: operations["get_environment_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1932,6 +1952,74 @@ export interface components {
          */
         EnvironmentResponse: {
             data: components["schemas"]["EnvironmentResource"];
+        };
+        /**
+         * EnvironmentUsage
+         * @description Counts of references to an environment held by other resources.
+         *
+         *     Returned by `GET /environments/{id}/usage` so the console can warn
+         *     the user about per-environment configuration that would survive a
+         *     bare environment-row deletion. Each count is the number of distinct
+         *     referencing resources, not the number of rule entries within them.
+         * @example {
+         *       "config_overrides": 5,
+         *       "flag_env_defaults": 2,
+         *       "flag_rules": 3,
+         *       "logger_overrides": 1
+         *     }
+         */
+        EnvironmentUsage: {
+            /**
+             * Flag Rules
+             * @description Number of feature-flag targeting rules scoped to this environment. Each flag may contribute multiple rules.
+             */
+            flag_rules: number;
+            /**
+             * Flag Env Defaults
+             * @description Number of feature flags that declare an environment-level default value for this environment.
+             */
+            flag_env_defaults: number;
+            /**
+             * Config Overrides
+             * @description Number of config-item overrides keyed to this environment, summed across all configs.
+             */
+            config_overrides: number;
+            /**
+             * Logger Overrides
+             * @description Number of loggers with an environment-level level override for this environment.
+             */
+            logger_overrides: number;
+        };
+        /**
+         * EnvironmentUsageResource
+         * @description JSON:API resource envelope for an environment-usage report.
+         * @example {
+         *       "attributes": {
+         *         "config_overrides": 5,
+         *         "flag_env_defaults": 2,
+         *         "flag_rules": 3,
+         *         "logger_overrides": 1
+         *       },
+         *       "id": "production",
+         *       "type": "environment_usage"
+         *     }
+         */
+        EnvironmentUsageResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "environment_usage";
+            attributes: components["schemas"]["EnvironmentUsage"];
+        };
+        /**
+         * EnvironmentUsageResponse
+         * @description JSON:API single-resource response envelope for environment-usage counts.
+         */
+        EnvironmentUsageResponse: {
+            data: components["schemas"]["EnvironmentUsageResource"];
         };
         /**
          * Error
@@ -4487,7 +4575,10 @@ export interface operations {
     };
     delete_environment: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When `true`, remove every flag rule, env-level flag default, config override, and logger override scoped to this environment before deleting the environment row. */
+                cascade?: boolean;
+            };
             header?: never;
             path: {
                 id: string;
@@ -4502,6 +4593,64 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_environment_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["EnvironmentUsageResponse"];
+                };
             };
             /** @description Validation error or malformed request */
             400: {
