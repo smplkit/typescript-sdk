@@ -15,11 +15,14 @@ export interface paths {
          * List Events
          * @description List audit events for this account.
          *
-         *     Default sort is newest first. Filters are exact-match except
-         *     `filter[occurred_at]`, which uses interval notation
-         *     (e.g. `[2026-01-01T00:00:00Z,2026-01-31T00:00:00Z)`), and
-         *     `filter[search]`, which is a case-insensitive substring match against
-         *     `resource_id` or `description`.
+         *     Default sort is `-occurred_at` (newest occurrence first). Sort by
+         *     `occurred_at` or `created_at`, ascending or descending — keep the same
+         *     `sort` value across paginated requests so the cursor stays consistent.
+         *     Filters are exact-match except `filter[occurred_at]`, which uses
+         *     interval notation (e.g.
+         *     `[2026-01-01T00:00:00Z,2026-01-31T00:00:00Z)`), and `filter[search]`,
+         *     which is a case-insensitive substring match against `resource_id` or
+         *     `description`.
          *
          *     To bound the rows scanned per request, the endpoint requires either:
          *
@@ -99,6 +102,9 @@ export interface paths {
         /**
          * List Forwarders
          * @description List forwarders for this account.
+         *
+         *     Default sort is `-created_at` (newest first). Pagination uses cursor
+         *     tokens; keep the same `sort` value across paginated requests.
          */
         get: operations["list_forwarders"];
         put?: never;
@@ -158,10 +164,10 @@ export interface paths {
          * List Forwarder Deliveries
          * @description List delivery log entries for a forwarder.
          *
-         *     Default sort is newest first. Filter by `status` (one of `SUCCEEDED`,
-         *     `FAILED`, `FILTERED_OUT`, `SKIPPED_DO_NOT_FORWARD` — case-insensitive),
-         *     by `event_id`, or by a `created_at` range using interval notation
-         *     (e.g. `[2026-01-01T00:00:00Z,*)`).
+         *     Default sort is `-created_at` (newest first). Filter by `status` (one of
+         *     `SUCCEEDED`, `FAILED`, `FILTERED_OUT`, `SKIPPED_DO_NOT_FORWARD` —
+         *     case-insensitive), by `event_id`, or by a `created_at` range using
+         *     interval notation (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
         put?: never;
@@ -253,8 +259,9 @@ export interface paths {
          * List Resource Types
          * @description List the distinct `resource_type` slugs recorded for this account.
          *
-         *     The resource `id` is the slug itself. Useful for populating filter
-         *     dropdowns in a UI.
+         *     The resource `id` is the slug itself. Default sort is `key`
+         *     ascending; pass `sort=-key` for descending. Useful for populating
+         *     filter dropdowns in a UI.
          */
         get: operations["list_resource_types"];
         put?: never;
@@ -276,6 +283,7 @@ export interface paths {
          * List Actions
          * @description List the distinct `action` slugs recorded for this account.
          *
+         *     Default sort is `key` ascending; pass `sort=-key` for descending.
          *     Without `filter[resource_type]`, returns one row per distinct
          *     action. With `filter[resource_type]`, returns the actions recorded
          *     for that specific resource type.
@@ -1040,6 +1048,8 @@ export interface operations {
                 "filter[search]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-occurred_at`. Allowed values: `created_at`, `-created_at`, `occurred_at`, `-occurred_at`. */
+                sort?: "created_at" | "-created_at" | "occurred_at" | "-occurred_at";
             };
             header?: never;
             path?: never;
@@ -1145,6 +1155,8 @@ export interface operations {
                 "filter[enabled]"?: boolean | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
             };
             header?: never;
             path?: never;
@@ -1263,6 +1275,8 @@ export interface operations {
                 "filter[event_id]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`. */
+                sort?: "created_at" | "-created_at";
             };
             header?: never;
             path: {
@@ -1357,6 +1371,8 @@ export interface operations {
             query?: {
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
+                sort?: "key" | "-key";
             };
             header?: never;
             path?: never;
@@ -1381,6 +1397,8 @@ export interface operations {
                 "filter[resource_type]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
+                sort?: "key" | "-key";
             };
             header?: never;
             path?: never;
