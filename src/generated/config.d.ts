@@ -15,8 +15,8 @@ export interface paths {
          * List Configs
          * @description List configs for this account.
          *
-         *     Pass `filter[parent]=<parent_key>` to return only the direct children
-         *     of a specific config.
+         *     Default sort is `key` ascending. Pass `filter[parent]=<parent_key>`
+         *     to return only the direct children of a specific config.
          */
         get: operations["list_configs"];
         put?: never;
@@ -373,6 +373,8 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[parent]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
             };
             header?: never;
             path?: never;
