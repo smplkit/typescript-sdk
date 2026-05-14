@@ -716,6 +716,8 @@ export interface paths {
          * @description Return distinct metric names recorded for the account, each with a
          *     representative unit. Plain-JSON response (not JSON:API) — this is
          *     metadata for discovery, not a metric resource.
+         *
+         *     Default sort is `name` ascending.
          */
         get: operations["list_metric_names"];
         put?: never;
@@ -844,6 +846,9 @@ export interface paths {
         /**
          * List Plans
          * @description Return all plan tier definitions as JSON:API resources.
+         *
+         *     Default sort is `sort_order` ascending — the natural ladder defined in
+         *     `plans.yaml`. Pass `sort=display_name` for an alphabetical view.
          */
         get: operations["list_plans"];
         put?: never;
@@ -863,7 +868,10 @@ export interface paths {
         };
         /**
          * List Products
-         * @description Return all flag-enabled products with their plans, limits, and marketing content.
+         * @description Return all flag-enabled products with their plans, limits, and
+         *     marketing content.
+         *
+         *     Default sort is `display_name` ascending.
          */
         get: operations["list_products"];
         put?: never;
@@ -884,6 +892,8 @@ export interface paths {
         /**
          * List Subscriptions
          * @description Return subscription rows for the authenticated account.
+         *
+         *     Default sort is `product` ascending.
          */
         get: operations["list_subscriptions"];
         put?: never;
@@ -1080,6 +1090,8 @@ export interface paths {
         /**
          * List Invoices
          * @description Return invoice history for the account from Stripe.
+         *
+         *     Default sort is `-created_at` (newest first).
          */
         get: operations["list_invoices"];
         put?: never;
@@ -4339,7 +4351,10 @@ export interface operations {
     };
     list_environments: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4694,6 +4709,8 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[status]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `expires_at`, `-expires_at`, `last_used_at`, `-last_used_at`, `name`, `-name`, `status`, `-status`. */
+                sort?: "created_at" | "-created_at" | "expires_at" | "-expires_at" | "last_used_at" | "-last_used_at" | "name" | "-name" | "status" | "-status";
             };
             header?: never;
             path?: never;
@@ -5044,7 +5061,10 @@ export interface operations {
     };
     list_context_types: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5398,6 +5418,8 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[context_type]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
             };
             header?: never;
             path?: never;
@@ -5630,7 +5652,10 @@ export interface operations {
     };
     list_services: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5925,6 +5950,8 @@ export interface operations {
             query?: {
                 "filter[status]"?: string | null;
                 "filter[token]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `email`, `-email`, `status`, `-status`. */
+                sort?: "created_at" | "-created_at" | "email" | "-email" | "status" | "-status";
             };
             header?: never;
             path?: never;
@@ -6366,7 +6393,10 @@ export interface operations {
     };
     list_metric_names: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `name`, `-name`. */
+                sort?: "name" | "-name";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6483,6 +6513,8 @@ export interface operations {
             query: {
                 "filter[name]": string;
                 "filter[recorded_at]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-recorded_at`. Allowed values: `recorded_at`, `-recorded_at`, `value`, `-value`. */
+                sort?: "recorded_at" | "-recorded_at" | "value" | "-value";
             };
             header?: never;
             path?: never;
@@ -6543,6 +6575,8 @@ export interface operations {
                 "filter[name]": string;
                 "filter[rollup]": string;
                 "filter[recorded_at]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `bucket`. Allowed values: `bucket`, `-bucket`. */
+                sort?: "bucket" | "-bucket";
             };
             header?: never;
             path?: never;
@@ -6608,6 +6642,8 @@ export interface operations {
                 "page[number]"?: number;
                 /** @description Items per page */
                 "page[size]"?: number;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `email`. Allowed values: `created_at`, `-created_at`, `display_name`, `-display_name`, `email`, `-email`. */
+                sort?: "created_at" | "-created_at" | "display_name" | "-display_name" | "email" | "-email";
             };
             header?: never;
             path?: never;
@@ -6840,7 +6876,10 @@ export interface operations {
     };
     list_plans: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `sort_order`. Allowed values: `display_name`, `-display_name`, `id`, `-id`, `sort_order`, `-sort_order`. */
+                sort?: "display_name" | "-display_name" | "id" | "-id" | "sort_order" | "-sort_order";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6896,7 +6935,10 @@ export interface operations {
     };
     list_products: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `display_name`. Allowed values: `display_name`, `-display_name`, `id`, `-id`. */
+                sort?: "display_name" | "-display_name" | "id" | "-id";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6952,7 +6994,10 @@ export interface operations {
     };
     list_subscriptions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `product`. Allowed values: `created_at`, `-created_at`, `plan`, `-plan`, `product`, `-product`, `status`, `-status`. */
+                sort?: "created_at" | "-created_at" | "plan" | "-plan" | "product" | "-product" | "status" | "-status";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7366,7 +7411,10 @@ export interface operations {
     };
     list_payment_methods: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `exp_year`, `-exp_year`, `is_default`, `-is_default`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "exp_year" | "-exp_year" | "is_default" | "-is_default" | "updated_at" | "-updated_at";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7716,7 +7764,10 @@ export interface operations {
     };
     list_invoices: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `status`, `-status`, `total`, `-total`. */
+                sort?: "created_at" | "-created_at" | "status" | "-status" | "total" | "-total";
+            };
             header?: never;
             path?: never;
             cookie?: never;
