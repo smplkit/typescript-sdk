@@ -15,10 +15,11 @@ export interface paths {
          * List Loggers
          * @description List loggers for this account.
          *
-         *     Supports `filter[managed]` to narrow to managed (or unmanaged) loggers,
-         *     `filter[service]` to keep only loggers observed in a specific service,
-         *     and `filter[last_seen]` (interval notation `[<from>,*)`) to keep only
-         *     loggers with a source observation at or after the given timestamp.
+         *     Default sort is `key` ascending. Supports `filter[managed]` to narrow
+         *     to managed (or unmanaged) loggers, `filter[service]` to keep only
+         *     loggers observed in a specific service, and `filter[last_seen]`
+         *     (interval notation `[<from>,*)`) to keep only loggers with a source
+         *     observation at or after the given timestamp.
          */
         get: operations["list_loggers"];
         put?: never;
@@ -96,6 +97,8 @@ export interface paths {
         /**
          * List Log Groups
          * @description List log groups for this account.
+         *
+         *     Default sort is `key` ascending.
          */
         get: operations["list_log_groups"];
         put?: never;
@@ -154,6 +157,8 @@ export interface paths {
         /**
          * List Logger Sources
          * @description List the service / environment observations recorded for a logger.
+         *
+         *     Default sort is `-last_seen` (most recently observed first).
          */
         get: operations["list_logger_sources"];
         put?: never;
@@ -175,8 +180,9 @@ export interface paths {
          * List All Logger Sources
          * @description List every logger source observation for this account.
          *
-         *     Supports `filter[environment]` and `filter[service]` to narrow to a
-         *     specific environment or service.
+         *     Default sort is `-last_seen` (most recently observed first). Supports
+         *     `filter[environment]` and `filter[service]` to narrow to a specific
+         *     environment or service.
          */
         get: operations["list_all_logger_sources"];
         put?: never;
@@ -197,6 +203,8 @@ export interface paths {
         /**
          * List Services
          * @description List the services that have reported a logger for this account.
+         *
+         *     Default sort is `name` ascending.
          */
         get: operations["list_services"];
         put?: never;
@@ -802,6 +810,8 @@ export interface operations {
                 "filter[managed]"?: boolean | null;
                 "filter[service]"?: string | null;
                 "filter[last_seen]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
             };
             header?: never;
             path?: never;
@@ -1094,7 +1104,10 @@ export interface operations {
     };
     list_log_groups: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1386,7 +1399,10 @@ export interface operations {
     };
     list_logger_sources: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-last_seen`. Allowed values: `created_at`, `-created_at`, `environment`, `-environment`, `last_seen`, `-last_seen`, `service`, `-service`. */
+                sort?: "created_at" | "-created_at" | "environment" | "-environment" | "last_seen" | "-last_seen" | "service" | "-service";
+            };
             header?: never;
             path: {
                 id: string;
@@ -1447,6 +1463,8 @@ export interface operations {
             query?: {
                 "filter[environment]"?: string | null;
                 "filter[service]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-last_seen`. Allowed values: `created_at`, `-created_at`, `environment`, `-environment`, `last_seen`, `-last_seen`, `service`, `-service`. */
+                sort?: "created_at" | "-created_at" | "environment" | "-environment" | "last_seen" | "-last_seen" | "service" | "-service";
             };
             header?: never;
             path?: never;
@@ -1503,7 +1521,10 @@ export interface operations {
     };
     list_services: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `name`, `-name`. */
+                sort?: "name" | "-name";
+            };
             header?: never;
             path?: never;
             cookie?: never;
