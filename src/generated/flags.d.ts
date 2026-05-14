@@ -14,6 +14,8 @@ export interface paths {
         /**
          * List Flags
          * @description List feature flags for this account.
+         *
+         *     Default sort is `key` ascending.
          */
         get: operations["list_flags"];
         put?: never;
@@ -89,6 +91,8 @@ export interface paths {
         /**
          * List Flag Sources
          * @description List the service/environment observations recorded for a single flag.
+         *
+         *     Default sort is `-last_seen` (most recently seen first).
          */
         get: operations["list_flag_sources"];
         put?: never;
@@ -110,7 +114,8 @@ export interface paths {
          * List All Flag Sources
          * @description List service/environment observations across all flags for this account.
          *
-         *     Filter by `environment` or `service` (or both) to narrow the result.
+         *     Default sort is `-last_seen` (most recently seen first). Filter by
+         *     `environment` or `service` (or both) to narrow the result.
          */
         get: operations["list_all_flag_sources"];
         put?: never;
@@ -790,6 +795,8 @@ export interface operations {
                 "filter[references_context]"?: string | null;
                 /** @description Return flags whose rules reference any attribute of the given context type. */
                 "filter[references_context_type]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `type`, `-type`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "type" | "-type" | "updated_at" | "-updated_at";
             };
             header?: never;
             path?: never;
@@ -926,7 +933,10 @@ export interface operations {
     };
     list_flag_sources: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-last_seen`. Allowed values: `created_at`, `-created_at`, `environment`, `-environment`, `last_seen`, `-last_seen`, `service`, `-service`. */
+                sort?: "created_at" | "-created_at" | "environment" | "-environment" | "last_seen" | "-last_seen" | "service" | "-service";
+            };
             header?: never;
             path: {
                 id: string;
@@ -951,6 +961,8 @@ export interface operations {
             query?: {
                 "filter[environment]"?: string | null;
                 "filter[service]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-last_seen`. Allowed values: `created_at`, `-created_at`, `environment`, `-environment`, `last_seen`, `-last_seen`, `service`, `-service`. */
+                sort?: "created_at" | "-created_at" | "environment" | "-environment" | "last_seen" | "-last_seen" | "service" | "-service";
             };
             header?: never;
             path?: never;
