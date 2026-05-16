@@ -882,7 +882,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/subscriptions": {
+    "/api/v1/accounts/current/subscription": {
         parameters: {
             query?: never;
             header?: never;
@@ -890,25 +890,46 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Subscriptions
-         * @description Return subscription rows for the authenticated account.
+         * Get Current Subscription
+         * @description Return the authenticated account's subscription, or 404 if none exists.
+         */
+        get: operations["get_current_subscription"];
+        /**
+         * Replace Current Subscription
+         * @description Replace the authenticated account's subscription with the desired state.
+         */
+        put: operations["put_current_subscription"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/current/subscription/actions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Subscription Change
+         * @description Project the result of replacing the subscription with the desired state.
          *
-         *     Default sort is `product` ascending.
+         *     No database or billing-provider changes are made; safe to call as the
+         *     customer iterates on a plan picker.
          */
-        get: operations["list_subscriptions"];
-        put?: never;
-        /**
-         * Create Subscription
-         * @description Create a new paid subscription for a product.
-         */
-        post: operations["create_subscription"];
+        post: operations["preview_current_subscription"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/subscriptions/{id}/actions/upgrade": {
+    "/api/v1/accounts/{account_id}/subscription": {
         parameters: {
             query?: never;
             header?: never;
@@ -916,92 +937,17 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
         /**
-         * Upgrade Subscription
-         * @description Upgrade an existing paid subscription to a higher plan.
+         * Replace Account Subscription (admin)
+         * @description Admin replacement of a specific account's subscription.
+         *
+         *     Accepts the same body shape as the customer endpoint plus
+         *     ``discount_override_pct``. Setting the override to 100 skips the billing
+         *     provider entirely; lowering it below 100 requires a payment method on
+         *     file for the target account.
          */
-        post: operations["upgrade_subscription"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/subscriptions/{id}/actions/downgrade": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Downgrade Subscription
-         * @description Downgrade an existing paid subscription to a lower plan.
-         */
-        post: operations["downgrade_subscription"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/subscriptions/{id}/actions/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel Subscription
-         * @description Cancel a subscription at end of the current billing period.
-         */
-        post: operations["cancel_subscription"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/subscriptions/{id}/actions/uncancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Undo Cancellation
-         * @description Reverse a pending cancellation; subscription will renew as normal.
-         */
-        post: operations["uncancel_subscription"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/subscriptions/{id}/actions/undowngrade": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Undo Pending Downgrade
-         * @description Reverse a pending downgrade scheduled for end of the current billing period.
-         */
-        post: operations["undowngrade_subscription"];
+        put: operations["admin_put_account_subscription"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1352,6 +1298,62 @@ export interface components {
              */
             type: "payment_method";
             attributes: components["schemas"]["AddPaymentMethodAttributes"];
+        };
+        /**
+         * AdminSubscriptionRequest
+         * @description Admin-scope request envelope for replacing a subscription.
+         */
+        AdminSubscriptionRequest: {
+            data: components["schemas"]["AdminSubscriptionRequestResource"];
+        };
+        /**
+         * AdminSubscriptionRequestAttributes
+         * @description Same as the customer request body plus the admin-only override field.
+         */
+        AdminSubscriptionRequestAttributes: {
+            /**
+             * Items
+             * @description Desired enrollments. Products listed are scheduled to be on the specified plan immediately (for upgrades and new enrollments) or at the end of the current billing period (for downgrades). Products not listed are scheduled to be dropped at the end of the current billing period.
+             */
+            items: components["schemas"]["SubscriptionItemRequest"][];
+            /**
+             * Payment Method
+             * Format: uuid
+             * @description Optional identifier of the payment method to bill against. If omitted, the account's default payment method is used.
+             */
+            payment_method?: string | null;
+            /**
+             * Discount Override Pct
+             * @description Administrator-set discount percentage (0–100). When set, the multi-product discount schedule is bypassed and this value is used directly. Setting `100` skips the billing provider entirely — the customer pays nothing. Pass `null` to clear any existing override and revert to the multi-product discount schedule.
+             */
+            discount_override_pct?: number | null;
+        };
+        /**
+         * AdminSubscriptionRequestResource
+         * @description Admin-scope resource object for a subscription update request.
+         * @example {
+         *       "attributes": {
+         *         "discount_override_pct": 100,
+         *         "items": [
+         *           {
+         *             "plan": "PRO",
+         *             "product": "audit"
+         *           }
+         *         ]
+         *       },
+         *       "type": "subscription"
+         *     }
+         */
+        AdminSubscriptionRequestResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @description JSON:API resource type.
+             * @enum {string}
+             */
+            type: "subscription";
+            attributes: components["schemas"]["AdminSubscriptionRequestAttributes"];
         };
         /**
          * ApiKey
@@ -1751,69 +1753,6 @@ export interface components {
          */
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
-        };
-        /**
-         * CreateSubscriptionAttributes
-         * @description Attributes accepted when creating a new subscription.
-         * @example {
-         *       "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-         *       "plan": "pro",
-         *       "product": "flags"
-         *     }
-         */
-        CreateSubscriptionAttributes: {
-            /**
-             * Product
-             * @description Product key to subscribe to, e.g. `flags`.
-             */
-            product: string;
-            /**
-             * Plan
-             * @description Plan key to subscribe on, e.g. `pro`.
-             */
-            plan: string;
-            /**
-             * Payment Method
-             * @description UUID of a payment method on file to bill against. If omitted, the account's default payment method is used.
-             */
-            payment_method?: string | null;
-        };
-        /**
-         * CreateSubscriptionBody
-         * @description JSON:API request envelope for creating a subscription.
-         * @example {
-         *       "data": {
-         *         "attributes": {
-         *           "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-         *           "plan": "pro",
-         *           "product": "flags"
-         *         },
-         *         "type": "subscription"
-         *       }
-         *     }
-         */
-        CreateSubscriptionBody: {
-            data: components["schemas"]["CreateSubscriptionData"];
-        };
-        /**
-         * CreateSubscriptionData
-         * @description Resource object for the create-subscription request.
-         * @example {
-         *       "attributes": {
-         *         "payment_method": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-         *         "plan": "pro",
-         *         "product": "flags"
-         *       },
-         *       "type": "subscription"
-         *     }
-         */
-        CreateSubscriptionData: {
-            /**
-             * Type
-             * @description Resource type; must be `subscription`.
-             */
-            type: string;
-            attributes: components["schemas"]["CreateSubscriptionAttributes"];
         };
         /**
          * Email
@@ -2591,13 +2530,13 @@ export interface components {
             attributes: components["schemas"]["MetricRollupAttributes"];
         };
         /**
-         * NextTierMeta
-         * @description Information about the next volume-discount tier.
+         * NextTierResponse
+         * @description Hint describing how the customer could unlock a better discount.
          */
-        NextTierMeta: {
+        NextTierResponse: {
             /**
              * Products Needed
-             * @description Number of additional subscribed products needed to reach the next tier.
+             * @description Number of additional paid products required to reach the next discount tier.
              */
             products_needed: number;
             /**
@@ -2607,7 +2546,7 @@ export interface components {
             discount_pct: number;
             /**
              * Additional Savings Cents
-             * @description Additional monthly savings in cents at the next tier.
+             * @description Estimated additional monthly savings (in cents) at the next tier, compared to paying full list price for the added product.
              */
             additional_savings_cents: number;
         };
@@ -2791,17 +2730,6 @@ export interface components {
              * @description Order in which the plan should be shown in customer-facing lists. Lower values sort first.
              */
             sort_order: number;
-        };
-        /**
-         * PlanChangeRequest
-         * @description Body for the subscription upgrade and downgrade actions.
-         */
-        PlanChangeRequest: {
-            /**
-             * Plan
-             * @description Plan key to change the subscription to.
-             */
-            plan: string;
         };
         /**
          * PlanDefinition
@@ -3096,123 +3024,374 @@ export interface components {
             data: components["schemas"]["SetupIntentResource"];
         };
         /**
-         * SubscriptionAttributes
-         * @description A subscription that grants the account access to a product on a plan.
+         * SubscriptionChangeProjection
+         * @description Per-item projected effect of a subscription change.
          */
-        SubscriptionAttributes: {
+        SubscriptionChangeProjection: {
             /**
              * Product
-             * @description Product key the subscription is for, e.g. `flags`.
+             * @description Product key affected by this change.
+             */
+            product: string;
+            /**
+             * From Plan
+             * @description Current plan for this product, or `FREE` if it is being added.
+             */
+            from_plan: string;
+            /**
+             * To Plan
+             * @description Plan the product will be on after the change. `FREE` indicates the enrollment will be dropped.
+             */
+            to_plan: string;
+            /**
+             * Monthly Cents
+             * @description Monthly cost in cents of this enrollment after the change. `0` when the enrollment will be dropped.
+             */
+            monthly_cents: number;
+            /**
+             * Effect
+             * @description `IMMEDIATE` when the change takes effect at confirmation time (and a prorated charge may apply today). `NEXT_PERIOD` when the change takes effect at the end of the current billing period.
+             * @enum {string}
+             */
+            effect: "IMMEDIATE" | "NEXT_PERIOD";
+            /**
+             * Prorated Charge Today Cents
+             * @description When `effect` is `IMMEDIATE`, the estimated prorated charge for the remainder of the current billing period in cents. Always `0` when `effect` is `NEXT_PERIOD`.
+             * @default 0
+             */
+            prorated_charge_today_cents: number;
+            /**
+             * Starts At
+             * @description When `effect` is `NEXT_PERIOD`, the ISO-8601 timestamp at which the change takes effect. `null` when `effect` is `IMMEDIATE` (the change applies on confirmation).
+             */
+            starts_at?: string | null;
+        };
+        /**
+         * SubscriptionItemRequest
+         * @description One product enrollment as supplied by the caller.
+         *
+         *     The caller supplies the *desired* (product, plan) pair for each product
+         *     they want enrolled. Products absent from the request are interpreted as
+         *     scheduled-for-drop at the end of the current billing period.
+         */
+        SubscriptionItemRequest: {
+            /**
+             * Product
+             * @description Product key (e.g. `audit`, `config`, `flags`, `logging`).
              */
             product: string;
             /**
              * Plan
-             * @description Plan key the subscription is on, e.g. `pro`.
+             * @description Target plan for this product. Must be a paid plan such as `STANDARD` or `PRO`; the free plan is implicit when a product is not listed.
+             */
+            plan: string;
+        };
+        /**
+         * SubscriptionItemResponse
+         * @description One product enrollment as exposed in subscription responses.
+         */
+        SubscriptionItemResponse: {
+            /**
+             * Id
+             * Format: uuid
+             * @description Unique identifier for this enrollment.
+             */
+            id: string;
+            /**
+             * Product
+             * @description Product key (e.g. `audit`, `config`, `flags`, `logging`).
+             */
+            product: string;
+            /**
+             * Plan
+             * @description Current plan for this product (e.g. `STANDARD`, `PRO`).
              */
             plan: string;
             /**
-             * Status
-             * @description Lifecycle state of the subscription, e.g. `active`, `trialing`, `past_due`, `canceled`.
+             * Price Monthly Cents
+             * @description Monthly list price for this enrollment, in cents. This value is locked at the time the enrollment was created or last had its plan changed; subsequent changes to the public price list do not affect this enrollment until the customer themselves changes their plan.
              */
-            status?: string | null;
+            price_monthly_cents: number;
             /**
-             * Comped
-             * @description When `true`, the subscription is complimentary and is not billed through the billing provider.
+             * Pending Plan Change
+             * @description When a plan change is scheduled for the end of the current billing period, this is the plan that will take effect. Otherwise `null`. The value `FREE` indicates the enrollment will be dropped.
              */
-            comped: boolean;
+            pending_plan_change?: string | null;
             /**
-             * Stripe Managed
-             * @description When `true`, the subscription is billed through Stripe; otherwise it is a free or complimentary subscription that does not produce invoices.
+             * Scheduled Change Effective At
+             * @description ISO-8601 timestamp at which the pending plan change takes effect. Matches the subscription's `current_period_end`.
              */
-            stripe_managed: boolean;
-            /**
-             * Current Period End
-             * @description End of the current billing period (ISO 8601 timestamp).
-             */
-            current_period_end?: string | null;
-            /**
-             * Client Secret
-             * @description Stripe payment intent client secret returned when a subscription create requires additional authentication (3DS). Returned only on create.
-             */
-            client_secret?: string | null;
+            scheduled_change_effective_at?: string | null;
         };
         /**
-         * SubscriptionListMeta
-         * @description Discount and totals summary attached to a subscription collection response.
+         * SubscriptionPreviewAttributes
+         * @description Projected totals and per-change breakdown for a hypothetical change.
          */
-        SubscriptionListMeta: {
+        SubscriptionPreviewAttributes: {
             /**
-             * Subtotal Cents
-             * @description Sum of list prices across all subscriptions in cents.
+             * Projected Subtotal Cents
+             * @description Projected sum of item monthly list prices after the change.
              */
-            subtotal_cents: number;
+            projected_subtotal_cents: number;
             /**
-             * Discount Pct
-             * @description Effective discount percentage applied.
+             * Projected Discount Pct
+             * @description Projected discount percentage that will apply after the change.
              */
-            discount_pct: number;
+            projected_discount_pct: number;
             /**
-             * Discount Amount Cents
-             * @description Discount amount in cents.
-             */
-            discount_amount_cents: number;
-            /**
-             * Discount Source
-             * @description Source of the discount. `VOLUME` indicates the standard volume-discount schedule; `OVERRIDE` indicates a custom discount set on the account.
+             * Projected Discount Source
+             * @description `VOLUME` when the projected discount comes from the multi-product schedule; `OVERRIDE` when an administrator's discount applies.
              * @enum {string}
              */
-            discount_source: "VOLUME" | "OVERRIDE";
+            projected_discount_source: "VOLUME" | "OVERRIDE";
             /**
-             * Total Cents
-             * @description Final monthly total in cents after the discount.
+             * Projected Discount Amount Cents
+             * @description Projected discount amount in cents after the change.
              */
-            total_cents: number;
-            /** @description Information about the next volume-discount tier, or `null` if the account is already at the top tier or on an override. */
-            next_tier?: components["schemas"]["NextTierMeta"];
+            projected_discount_amount_cents: number;
+            /**
+             * Projected Total Cents
+             * @description Projected final monthly total in cents after the change.
+             */
+            projected_total_cents: number;
+            /** @description Hint describing additional savings available by subscribing to another product after the change is applied. `null` when no better tier is reachable. */
+            projected_next_tier?: components["schemas"]["NextTierResponse"];
+            /**
+             * Changes
+             * @description Per-product breakdown of changes the desired state would produce. Products that would remain unchanged are omitted.
+             */
+            changes: components["schemas"]["SubscriptionChangeProjection"][];
+            /**
+             * Total Charge Today Cents
+             * @description Total amount that would be charged at confirmation time, in cents. The sum of `prorated_charge_today_cents` across `IMMEDIATE` changes.
+             */
+            total_charge_today_cents: number;
+            /**
+             * Next Invoice Total Cents
+             * @description Projected total of the next monthly invoice in cents, after all scheduled changes have taken effect.
+             */
+            next_invoice_total_cents: number;
         };
         /**
-         * SubscriptionListResponse
-         * @description JSON:API collection response for subscriptions.
+         * SubscriptionPreviewResource
+         * @description JSON:API resource object for a subscription preview.
+         * @example {
+         *       "attributes": {
+         *         "changes": [
+         *           {
+         *             "effect": "IMMEDIATE",
+         *             "from_plan": "FREE",
+         *             "monthly_cents": 9900,
+         *             "product": "audit",
+         *             "prorated_charge_today_cents": 4521,
+         *             "to_plan": "PRO"
+         *           }
+         *         ],
+         *         "next_invoice_total_cents": 12580,
+         *         "projected_discount_amount_cents": 2220,
+         *         "projected_discount_pct": 15,
+         *         "projected_discount_source": "VOLUME",
+         *         "projected_subtotal_cents": 14800,
+         *         "projected_total_cents": 12580,
+         *         "total_charge_today_cents": 4521
+         *       },
+         *       "id": "preview",
+         *       "type": "subscription_preview"
+         *     }
          */
-        SubscriptionListResponse: {
-            /** Data */
-            data: components["schemas"]["SubscriptionResource"][];
-            meta?: components["schemas"]["SubscriptionListMeta"];
+        SubscriptionPreviewResource: {
+            /**
+             * Id
+             * @description Always `preview`.
+             * @default preview
+             * @enum {string|null}
+             */
+            id: "preview" | null;
+            /**
+             * Type
+             * @description JSON:API resource type.
+             * @enum {string}
+             */
+            type: "subscription_preview";
+            attributes: components["schemas"]["SubscriptionPreviewAttributes"];
+        };
+        /**
+         * SubscriptionPreviewResponse
+         * @description Response envelope for the preview action.
+         */
+        SubscriptionPreviewResponse: {
+            data: components["schemas"]["SubscriptionPreviewResource"];
+        };
+        /**
+         * SubscriptionRequest
+         * @description Single-resource request envelope for replacing the subscription.
+         */
+        SubscriptionRequest: {
+            data: components["schemas"]["SubscriptionRequestResource"];
+        };
+        /**
+         * SubscriptionRequestAttributes
+         * @description Customer's desired subscription state.
+         */
+        SubscriptionRequestAttributes: {
+            /**
+             * Items
+             * @description Desired enrollments. Products listed are scheduled to be on the specified plan immediately (for upgrades and new enrollments) or at the end of the current billing period (for downgrades). Products not listed are scheduled to be dropped at the end of the current billing period.
+             */
+            items: components["schemas"]["SubscriptionItemRequest"][];
+            /**
+             * Payment Method
+             * Format: uuid
+             * @description Optional identifier of the payment method to bill against. If omitted, the account's default payment method is used.
+             */
+            payment_method?: string | null;
+        };
+        /**
+         * SubscriptionRequestResource
+         * @description JSON:API resource object for a subscription update request.
+         * @example {
+         *       "attributes": {
+         *         "items": [
+         *           {
+         *             "plan": "PRO",
+         *             "product": "audit"
+         *           },
+         *           {
+         *             "plan": "PRO",
+         *             "product": "config"
+         *           }
+         *         ],
+         *         "payment_method": "p1q2r3s4-5678-90ab-cdef-1234567890ab"
+         *       },
+         *       "type": "subscription"
+         *     }
+         */
+        SubscriptionRequestResource: {
+            /**
+             * Id
+             * @description Subscription identifier; the server ignores this and uses the auth context.
+             */
+            id?: string | null;
+            /**
+             * Type
+             * @description JSON:API resource type.
+             * @enum {string}
+             */
+            type: "subscription";
+            attributes: components["schemas"]["SubscriptionRequestAttributes"];
         };
         /**
          * SubscriptionResource
-         * @description JSON:API resource envelope for a subscription.
-         *
-         *     `id` must not be specified for create requests (the server assigns it).
+         * @description JSON:API resource object for a subscription.
          * @example {
          *       "attributes": {
-         *         "comped": false,
-         *         "current_period_end": "2026-05-01T00:00:00Z",
-         *         "plan": "pro",
-         *         "product": "flags",
-         *         "status": "active",
-         *         "stripe_managed": true
+         *         "current_period_end": "2026-06-01T00:00:00Z",
+         *         "current_period_start": "2026-05-01T00:00:00Z",
+         *         "discount_amount_cents": 2220,
+         *         "discount_pct": 15,
+         *         "discount_source": "VOLUME",
+         *         "items": [
+         *           {
+         *             "id": "i1j2k3l4-5678-90ab-cdef-1234567890ab",
+         *             "plan": "PRO",
+         *             "price_monthly_cents": 9900,
+         *             "product": "audit"
+         *           }
+         *         ],
+         *         "next_tier": {
+         *           "additional_savings_cents": 4281,
+         *           "discount_pct": 33,
+         *           "products_needed": 1
+         *         },
+         *         "payment_method": "p1q2r3s4-5678-90ab-cdef-1234567890ab",
+         *         "status": "ACTIVE",
+         *         "subtotal_cents": 14800,
+         *         "total_cents": 12580
          *       },
          *       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
          *       "type": "subscription"
          *     }
          */
         SubscriptionResource: {
-            /** Id */
+            /**
+             * Id
+             * @description Subscription identifier. Always `current` on response; absent on create-style requests.
+             */
             id?: string | null;
             /**
              * Type
+             * @description JSON:API resource type.
              * @enum {string}
              */
             type: "subscription";
-            attributes: components["schemas"]["SubscriptionAttributes"];
+            attributes: components["schemas"]["SubscriptionResponseAttributes"];
         };
         /**
          * SubscriptionResponse
-         * @description JSON:API single-resource response envelope for a subscription.
+         * @description Single-resource response envelope for a subscription.
          */
         SubscriptionResponse: {
             data: components["schemas"]["SubscriptionResource"];
+        };
+        /**
+         * SubscriptionResponseAttributes
+         * @description Customer's subscription as returned by the API.
+         */
+        SubscriptionResponseAttributes: {
+            /**
+             * Status
+             * @description Lifecycle state of the subscription. `ACTIVE` while billing is current; `PAST_DUE` after a failed charge; `CANCELED` once the subscription has ended; `null` when the subscription has no billing object (fully comped at 100% discount).
+             */
+            status?: string | null;
+            /**
+             * Current Period Start
+             * @description ISO-8601 timestamp of the current billing period's start.
+             */
+            current_period_start?: string | null;
+            /**
+             * Current Period End
+             * @description ISO-8601 timestamp of the current billing period's end. Scheduled plan changes take effect at this moment.
+             */
+            current_period_end?: string | null;
+            /**
+             * Discount Pct
+             * @description Effective discount percentage applied to the subscription's monthly invoice. This is the value locked at the time of the customer's last subscription change; subsequent changes to the public discount schedule do not affect this customer until they themselves change their subscription.
+             */
+            discount_pct: number;
+            /**
+             * Discount Source
+             * @description `VOLUME` when the discount comes from the multi-product discount schedule; `OVERRIDE` when an administrator has applied a custom discount.
+             * @enum {string}
+             */
+            discount_source: "VOLUME" | "OVERRIDE";
+            /**
+             * Subtotal Cents
+             * @description Sum of all item list prices in cents, before discount.
+             */
+            subtotal_cents: number;
+            /**
+             * Discount Amount Cents
+             * @description Amount discounted from the subtotal in cents.
+             */
+            discount_amount_cents: number;
+            /**
+             * Total Cents
+             * @description Final monthly total in cents after the discount is applied.
+             */
+            total_cents: number;
+            /** @description When `discount_source` is `VOLUME` and the customer is below the top tier, describes the additional savings available by subscribing to another product. `null` otherwise. */
+            next_tier?: components["schemas"]["NextTierResponse"];
+            /**
+             * Payment Method
+             * Format: uuid
+             * @description Identifier of the default payment method used to bill this subscription. `null` when the subscription has no associated payment method (e.g. fully comped).
+             */
+            payment_method?: string | null;
+            /**
+             * Items
+             * @description One entry per product currently enrolled on the subscription.
+             */
+            items: components["schemas"]["SubscriptionItemResponse"][];
         };
         /**
          * User
@@ -6992,258 +7171,13 @@ export interface operations {
             };
         };
     };
-    list_subscriptions: {
-        parameters: {
-            query?: {
-                /** @description Field to sort by. Prefix with `-` for descending order. Default: `product`. Allowed values: `created_at`, `-created_at`, `plan`, `-plan`, `product`, `-product`, `status`, `-status`. */
-                sort?: "created_at" | "-created_at" | "plan" | "-plan" | "product" | "-product" | "status" | "-status";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["SubscriptionListResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_subscription: {
+    get_current_subscription: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/vnd.api+json": components["schemas"]["CreateSubscriptionBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    upgrade_subscription: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/vnd.api+json": components["schemas"]["PlanChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    downgrade_subscription: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/vnd.api+json": components["schemas"]["PlanChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["SubscriptionResponse"];
-                };
-            };
-            /** @description Validation error or malformed request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Rate limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    cancel_subscription: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
         requestBody?: never;
         responses: {
             /** @description Successful Response */
@@ -7293,16 +7227,18 @@ export interface operations {
             };
         };
     };
-    uncancel_subscription: {
+    put_current_subscription: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["SubscriptionRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -7351,16 +7287,80 @@ export interface operations {
             };
         };
     };
-    undowngrade_subscription: {
+    preview_current_subscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["SubscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SubscriptionPreviewResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_put_account_subscription: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                id: string;
+                account_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["AdminSubscriptionRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
