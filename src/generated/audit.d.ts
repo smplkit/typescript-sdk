@@ -506,9 +506,8 @@ export interface components {
          *
          *     Each event recorded for the account is evaluated against every enabled
          *     forwarder. If the filter expression evaluates truthy — or is absent —
-         *     the event is delivered to the destination using the configured HTTP
-         *     request. The slug, derived from `name` at create time, is the stable
-         *     identifier used by the console and other tooling.
+         *     the event is shaped by the configured transform and delivered to the
+         *     destination defined by ``configuration``.
          */
         Forwarder: {
             /**
@@ -516,6 +515,11 @@ export interface components {
              * @description Human-readable name for the forwarder.
              */
             name: string;
+            /**
+             * Description
+             * @description Free-text description for the forwarder.
+             */
+            description?: string | null;
             /** @description Destination type. */
             forwarder_type: components["schemas"]["ForwarderType"];
             /**
@@ -532,17 +536,17 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
-             * Transform
-             * @description JSONata template applied to each event before delivery. Omit to deliver the event unchanged.
+             * Transform Type
+             * @description Engine used to evaluate ``transform``. Must be set whenever ``transform`` is set. Today only `JSONATA` is supported.
              */
-            transform?: string | null;
-            /** @description HTTP request used to deliver each event to the destination. */
-            http: components["schemas"]["ForwarderHttp"];
+            transform_type?: "JSONATA" | null;
             /**
-             * Slug
-             * @description URL-safe identifier derived from `name` at create time. Stable for the lifetime of the forwarder.
+             * Transform
+             * @description Template applied to each event before delivery. The shape depends on ``transform_type``: for `JSONATA`, a string containing a JSONata expression. Omit to deliver the event JSON unchanged.
              */
-            readonly slug?: string | null;
+            transform?: unknown | null;
+            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. */
+            configuration: components["schemas"]["HttpConfiguration"];
             /**
              * Created At
              * @description When the forwarder was created.
@@ -701,40 +705,6 @@ export interface components {
             data: components["schemas"]["ForwarderDeliveryResource"];
         };
         /**
-         * ForwarderHttp
-         * @description HTTP request configuration used to deliver an event to the destination.
-         */
-        ForwarderHttp: {
-            /**
-             * Method
-             * @description HTTP method used when delivering an event.
-             * @default POST
-             * @enum {string}
-             */
-            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-            /**
-             * Url
-             * @description Destination URL.
-             */
-            url: string;
-            /**
-             * Headers
-             * @description HTTP headers attached to each delivery request.
-             */
-            headers?: components["schemas"]["HttpHeader"][];
-            /**
-             * Body
-             * @description Request body sent to the destination. If omitted, the event JSON is sent as the body.
-             */
-            body?: string | null;
-            /**
-             * Success Status
-             * @description HTTP response status that indicates a successful delivery. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
-             * @default 2xx
-             */
-            success_status: string;
-        };
-        /**
          * ForwarderListResponse
          * @description JSON:API collection response for forwarders.
          */
@@ -757,18 +727,7 @@ export interface components {
          *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
-         *         "created_at": "2026-05-07T12:00:00Z",
-         *         "enabled": true,
-         *         "filter": {
-         *           "==": [
-         *             {
-         *               "var": "action"
-         *             },
-         *             "user.created"
-         *           ]
-         *         },
-         *         "forwarder_type": "DATADOG",
-         *         "http": {
+         *         "configuration": {
          *           "headers": [
          *             {
          *               "name": "DD-API-KEY",
@@ -779,8 +738,21 @@ export interface components {
          *           "success_status": "2xx",
          *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
          *         },
+         *         "created_at": "2026-05-07T12:00:00Z",
+         *         "description": "Forwards user.* events to the prod Datadog tenant.",
+         *         "enabled": true,
+         *         "filter": {
+         *           "==": [
+         *             {
+         *               "var": "action"
+         *             },
+         *             "user.created"
+         *           ]
+         *         },
+         *         "forwarder_type": "DATADOG",
          *         "name": "Datadog production",
-         *         "slug": "datadog_production",
+         *         "transform": "{ \"message\": action & ' on ' & resource_type }",
+         *         "transform_type": "JSONATA",
          *         "updated_at": "2026-05-07T12:00:00Z",
          *         "version": 1
          *       },
@@ -812,8 +784,48 @@ export interface components {
          */
         ForwarderType: "HTTP" | "DATADOG" | "SPLUNK_HEC" | "SUMO_LOGIC" | "NEW_RELIC" | "HONEYCOMB" | "ELASTIC";
         /**
+         * HttpConfiguration
+         * @description HTTP request configuration used to deliver an event to the destination.
+         *
+         *     Used when the parent forwarder's ``forwarder_type`` is one of the
+         *     HTTP-family destinations (``HTTP``, ``DATADOG``, ``SPLUNK_HEC``,
+         *     ``SUMO_LOGIC``, ``NEW_RELIC``, ``HONEYCOMB``, ``ELASTIC``). When other
+         *     transports land (``FTP``, ``SQS``, …) their own configuration schemas
+         *     will join this one as members of a discriminated union under the
+         *     ``configuration`` field of ``Forwarder``.
+         */
+        HttpConfiguration: {
+            /**
+             * Method
+             * @description HTTP method used when delivering an event.
+             * @default POST
+             * @enum {string}
+             */
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+            /**
+             * Url
+             * @description Destination URL.
+             */
+            url: string;
+            /**
+             * Headers
+             * @description HTTP headers attached to each delivery request.
+             */
+            headers?: components["schemas"]["HttpHeader"][];
+            /**
+             * Success Status
+             * @description HTTP response status that indicates a successful delivery. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
+             * @default 2xx
+             */
+            success_status: string;
+        };
+        /**
          * HttpHeader
          * @description A single HTTP header attached to a forwarder delivery request.
+         *
+         *     Header values carrying secrets (API keys, bearer tokens, HEC tokens)
+         *     are encrypted at the application layer before persistence; the wire
+         *     representation here is always plaintext.
          */
         HttpHeader: {
             /**
@@ -955,11 +967,6 @@ export interface components {
              * @description HTTP headers attached to the test request.
              */
             headers?: components["schemas"]["HttpHeader"][];
-            /**
-             * Body
-             * @description Request body. If omitted, an empty body is sent.
-             */
-            body?: string | null;
             /**
              * Success Status
              * @description HTTP response status that indicates success. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
