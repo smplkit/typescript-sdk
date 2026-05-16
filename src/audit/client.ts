@@ -33,6 +33,7 @@ import type {
   ListEventsParams,
   ListResourceTypesPage,
   ListResourceTypesParams,
+  Pagination,
   ResourceType,
 } from "./types.js";
 
@@ -91,6 +92,21 @@ function _nextCursorFromLinks(body: { links?: { next?: string | null } | null })
   // The link may include other query params after the cursor; the cursor
   // token is base64-url-safe so we slice at the next `&`.
   return next.split("page[after]=")[1]!.split("&")[0]!;
+}
+
+function _paginationFromBody(body: {
+  meta?: { pagination?: Record<string, unknown> | null } | null;
+}): Pagination {
+  const raw = body.meta?.pagination ?? {};
+  const out: Pagination = {
+    page: Number(raw.page ?? 0),
+    size: Number(raw.size ?? 0),
+  };
+  if (raw.total !== undefined && raw.total !== null) out.total = Number(raw.total);
+  if (raw.total_pages !== undefined && raw.total_pages !== null) {
+    out.totalPages = Number(raw.total_pages);
+  }
+  return out;
 }
 
 async function _throwForResponse(response: Response): Promise<never> {
@@ -213,12 +229,13 @@ class ResourceTypesClient {
    *
    * Backed by a maintain-by-write side table (ADR-047 §2.5), so the
    * response time is independent of event volume. Sorted alphabetically;
-   * cursor pagination via `pageAfter`.
+   * offset pagination via `pageNumber` / `pageSize`.
    */
   async list(params: ListResourceTypesParams = {}): Promise<ListResourceTypesPage> {
-    const query: Record<string, string | number> = {};
+    const query: Record<string, string | number | boolean> = {};
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
-    if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
+    if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
 
     const result = await this._http.GET("/api/v1/resource_types", {
       params: { query: query as unknown as Record<string, never> },
@@ -232,7 +249,7 @@ class ResourceTypesClient {
         createdAt: String((r.attributes as Record<string, unknown>).created_at ?? ""),
       }),
     );
-    return { resourceTypes, nextCursor: _nextCursorFromLinks(body) };
+    return { resourceTypes, pagination: _paginationFromBody(body) };
   }
 }
 
@@ -249,14 +266,15 @@ class ActionsClient {
    * Without `filterResourceType`, returns one row per distinct action.
    * With `filterResourceType`, returns only the actions recorded with
    * that resource_type, powering cascading-filter UIs (ADR-047 §2.5).
-   * Sorted alphabetically; cursor pagination via `pageAfter`.
+   * Sorted alphabetically; offset pagination via `pageNumber` / `pageSize`.
    */
   async list(params: ListActionsParams = {}): Promise<ActionListPage> {
-    const query: Record<string, string | number> = {};
+    const query: Record<string, string | number | boolean> = {};
     if (params.filterResourceType !== undefined)
       query["filter[resource_type]"] = params.filterResourceType;
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
-    if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
+    if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
 
     const result = await this._http.GET("/api/v1/actions", {
       params: { query: query as unknown as Record<string, never> },
@@ -270,7 +288,7 @@ class ActionsClient {
         createdAt: String((r.attributes as Record<string, unknown>).created_at ?? ""),
       }),
     );
-    return { actions, nextCursor: _nextCursorFromLinks(body) };
+    return { actions, pagination: _paginationFromBody(body) };
   }
 }
 

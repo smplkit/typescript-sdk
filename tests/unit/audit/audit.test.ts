@@ -394,7 +394,7 @@ describe("AuditClient.resourceTypes", () => {
                 attributes: { resource_type: "user", created_at: "2026-01-02T00:00:00Z" },
               },
             ],
-            meta: { page_size: 20 },
+            meta: { pagination: { page: 1, size: 1000 } },
           }),
           { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
         ),
@@ -403,30 +403,47 @@ describe("AuditClient.resourceTypes", () => {
     expect(page.resourceTypes).toHaveLength(2);
     expect(page.resourceTypes[0]!.id).toBe("invoice");
     expect(page.resourceTypes[1]!.id).toBe("user");
-    expect(page.nextCursor).toBeNull();
+    expect(page.pagination).toEqual({ page: 1, size: 1000 });
     await c._close();
   });
 
-  test("list parses next cursor", async () => {
+  test("list passes page[number], page[size], meta[total] and reads totals", async () => {
+    let capturedUrl = "";
+    const c = _newClient(async (req) => {
+      capturedUrl = req.url;
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "invoice",
+              type: "resource_type",
+              attributes: { resource_type: "invoice", created_at: "2026-01-01T00:00:00Z" },
+            },
+          ],
+          meta: { pagination: { page: 2, size: 1, total: 3, total_pages: 3 } },
+        }),
+        { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
+    const page = await c.resourceTypes.list({ pageNumber: 2, pageSize: 1, metaTotal: true });
+    expect(capturedUrl).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+    expect(capturedUrl).toMatch(/page(\[|%5B)size(\]|%5D)=1/);
+    // booleans serialize lowercase
+    expect(capturedUrl).toMatch(/meta(\[|%5B)total(\]|%5D)=true/);
+    expect(page.pagination).toEqual({ page: 2, size: 1, total: 3, totalPages: 3 });
+    await c._close();
+  });
+
+  test("list returns zeroed pagination when meta block missing", async () => {
     const c = _newClient(
       async () =>
-        new Response(
-          JSON.stringify({
-            data: [
-              {
-                id: "invoice",
-                type: "resource_type",
-                attributes: { resource_type: "invoice", created_at: "2026-01-01T00:00:00Z" },
-              },
-            ],
-            meta: { page_size: 1 },
-            links: { next: "/api/v1/resource_types?page[size]=1&page[after]=cursor-abc" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
-        ),
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.api+json" },
+        }),
     );
-    const page = await c.resourceTypes.list({ pageSize: 1 });
-    expect(page.nextCursor).toBe("cursor-abc");
+    const page = await c.resourceTypes.list();
+    expect(page.pagination).toEqual({ page: 0, size: 0 });
     await c._close();
   });
 
@@ -470,7 +487,7 @@ describe("AuditClient.actions", () => {
                 attributes: { action: "user.updated", created_at: "2026-01-02T00:00:00Z" },
               },
             ],
-            meta: { page_size: 20 },
+            meta: { pagination: { page: 1, size: 1000 } },
           }),
           { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
         ),
@@ -479,7 +496,7 @@ describe("AuditClient.actions", () => {
     expect(page.actions).toHaveLength(2);
     expect(page.actions[0]!.id).toBe("invoice.created");
     expect(page.actions[1]!.id).toBe("user.updated");
-    expect(page.nextCursor).toBeNull();
+    expect(page.pagination).toEqual({ page: 1, size: 1000 });
     await c._close();
   });
 
@@ -487,10 +504,10 @@ describe("AuditClient.actions", () => {
     let capturedUrl = "";
     const c = _newClient(async (req) => {
       capturedUrl = req.url;
-      return new Response(JSON.stringify({ data: [], meta: { page_size: 20 } }), {
-        status: 200,
-        headers: { "Content-Type": "application/vnd.api+json" },
-      });
+      return new Response(
+        JSON.stringify({ data: [], meta: { pagination: { page: 1, size: 1000 } } }),
+        { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
     });
     await c.actions.list({ filterResourceType: "invoice" });
     // openapi-fetch may or may not percent-encode brackets; check for either form
@@ -498,26 +515,29 @@ describe("AuditClient.actions", () => {
     await c._close();
   });
 
-  test("list parses next cursor", async () => {
-    const c = _newClient(
-      async () =>
-        new Response(
-          JSON.stringify({
-            data: [
-              {
-                id: "invoice.created",
-                type: "action",
-                attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
-              },
-            ],
-            meta: { page_size: 1 },
-            links: { next: "/api/v1/actions?page[size]=1&page[after]=cursor-xyz" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
-        ),
-    );
-    const page = await c.actions.list({ pageSize: 1 });
-    expect(page.nextCursor).toBe("cursor-xyz");
+  test("list passes page[number], page[size], meta[total] and reads totals", async () => {
+    let capturedUrl = "";
+    const c = _newClient(async (req) => {
+      capturedUrl = req.url;
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "invoice.created",
+              type: "action",
+              attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
+            },
+          ],
+          meta: { pagination: { page: 2, size: 1, total: 3, total_pages: 3 } },
+        }),
+        { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
+    const page = await c.actions.list({ pageNumber: 2, pageSize: 1, metaTotal: true });
+    expect(capturedUrl).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+    expect(capturedUrl).toMatch(/page(\[|%5B)size(\]|%5D)=1/);
+    expect(capturedUrl).toMatch(/meta(\[|%5B)total(\]|%5D)=true/);
+    expect(page.pagination).toEqual({ page: 2, size: 1, total: 3, totalPages: 3 });
     await c._close();
   });
 

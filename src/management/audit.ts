@@ -20,6 +20,7 @@ import type {
   HttpHeader,
   ListForwardersPage,
   ListForwardersParams,
+  Pagination,
   UpdateForwarderInput,
 } from "../audit/types.js";
 
@@ -45,10 +46,19 @@ function wrapFetchError(err: unknown): never {
   );
 }
 
-function _nextCursorFromLinks(body: { links?: { next?: string | null } | null }): string | null {
-  const next = body.links?.next;
-  if (typeof next !== "string" || !next.includes("page[after]=")) return null;
-  return next.split("page[after]=")[1]!.split("&")[0]!;
+function _paginationFromBody(body: {
+  meta?: { pagination?: Record<string, unknown> | null } | null;
+}): Pagination {
+  const raw = body.meta?.pagination ?? {};
+  const out: Pagination = {
+    page: Number(raw.page ?? 0),
+    size: Number(raw.size ?? 0),
+  };
+  if (raw.total !== undefined && raw.total !== null) out.total = Number(raw.total);
+  if (raw.total_pages !== undefined && raw.total_pages !== null) {
+    out.totalPages = Number(raw.total_pages);
+  }
+  return out;
 }
 
 function _httpToWire(http: ForwarderHttp): GenForwarderHttpType {
@@ -136,10 +146,13 @@ export class ForwardersClient {
     const query: Record<string, string | number | boolean> = {};
     if (params.forwarderType !== undefined) query["filter[forwarder_type]"] = params.forwarderType;
     if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
-    if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
+    if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
 
-    let data: { data?: unknown[]; links?: { next?: string | null } | null } | undefined;
+    let data:
+      | { data?: unknown[]; meta?: { pagination?: Record<string, unknown> | null } | null }
+      | undefined;
     try {
       const result = await this._http.GET("/api/v1/forwarders", {
         params: { query: query as unknown as Record<string, never> },
@@ -153,7 +166,7 @@ export class ForwardersClient {
       forwarders: (
         (data?.data ?? []) as Array<{ id: string; attributes: Record<string, unknown> }>
       ).map(_forwarderFromResource),
-      nextCursor: _nextCursorFromLinks(data ?? {}),
+      pagination: _paginationFromBody(data ?? {}),
     };
   }
 

@@ -103,8 +103,7 @@ export interface paths {
          * List Forwarders
          * @description List forwarders for this account.
          *
-         *     Default sort is `-created_at` (newest first). Pagination uses cursor
-         *     tokens; keep the same `sort` value across paginated requests.
+         *     Default sort is `-created_at` (newest first).
          */
         get: operations["list_forwarders"];
         put?: never;
@@ -315,22 +314,11 @@ export interface components {
              */
             created_at: string;
         };
-        /** ActionListLinks */
-        ActionListLinks: {
-            /** Next */
-            next?: string | null;
-        };
-        /** ActionListMeta */
-        ActionListMeta: {
-            /** Page Size */
-            page_size: number;
-        };
         /** ActionListResponse */
         ActionListResponse: {
             /** Data */
             data: components["schemas"]["ActionResource"][];
-            meta: components["schemas"]["ActionListMeta"];
-            links?: components["schemas"]["ActionListLinks"] | null;
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ActionResource
@@ -435,14 +423,23 @@ export interface components {
             /** Next */
             next?: string | null;
         };
-        /** EventListMeta */
+        /**
+         * EventListMeta
+         * @description Cursor-pagination meta for the audit-event list endpoint.
+         *
+         *     Audit events are append-only at high cardinality (millions of rows
+         *     per account at production tenants), so this endpoint stays on
+         *     cursor pagination — the documented exception in ADR-014. Every
+         *     other read-many endpoint in the platform follows the standard
+         *     offset convention (`page[number]` / `page[size]`).
+         */
         EventListMeta: {
             /** Page Size */
             page_size: number;
         };
         /**
          * EventListResponse
-         * @description JSON:API collection response for audit events.
+         * @description JSON:API collection response for audit events (cursor paged).
          */
         EventListResponse: {
             /** Data */
@@ -628,15 +625,34 @@ export interface components {
              */
             created_at?: string | null;
         };
+        /** ForwarderDeliveryListLinks */
+        ForwarderDeliveryListLinks: {
+            /** Next */
+            next?: string | null;
+        };
+        /**
+         * ForwarderDeliveryListMeta
+         * @description Cursor-pagination meta for the forwarder-delivery log endpoint.
+         *
+         *     Forwarder deliveries are append-only at high cardinality (one row per
+         *     delivery attempt per event) and scroll with the same workload as
+         *     audit events, so this endpoint stays on cursor pagination — the
+         *     documented exception in ADR-014. The parent `/forwarders` collection
+         *     follows the standard offset convention.
+         */
+        ForwarderDeliveryListMeta: {
+            /** Page Size */
+            page_size: number;
+        };
         /**
          * ForwarderDeliveryListResponse
-         * @description JSON:API collection response for forwarder deliveries.
+         * @description JSON:API collection response for forwarder deliveries (cursor paged).
          */
         ForwarderDeliveryListResponse: {
             /** Data */
             data: components["schemas"]["ForwarderDeliveryResource"][];
-            meta: components["schemas"]["ForwarderListMeta"];
-            links?: components["schemas"]["ForwarderListLinks"] | null;
+            meta: components["schemas"]["ForwarderDeliveryListMeta"];
+            links?: components["schemas"]["ForwarderDeliveryListLinks"] | null;
         };
         /**
          * ForwarderDeliveryResource
@@ -718,16 +734,6 @@ export interface components {
              */
             success_status: string;
         };
-        /** ForwarderListLinks */
-        ForwarderListLinks: {
-            /** Next */
-            next?: string | null;
-        };
-        /** ForwarderListMeta */
-        ForwarderListMeta: {
-            /** Page Size */
-            page_size: number;
-        };
         /**
          * ForwarderListResponse
          * @description JSON:API collection response for forwarders.
@@ -735,8 +741,7 @@ export interface components {
         ForwarderListResponse: {
             /** Data */
             data: components["schemas"]["ForwarderResource"][];
-            meta: components["schemas"]["ForwarderListMeta"];
-            links?: components["schemas"]["ForwarderListLinks"] | null;
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ForwarderRequest
@@ -822,6 +827,44 @@ export interface components {
              */
             value: string;
         };
+        /**
+         * ListMeta
+         * @description Top-level ``meta`` block included on every JSON:API list response.
+         */
+        ListMeta: {
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * PaginationMeta
+         * @description Pagination block returned inside ``meta`` on every list response.
+         *
+         *     ``page`` and ``size`` are always present and echo the parameters that
+         *     served the response (their defaults when the client omitted them).
+         *     ``total`` and ``total_pages`` are present only when the request included
+         *     ``meta[total]=true``.
+         */
+        PaginationMeta: {
+            /**
+             * Page
+             * @description 1-based page number returned.
+             */
+            page: number;
+            /**
+             * Size
+             * @description Number of items per page.
+             */
+            size: number;
+            /**
+             * Total
+             * @description Total number of matching items across all pages. Present only when the request included `meta[total]=true`.
+             */
+            total?: number | null;
+            /**
+             * Total Pages
+             * @description Total number of pages at the requested page size. Present only when the request included `meta[total]=true`.
+             */
+            total_pages?: number | null;
+        };
         /** ResourceTypeAttributes */
         ResourceTypeAttributes: {
             /**
@@ -836,22 +879,11 @@ export interface components {
              */
             created_at: string;
         };
-        /** ResourceTypeListLinks */
-        ResourceTypeListLinks: {
-            /** Next */
-            next?: string | null;
-        };
-        /** ResourceTypeListMeta */
-        ResourceTypeListMeta: {
-            /** Page Size */
-            page_size: number;
-        };
         /** ResourceTypeListResponse */
         ResourceTypeListResponse: {
             /** Data */
             data: components["schemas"]["ResourceTypeResource"][];
-            meta: components["schemas"]["ResourceTypeListMeta"];
-            links?: components["schemas"]["ResourceTypeListLinks"] | null;
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ResourceTypeResource
@@ -1025,6 +1057,7 @@ export interface components {
         UsageResponse: {
             /** Data */
             data: components["schemas"]["UsageResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
     };
     responses: never;
@@ -1130,6 +1163,12 @@ export interface operations {
             query: {
                 /** @description Period to report. `current` is the only supported value. */
                 "filter[period]": string;
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -1153,10 +1192,14 @@ export interface operations {
             query?: {
                 "filter[forwarder_type]"?: string | null;
                 "filter[enabled]"?: boolean | null;
-                "page[size]"?: number | null;
-                "page[after]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -1369,10 +1412,14 @@ export interface operations {
     list_resource_types: {
         parameters: {
             query?: {
-                "page[size]"?: number | null;
-                "page[after]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
                 sort?: "key" | "-key";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -1395,10 +1442,14 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[resource_type]"?: string | null;
-                "page[size]"?: number | null;
-                "page[after]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
                 sort?: "key" | "-key";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;

@@ -23,6 +23,7 @@ export type {
   ResourceType as AuditResourceType,
   ListResourceTypesPage as AuditResourceTypeListPage,
   ListResourceTypesParams as AuditListResourceTypesParams,
+  Pagination as AuditPagination,
 } from "./audit/types.js";
 
 // Config
