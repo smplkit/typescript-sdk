@@ -11,6 +11,7 @@ import type { components } from "../generated/logging.d.ts";
 import { SmplError, SmplTimeoutError } from "../errors.js";
 import { Logger, LogGroup } from "./models.js";
 import { LogLevel, LoggerChangeEvent } from "./types.js";
+import { resolveLevel, type GroupCacheEntry, type LoggerCacheEntry } from "./_resolution.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
 import type { SharedWebSocket } from "../ws.js";
@@ -110,9 +111,20 @@ export class LoggingClient {
   private _loggerBuffer = new LoggerRegistrationBuffer();
   private _loggerFlushTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Local stores for diff-based listener firing
-  private _loggerStore: Record<string, string | null> = {}; // key -> level
-  private _groupStore: Record<string, string | null> = {}; // key -> level
+  // Caches consulted by the resolution algorithm. The runtime client mutates
+  // these from install(), refresh(), and the WebSocket handlers; resolveLevel
+  // reads them on every apply.
+  private _loggersCache: Record<string, LoggerCacheEntry> = {};
+  private _groupsCache: Record<string, GroupCacheEntry> = {};
+  // Resolved-level snapshot, used to decide whether to fire change listeners.
+  // Keyed by logger id; storing the *resolved* level (not raw `logger.level`)
+  // means a group-driven level shift fires listeners even when the logger's
+  // own level is untouched.
+  private _resolvedLevelStore: Record<string, string> = {};
+  // Adapter-known logger names. The adapter knows loggers by their original
+  // name (e.g. `com.acme.payments`); the cache is keyed by the same string
+  // since the TypeScript SDK does not normalize.
+  private _knownLoggerNames = new Set<string>();
 
   /** @internal */
   constructor(
@@ -327,6 +339,7 @@ export class LoggingClient {
         const loggers = adapter.discover();
         for (const { name, level } of loggers) {
           this._loggerBuffer.add(name, level, level, service, environment);
+          this._knownLoggerNames.add(name);
           discoveredCount++;
         }
       } catch {
@@ -370,14 +383,10 @@ export class LoggingClient {
         `fetched ${serverLoggers.length} logger(s) and ${serverGroups.length} group(s) from server`,
       );
 
-      // 6. Apply levels from server to adapters and populate stores
-      this._applyLevels(serverLoggers);
-      for (const l of serverLoggers) {
-        this._loggerStore[l.id!] = l.level;
-      }
-      for (const g of serverGroups) {
-        this._groupStore[g.id!] = g.level;
-      }
+      // 6. Replace caches and apply resolved levels.
+      this._loggersCache = this._buildLoggersCache(serverLoggers);
+      this._groupsCache = this._buildGroupsCache(serverGroups);
+      this._applyLevels();
     } catch {
       // Server may be unreachable — continue with WebSocket wiring
     }
@@ -494,37 +503,95 @@ export class LoggingClient {
     return adapters;
   }
 
-  /** Apply resolved levels from server loggers to all adapters. */
-  private _applyLevels(serverLoggers: Logger[]): void {
-    for (const logger of serverLoggers) {
-      if (!logger.level) continue;
+  /**
+   * Refresh resolved levels and apply them to adapter-known loggers.
+   *
+   * Computes a resolved level (via {@link resolveLevel}) for every entry
+   * currently in `_loggersCache` *and* every adapter-known logger name —
+   * even loggers whose own `level` is `null`, because they may inherit
+   * via group chain or dot-notation ancestry.
+   *
+   * The full resolved-level snapshot is stored in `_resolvedLevelStore`
+   * so callers can diff pre-vs-post and fire change listeners on actual
+   * effective-level deltas (group-driven changes included). Adapter pushes
+   * only happen for adapter-known names where `managed !== false`.
+   * @internal
+   */
+  private _applyLevels(): void {
+    const environment = this._parent?._environment ?? "";
+    const newResolved: Record<string, string> = {};
 
-      // Resolve environment-specific level if available
-      const env = this._parent?._environment;
-      let effectiveLevel = logger.level;
-      if (env && logger.environments) {
-        const envOverride = (logger.environments as Record<string, any>)[env];
-        if (envOverride?.level) {
-          effectiveLevel = envOverride.level;
-        }
+    // Resolve for every logger in the cache. This captures server-side
+    // loggers that no local adapter has discovered — change listeners
+    // still need to fire for them.
+    for (const id of Object.keys(this._loggersCache)) {
+      newResolved[id] = resolveLevel(id, environment, this._loggersCache, this._groupsCache);
+    }
+    // Resolve for adapter-known names that may not yet be in the cache.
+    for (const name of this._knownLoggerNames) {
+      if (!(name in newResolved)) {
+        newResolved[name] = resolveLevel(name, environment, this._loggersCache, this._groupsCache);
       }
+    }
+    this._resolvedLevelStore = newResolved;
 
-      debug("resolution", `${logger.id} -> ${effectiveLevel}`);
+    // Push resolved levels to every adapter for each adapter-known name.
+    for (const name of this._knownLoggerNames) {
+      const resolved = newResolved[name]!;
 
       const metrics = this._parent?._metrics;
       if (metrics) {
-        metrics.record("logging.level_changes", 1, "changes", { logger: logger.id! });
+        metrics.record("logging.level_changes", 1, "changes", { logger: name });
       }
 
       for (const adapter of this._adapters) {
         try {
-          debug("adapter", `setLevel(${logger.id}, ${effectiveLevel})`);
-          adapter.applyLevel(logger.id!, effectiveLevel);
+          debug("adapter", `setLevel(${name}, ${resolved})`);
+          adapter.applyLevel(name, resolved);
         } catch {
           // ignore adapter errors
         }
       }
     }
+  }
+
+  /** @internal Convert a server Logger list into the resolution cache. */
+  private _buildLoggersCache(loggers: Logger[]): Record<string, LoggerCacheEntry> {
+    const out: Record<string, LoggerCacheEntry> = {};
+    for (const l of loggers) {
+      if (l.id === null) continue;
+      out[l.id] = this._loggerToCacheEntry(l);
+    }
+    return out;
+  }
+
+  /** @internal Convert a server LogGroup list into the resolution cache. */
+  private _buildGroupsCache(groups: LogGroup[]): Record<string, GroupCacheEntry> {
+    const out: Record<string, GroupCacheEntry> = {};
+    for (const g of groups) {
+      if (g.id === null) continue;
+      out[g.id] = this._groupToCacheEntry(g);
+    }
+    return out;
+  }
+
+  /** @internal */
+  private _loggerToCacheEntry(l: Logger): LoggerCacheEntry {
+    return {
+      level: l.level ?? null,
+      group: l.group ?? null,
+      managed: l.managed ?? null,
+      environments: (l.environments ?? null) as LoggerCacheEntry["environments"],
+    };
+  }
+
+  /** @internal */
+  private _groupToCacheEntry(g: LogGroup): GroupCacheEntry {
+    return {
+      level: g.level ?? null,
+      group: g.group ?? null,
+      environments: (g.environments ?? null) as GroupCacheEntry["environments"],
+    };
   }
 
   /** Called by adapter hooks when a new logger is created in the framework. */
@@ -533,9 +600,30 @@ export class LoggingClient {
     const service = this._parent?._service ?? null;
     const environment = this._parent?._environment ?? null;
     this._loggerBuffer.add(name, level, level, service, environment);
+    this._knownLoggerNames.add(name);
 
     if (this._loggerBuffer.pendingCount >= 50) {
       void this._flushLoggerBuffer();
+    }
+
+    // If we're already started, apply an immediate resolved level for this
+    // newly-discovered name. Without this, the framework's local default
+    // would persist until the next refresh / ws event.
+    if (this._started) {
+      const resolved = resolveLevel(
+        name,
+        this._parent?._environment ?? "",
+        this._loggersCache,
+        this._groupsCache,
+      );
+      this._resolvedLevelStore[name] = resolved;
+      for (const adapter of this._adapters) {
+        try {
+          adapter.applyLevel(name, resolved);
+        } catch {
+          // ignore adapter errors
+        }
+      }
     }
   }
 
@@ -575,35 +663,14 @@ export class LoggingClient {
     // Scoped fetch: GET /loggers/{key}
     void this._fetchSingleLogger(id)
       .then((logger) => {
-        const oldLevel = this._loggerStore[id] ?? null;
-        const newLevel = logger?.level ?? null;
-        if (oldLevel === newLevel) return; // no change
-        this._loggerStore[id] = newLevel;
-        if (logger) {
-          this._applyLevels([logger]);
+        const preResolved = { ...this._resolvedLevelStore };
+        if (logger !== null) {
+          this._loggersCache[id] = this._loggerToCacheEntry(logger);
+        } else {
+          delete this._loggersCache[id];
         }
-        const event = new LoggerChangeEvent({
-          id,
-          level: newLevel as LogLevel | null,
-          source: "websocket",
-        });
-        for (const cb of this._globalListeners) {
-          try {
-            cb(event);
-          } catch {
-            // ignore listener errors
-          }
-        }
-        const idCallbacks = this._keyListeners.get(id);
-        if (idCallbacks) {
-          for (const cb of idCallbacks) {
-            try {
-              cb(event);
-            } catch {
-              // ignore listener errors
-            }
-          }
-        }
+        this._applyLevels();
+        this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket");
       })
       .catch((err: unknown) => {
         debug(
@@ -617,37 +684,14 @@ export class LoggingClient {
     debug("websocket", `logger_deleted event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
-    // Remove from store — no HTTP fetch
-    delete this._loggerStore[id];
-    const event = new LoggerChangeEvent({
-      id,
-      level: null,
-      source: "websocket",
-      deleted: true,
-    });
-    for (const cb of this._globalListeners) {
-      try {
-        cb(event);
-      } catch (err) {
-        debug(
-          "websocket",
-          `logger_deleted listener error: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-    const idCallbacks = this._keyListeners.get(id);
-    if (idCallbacks) {
-      for (const cb of idCallbacks) {
-        try {
-          cb(event);
-        } catch (err) {
-          debug(
-            "websocket",
-            `logger_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-    }
+    delete this._loggersCache[id];
+    const preResolved = { ...this._resolvedLevelStore };
+    this._applyLevels();
+    // Always emit a deleted event for the specific id (preserves the
+    // explicit notification contract). Exclude it from the delta pass so
+    // listeners don't fire twice.
+    this._emitDeletedEvent(id, "websocket");
+    this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket", new Set([id]));
   };
 
   private _handleGroupChanged = (data: Record<string, any>): void => {
@@ -657,16 +701,16 @@ export class LoggingClient {
     // Scoped fetch: GET /log_groups/{key}
     void this._fetchSingleGroup(id)
       .then((group) => {
-        const oldLevel = this._groupStore[id] ?? null;
-        const newLevel = group?.level ?? null;
-        if (oldLevel === newLevel) return; // no change
-        this._groupStore[id] = newLevel;
-        // Group level change means re-apply to all loggers in this group
-        void this._listLoggers()
-          .then((loggers) => {
-            this._applyLevels(loggers);
-          })
-          .catch(() => {});
+        const preResolved = { ...this._resolvedLevelStore };
+        if (group !== null) {
+          this._groupsCache[id] = this._groupToCacheEntry(group);
+        } else {
+          delete this._groupsCache[id];
+        }
+        // Re-resolve every adapter-known logger; some may now inherit from
+        // this group via direct membership or through a parent group chain.
+        this._applyLevels();
+        this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket");
       })
       .catch((err: unknown) => {
         debug(
@@ -680,12 +724,80 @@ export class LoggingClient {
     debug("websocket", `group_deleted event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
-    // Remove from store — no HTTP fetch
-    delete this._groupStore[id];
+    delete this._groupsCache[id];
+    const preResolved = { ...this._resolvedLevelStore };
+    this._applyLevels();
+    // Always emit a deleted event on the group id so listeners scoped to
+    // the group id hear about it, even when no dependent logger's resolved
+    // level actually changed.
+    this._emitDeletedEvent(id, "websocket");
+    this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket", new Set([id]));
+  };
+
+  /**
+   * @internal Fire change listeners for every logger whose resolved level
+   * changed between `pre` and `post`. Stores resolved levels, not raw
+   * `logger.level`, so a group-driven change actually fires. Keys that
+   * disappeared from `post` are emitted with `deleted: true`.
+   */
+  private _fireDeltas(
+    pre: Record<string, string>,
+    post: Record<string, string>,
+    source: "websocket" | "manual",
+    excludeIds?: Set<string>,
+  ): void {
+    const changed: string[] = [];
+    const allKeys = new Set([...Object.keys(pre), ...Object.keys(post)]);
+    for (const k of allKeys) {
+      if (excludeIds?.has(k)) continue;
+      if (pre[k] !== post[k]) changed.push(k);
+    }
+    if (changed.length === 0) return;
+    const buildEvent = (id: string): LoggerChangeEvent => {
+      const isDeletion = id in pre && !(id in post);
+      const fields: ConstructorParameters<typeof LoggerChangeEvent>[0] = {
+        id,
+        source,
+        level: (post[id] ?? null) as LogLevel | null,
+      };
+      if (isDeletion) fields.deleted = true;
+      return new LoggerChangeEvent(fields);
+    };
+    const firstKey = changed[0]!;
+    const globalEvent = buildEvent(firstKey);
+    for (const cb of this._globalListeners) {
+      try {
+        cb(globalEvent);
+      } catch {
+        // ignore listener errors
+      }
+    }
+    for (const k of changed) {
+      const keyCallbacks = this._keyListeners.get(k);
+      if (keyCallbacks) {
+        const event = buildEvent(k);
+        for (const cb of keyCallbacks) {
+          try {
+            cb(event);
+          } catch {
+            // ignore listener errors
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * @internal Always emit a deleted event for `id` on global and per-key
+   * listeners. Used by `logger_deleted` / `group_deleted` handlers to
+   * preserve the explicit notification contract even when nothing in the
+   * resolved-level store changed (e.g. server removed an unknown logger).
+   */
+  private _emitDeletedEvent(id: string, source: "websocket" | "manual"): void {
     const event = new LoggerChangeEvent({
       id,
       level: null,
-      source: "websocket",
+      source,
       deleted: true,
     });
     for (const cb of this._globalListeners) {
@@ -694,7 +806,7 @@ export class LoggingClient {
       } catch (err) {
         debug(
           "websocket",
-          `group_deleted listener error: ${err instanceof Error ? err.message : String(err)}`,
+          `deleted listener error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -706,12 +818,12 @@ export class LoggingClient {
         } catch (err) {
           debug(
             "websocket",
-            `group_deleted key listener error: ${err instanceof Error ? err.message : String(err)}`,
+            `deleted key listener error: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
     }
-  };
+  }
 
   private _handleLoggersChanged = (_data: Record<string, any>): void => {
     debug("websocket", `loggers_changed event received`);
@@ -721,10 +833,10 @@ export class LoggingClient {
   };
 
   /**
-   * Full refetch of loggers + log_groups, apply resolved levels to
-   * adapters, diff against local stores and fire change listeners
-   * (global once, per-key for each changed id). Shared between the
-   * `loggers_changed` WS handler and the public `refresh()` method.
+   * Full refetch of loggers + log_groups, rebuild the caches, re-resolve
+   * every adapter-known logger, and fire change listeners on resolved-level
+   * deltas. Shared between the `loggers_changed` WS handler and the
+   * public `refresh()` method.
    * @internal
    */
   private async _resolveAndFire(source: "websocket" | "manual"): Promise<void> {
@@ -733,61 +845,14 @@ export class LoggingClient {
       this._listLogGroups(),
     ]);
     debug("resolution", `resolution pass (trigger: ${source})`);
-    // Diff loggers
-    const changedLoggerIds = new Set<string>();
-    const newLoggerKeys = new Set(serverLoggers.map((l) => l.id!));
-    for (const logger of serverLoggers) {
-      const key = logger.id!;
-      const oldLevel = this._loggerStore[key] ?? null;
-      const newLevel = logger.level ?? null;
-      if (oldLevel !== newLevel || !(key in this._loggerStore)) {
-        changedLoggerIds.add(key);
-        this._loggerStore[key] = newLevel;
-      }
-    }
-    for (const key of Object.keys(this._loggerStore)) {
-      if (!newLoggerKeys.has(key)) {
-        changedLoggerIds.add(key);
-        delete this._loggerStore[key];
-      }
-    }
-    for (const group of serverGroups) {
-      this._groupStore[group.id!] = group.level ?? null;
-    }
-    this._applyLevels(serverLoggers);
-    if (changedLoggerIds.size === 0) return;
-    const [firstKey] = changedLoggerIds;
-    const firstLogger = serverLoggers.find((l) => l.id === firstKey);
-    const globalEvent = new LoggerChangeEvent({
-      id: firstKey,
-      level: (firstLogger?.level ?? null) as LogLevel | null,
-      source,
-    });
-    for (const cb of this._globalListeners) {
-      try {
-        cb(globalEvent);
-      } catch {
-        // ignore listener errors
-      }
-    }
-    for (const key of changedLoggerIds) {
-      const keyCallbacks = this._keyListeners.get(key);
-      if (keyCallbacks) {
-        const l = serverLoggers.find((x) => x.id === key);
-        const keyEvent = new LoggerChangeEvent({
-          id: key,
-          level: (l?.level ?? null) as LogLevel | null,
-          source,
-        });
-        for (const cb of keyCallbacks) {
-          try {
-            cb(keyEvent);
-          } catch {
-            // ignore listener errors
-          }
-        }
-      }
-    }
+    const preResolved = { ...this._resolvedLevelStore };
+    this._loggersCache = this._buildLoggersCache(serverLoggers);
+    this._groupsCache = this._buildGroupsCache(serverGroups);
+    // Re-resolve from scratch. Drop any prior resolved levels — `_applyLevels`
+    // only repopulates entries for the currently-known adapter logger names.
+    this._resolvedLevelStore = {};
+    this._applyLevels();
+    this._fireDeltas(preResolved, this._resolvedLevelStore, source);
   }
 
   // ------------------------------------------------------------------

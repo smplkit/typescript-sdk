@@ -755,14 +755,15 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
     await client.start();
 
-    // Spy on _groupStore setter to throw after change is detected
-    const origGroupStore = (client as unknown as { _groupStore: Record<string, string | null> })
-      ._groupStore;
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore = new Proxy(
-      origGroupStore,
+    // Spy on _groupsCache setter to throw after change is detected
+    type GroupEntry = { level: string | null; group: string | null; environments: unknown };
+    const origCache = (client as unknown as { _groupsCache: Record<string, GroupEntry> })
+      ._groupsCache;
+    (client as unknown as { _groupsCache: Record<string, GroupEntry> })._groupsCache = new Proxy(
+      origCache,
       {
         set: (_t, _k, _v) => {
-          throw new Error("groupStore set error");
+          throw new Error("groupsCache set error");
         },
       },
     );
@@ -796,8 +797,14 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Manually populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
-      "WARN";
+    (
+      client as unknown as {
+        _groupsCache: Record<
+          string,
+          { level: string | null; group: string | null; environments: unknown }
+        >;
+      }
+    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
 
     const fetchCountBefore = mockFetch.mock.calls.length;
     // Scoped group fetch returns same level
@@ -823,8 +830,14 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
-      "WARN";
+    (
+      client as unknown as {
+        _groupsCache: Record<
+          string,
+          { level: string | null; group: string | null; environments: unknown }
+        >;
+      }
+    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
 
     const fetchCountBefore = mockFetch.mock.calls.length;
     lastMockWs._emit("group_deleted", { id: "db-group" });
@@ -849,8 +862,14 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     await client.start();
 
     // Populate group store
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
-      "WARN";
+    (
+      client as unknown as {
+        _groupsCache: Record<
+          string,
+          { level: string | null; group: string | null; environments: unknown }
+        >;
+      }
+    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
 
     lastMockWs._emit("group_deleted", { id: "db-group" });
     await new Promise((r) => setTimeout(r, 10));
@@ -870,8 +889,14 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     client.onChange("db-group", goodCb);
     await client.start();
 
-    (client as unknown as { _groupStore: Record<string, string | null> })._groupStore["db-group"] =
-      "WARN";
+    (
+      client as unknown as {
+        _groupsCache: Record<
+          string,
+          { level: string | null; group: string | null; environments: unknown }
+        >;
+      }
+    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
 
     lastMockWs._emit("group_deleted", { id: "db-group" });
     await new Promise((r) => setTimeout(r, 10));
@@ -1258,9 +1283,14 @@ describe("LoggingClient — refresh()", () => {
   });
 
   it("re-applies levels onto adapters and fires listeners with source 'manual'", async () => {
-    const { client, applyLevel } = prepareClient();
-    // Initial start: sql=INFO
+    // Adapter must discover "sql" — otherwise applyLevel is never called for it.
+    const { client, applyLevel } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
+    // Initial start: sql=INFO. The bulk-register POST happens first, then the
+    // paginated list calls. Provide three resolved responses in order.
     mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
       .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "INFO" }]))
       .mockResolvedValueOnce(groupListResponse());
     const globalCb = vi.fn();
@@ -1376,6 +1406,231 @@ describe("LoggingClient — refresh()", () => {
 
     await expect(client.refresh()).rejects.toThrow("boom");
   });
+
+  // -------------------------------------------------------------------------
+  // End-to-end: resolution wiring through the runtime client
+  // -------------------------------------------------------------------------
+
+  it("applies inherited group level to adapter-known logger on install", async () => {
+    const { client, applyLevel } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
+    // Logger has level=null and group="db"; group has level=WARN.
+    // Old buggy code skipped null-level loggers entirely — verify the
+    // inherited level lands.
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "sql",
+              type: "logger",
+              attributes: {
+                name: "sql",
+                level: null,
+                group: "db",
+                managed: true,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "db",
+              type: "log_group",
+              attributes: {
+                name: "db",
+                level: "WARN",
+                parent_id: null,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      );
+
+    await client.start();
+
+    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
+  });
+
+  it("applies dot-notation ancestor level to adapter-known logger on install", async () => {
+    const { client, applyLevel } = prepareClient({
+      discover: () => [{ name: "com.acme.payments", level: "INFO" }],
+    });
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "com.acme",
+              type: "logger",
+              attributes: {
+                name: "com.acme",
+                level: "ERROR",
+                group: null,
+                managed: true,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    await client.start();
+
+    expect(applyLevel).toHaveBeenCalledWith("com.acme.payments", "ERROR");
+  });
+
+  it("reapplies adapter level when a group's level changes via WS", async () => {
+    const { client, applyLevel } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
+    // Initial: sql inherits WARN from group "db".
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "sql",
+              type: "logger",
+              attributes: {
+                name: "sql",
+                level: null,
+                group: "db",
+                managed: true,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "db",
+              type: "log_group",
+              attributes: {
+                name: "db",
+                level: "WARN",
+                parent_id: null,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      );
+
+    await client.start();
+    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
+
+    applyLevel.mockClear();
+
+    // group_changed WS event: db now resolves to ERROR. sql's resolved
+    // level should track without sql itself being touched.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "db",
+          type: "log_group",
+          attributes: {
+            name: "db",
+            level: "ERROR",
+            parent_id: null,
+            environments: {},
+            created_at: null,
+            updated_at: null,
+          },
+        },
+      }),
+    );
+    const sqlCb = vi.fn();
+    client.onChange("sql", sqlCb);
+
+    lastMockWs._emit("group_changed", { id: "db" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(applyLevel).toHaveBeenCalledWith("sql", "ERROR");
+    // The sql listener fires because its *resolved* level changed, even
+    // though sql's own raw level field never moved.
+    expect(sqlCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "ERROR", source: "websocket" }),
+    );
+  });
+
+  it("reapplies adapter level when a group is deleted via WS", async () => {
+    const { client, applyLevel } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
+    // Initial: sql inherits WARN from group "db".
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "sql",
+              type: "logger",
+              attributes: {
+                name: "sql",
+                level: null,
+                group: "db",
+                managed: true,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              id: "db",
+              type: "log_group",
+              attributes: {
+                name: "db",
+                level: "WARN",
+                parent_id: null,
+                environments: {},
+                created_at: null,
+                updated_at: null,
+              },
+            },
+          ],
+        }),
+      );
+
+    await client.start();
+    applyLevel.mockClear();
+
+    // group_deleted removes db. sql now has no resolution path → falls back to INFO.
+    lastMockWs._emit("group_deleted", { id: "db" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(applyLevel).toHaveBeenCalledWith("sql", "INFO");
+  });
 });
 
 // ===========================================================================
@@ -1489,6 +1744,33 @@ describe("LoggingClient — post-startup logger discovery", () => {
 
     // Buffer should now have 1 pending item
     expect((client as any)._loggerBuffer.pendingCount).toBe(1);
+
+    client._close();
+  });
+
+  it("_onAdapterNewLogger swallows adapter.applyLevel errors after start", async () => {
+    const client = makeClient();
+
+    let capturedHook: ((name: string, level: string) => void) | null = null;
+    const adapter = {
+      name: "throwing",
+      discover: () => [],
+      applyLevel: vi.fn(() => {
+        throw new Error("adapter applyLevel boom");
+      }),
+      installHook: (cb: (name: string, level: string) => void) => {
+        capturedHook = cb;
+      },
+      uninstallHook: () => {},
+    };
+    client.registerAdapter(adapter);
+
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await client.start();
+
+    // Fire the hook — adapter.applyLevel throws, hook must not propagate.
+    expect(() => capturedHook!("runtime.logger", "INFO")).not.toThrow();
+    expect(adapter.applyLevel).toHaveBeenCalledWith("runtime.logger", expect.any(String));
 
     client._close();
   });

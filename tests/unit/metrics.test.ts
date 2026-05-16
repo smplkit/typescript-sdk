@@ -755,9 +755,10 @@ describe("LoggingClient — metrics instrumentation", () => {
 
     client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
 
-    // Register a mock adapter
+    // Register a mock adapter that discovers the "app" logger — without
+    // adapter knowledge, _applyLevels would have no logger to push to.
     const mockAdapter = {
-      discover: () => [],
+      discover: () => [{ name: "app", level: "INFO" }],
       installHook: vi.fn(),
       uninstallHook: vi.fn(),
       applyLevel: vi.fn(),

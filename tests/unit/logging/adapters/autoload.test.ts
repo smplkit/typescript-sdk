@@ -215,7 +215,9 @@ describe("LoggingClient — adapter lifecycle", () => {
 
   it("should apply server levels to adapters after fetching", async () => {
     const client = makeClient();
-    const adapter = createMockAdapter();
+    const adapter = createMockAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
+    });
     client.registerAdapter(adapter);
 
     // Mock list() to return a logger with a level
@@ -244,7 +246,9 @@ describe("LoggingClient — adapter lifecycle", () => {
 
   it("should apply environment-specific levels when available", async () => {
     const client = makeClient();
-    const adapter = createMockAdapter();
+    const adapter = createMockAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
+    });
     client.registerAdapter(adapter);
 
     // Set up parent with environment
@@ -276,6 +280,7 @@ describe("LoggingClient — adapter lifecycle", () => {
   it("should handle adapter applyLevel() errors gracefully", async () => {
     const client = makeClient();
     const adapter = createMockAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
       applyLevel: vi.fn(() => {
         throw new Error("applyLevel boom");
       }),
