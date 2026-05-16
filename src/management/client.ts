@@ -169,10 +169,23 @@ export class EnvironmentsClient {
     });
   }
 
-  async list(): Promise<Environment[]> {
+  /**
+   * List environments.
+   *
+   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
+   * Omit both to fetch the first page; pass them through to walk further
+   * pages. The wrapper does not loop on the customer's behalf — the
+   * customer chooses how to paginate.
+   */
+  async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Environment[]> {
+    const query: Record<string, number> = {};
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     let data: any;
     try {
-      const result = await this._http.GET("/api/v1/environments", {});
+      const result = await this._http.GET("/api/v1/environments", {
+        params: { query: query as unknown as Record<string, never> },
+      });
       if (!result.response.ok) await checkError(result.response);
       data = result.data;
     } catch (err) {
@@ -294,10 +307,23 @@ export class ContextTypesClient {
     });
   }
 
-  async list(): Promise<ContextType[]> {
+  /**
+   * List context types.
+   *
+   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
+   * Omit both to fetch the first page; pass them through to walk further
+   * pages. The wrapper does not loop on the customer's behalf — the
+   * customer chooses how to paginate.
+   */
+  async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<ContextType[]> {
+    const query: Record<string, number> = {};
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     let data: any;
     try {
-      const result = await this._http.GET("/api/v1/context_types", {});
+      const result = await this._http.GET("/api/v1/context_types", {
+        params: { query: query as unknown as Record<string, never> },
+      });
       if (!result.response.ok) await checkError(result.response);
       data = result.data;
     } catch (err) {
@@ -494,12 +520,25 @@ export class ContextsClient {
     return this._buffer.pendingCount;
   }
 
-  /** List all contexts of a given type. */
-  async list(type: string): Promise<Context[]> {
+  /**
+   * List contexts of a given type.
+   *
+   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
+   * Omit both to fetch the first page; pass them through to walk further
+   * pages. The wrapper does not loop on the customer's behalf — the
+   * customer chooses how to paginate.
+   */
+  async list(
+    type: string,
+    params: { pageNumber?: number; pageSize?: number } = {},
+  ): Promise<Context[]> {
+    const query: Record<string, string | number> = { "filter[context_type]": type };
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     let data: any;
     try {
       const result = await this._http.GET("/api/v1/contexts", {
-        params: { query: { "filter[context_type]": type } },
+        params: { query: query as unknown as Record<string, never> },
       });
       if (!result.response.ok) await checkError(result.response);
       data = result.data;

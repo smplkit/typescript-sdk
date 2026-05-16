@@ -179,6 +179,24 @@ describe("EnvironmentsClient", () => {
       mockFetch.mockRejectedValueOnce(new Error("Some unexpected error"));
       await expect(client.environments.list()).rejects.toThrow(SmplConnectionError);
     });
+
+    it("passes pageNumber and pageSize through as query params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.environments.list({ pageNumber: 2, pageSize: 50 });
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+      expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=50/);
+    });
+
+    it("omits pagination query params when not supplied", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.environments.list();
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+      expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -381,6 +399,24 @@ describe("ContextTypesClient", () => {
       const client = makeClient();
       mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
       await expect(client.contextTypes.list()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("passes pageNumber and pageSize through as query params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.contextTypes.list({ pageNumber: 7, pageSize: 30 });
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=7/);
+      expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=30/);
+    });
+
+    it("omits pagination query params when not supplied", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.contextTypes.list();
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+      expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
     });
   });
 
@@ -698,6 +734,25 @@ describe("ContextsClient", () => {
       const client = makeClient();
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(client.contexts.list("user")).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("passes pageNumber and pageSize through as query params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.contexts.list("user", { pageNumber: 3, pageSize: 200 });
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=3/);
+      expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=200/);
+      expect(decodeURIComponent(req.url)).toContain("filter[context_type]=user");
+    });
+
+    it("omits pagination query params when not supplied", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.contexts.list("user");
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+      expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
     });
   });
 

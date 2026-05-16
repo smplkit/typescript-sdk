@@ -143,6 +143,89 @@ describe("ConfigClient", () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const url = mockFetch.mock.calls[0][0].url as string;
       expect(url).toContain("/api/v1/configs");
+      expect(url).toMatch(/page(\[|%5B)number(\]|%5D)=1/);
+      expect(url).toMatch(/page(\[|%5B)size(\]|%5D)=1000/);
+    });
+
+    it("pages through configs when the first page is full (direct HTTP fallback)", async () => {
+      const client = makeClient();
+      client._parent = { _environment: "production", _service: "svc", _metrics: null };
+
+      const PAGE_SIZE = 1000;
+      const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+        id: `cfg-${i}`,
+        type: "config",
+        attributes: {
+          name: `Cfg ${i}`,
+          description: null,
+          parent: null,
+          items: {},
+          environments: {},
+        },
+      }));
+      const secondPage = [
+        {
+          id: "cfg-last",
+          type: "config",
+          attributes: {
+            name: "Last",
+            description: null,
+            parent: null,
+            items: {},
+            environments: {},
+          },
+        },
+      ];
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ data: firstPage }))
+        .mockResolvedValueOnce(jsonResponse({ data: secondPage }));
+
+      await client.start();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const url1 = mockFetch.mock.calls[0][0].url as string;
+      const url2 = mockFetch.mock.calls[1][0].url as string;
+      expect(url1).toMatch(/page(\[|%5B)number(\]|%5D)=1/);
+      expect(url2).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+      // Both pages landed in the cache
+      expect(client._getCachedConfig("cfg-0")).toBeDefined();
+      expect(client._getCachedConfig("cfg-last")).toBeDefined();
+    });
+
+    it("pages through configs via the management plane when wired", async () => {
+      const client = makeClient();
+      const PAGE_SIZE = 1000;
+      const fakeMgmt = {
+        config: {
+          list: vi
+            .fn()
+            // First page is exactly PAGE_SIZE — must loop.
+            .mockResolvedValueOnce(
+              Array.from({ length: PAGE_SIZE }, (_, i) => ({
+                id: `cfg-${i}`,
+                _buildChain: () => Promise.resolve([]),
+              })),
+            )
+            // Second page is short — loop exits.
+            .mockResolvedValueOnce([{ id: "cfg-last", _buildChain: () => Promise.resolve([]) }]),
+        },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client._resolveManagement = () => fakeMgmt as any;
+      client._parent = { _environment: "production", _service: "svc", _metrics: null };
+
+      await client.start();
+
+      expect(fakeMgmt.config.list).toHaveBeenCalledTimes(2);
+      expect(fakeMgmt.config.list).toHaveBeenNthCalledWith(1, {
+        pageNumber: 1,
+        pageSize: PAGE_SIZE,
+      });
+      expect(fakeMgmt.config.list).toHaveBeenNthCalledWith(2, {
+        pageNumber: 2,
+        pageSize: PAGE_SIZE,
+      });
     });
   });
 

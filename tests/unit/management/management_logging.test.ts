@@ -258,6 +258,24 @@ describe("LoggersClient.list()", () => {
     mockFetch.mockResolvedValueOnce(textResponse("invalid", 422));
     await expect(client.loggers.list()).rejects.toThrow(SmplValidationError);
   });
+
+  it("passes pageNumber and pageSize through as query params", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.loggers.list({ pageNumber: 5, pageSize: 100 });
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=5/);
+    expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=100/);
+  });
+
+  it("omits pagination query params when not supplied", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.loggers.list();
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+    expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
+  });
 });
 
 describe("LoggersClient.get()", () => {
@@ -677,6 +695,24 @@ describe("LogGroupsClient.list()", () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(textResponse("invalid", 422));
     await expect(client.logGroups.list()).rejects.toThrow(SmplValidationError);
+  });
+
+  it("passes pageNumber and pageSize through as query params", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.logGroups.list({ pageNumber: 6, pageSize: 75 });
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=6/);
+    expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=75/);
+  });
+
+  it("omits pagination query params when not supplied", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.logGroups.list();
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+    expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
   });
 });
 

@@ -1011,19 +1011,34 @@ export class FlagsClient {
   }
 
   private async _fetchFlagsList(): Promise<Array<Record<string, any>>> {
-    debug("api", "GET /api/v1/flags");
-    let data: components["schemas"]["FlagListResponse"] | undefined;
-    try {
-      const result = await this._http.GET("/api/v1/flags", {});
-      if (!result.response.ok) await checkError(result.response, "Failed to list flags");
-      data = result.data;
-    } catch (err) {
-      wrapFetchError(err);
+    const PAGE_SIZE = 1000;
+    const all: Array<Record<string, any>> = [];
+    let page = 1;
+    let lastPageWasFull = true;
+    while (lastPageWasFull) {
+      debug("api", `GET /api/v1/flags?page[number]=${page}&page[size]=${PAGE_SIZE}`);
+      let data: components["schemas"]["FlagListResponse"] | undefined;
+      try {
+        const result = await this._http.GET("/api/v1/flags", {
+          params: {
+            query: {
+              "page[number]": page,
+              "page[size]": PAGE_SIZE,
+            } as unknown as Record<string, never>,
+          },
+        });
+        if (!result.response.ok) await checkError(result.response, "Failed to list flags");
+        data = result.data;
+      } catch (err) {
+        wrapFetchError(err);
+      }
+      const rows = data?.data ?? [];
+      for (const r of rows) all.push(this._resourceToPlainDict(r));
+      lastPageWasFull = rows.length === PAGE_SIZE;
+      page++;
     }
-    if (!data) return [];
-    const flags = data.data.map((r) => this._resourceToPlainDict(r));
-    debug("api", `GET /api/v1/flags -> ${flags.length} flag(s)`);
-    return flags;
+    debug("api", `GET /api/v1/flags -> ${all.length} flag(s)`);
+    return all;
   }
 
   // ------------------------------------------------------------------

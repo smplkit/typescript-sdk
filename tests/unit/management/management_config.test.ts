@@ -218,6 +218,24 @@ describe("ManagementConfigClient.list()", () => {
     mockFetch.mockResolvedValueOnce(textResponse("Conflict", 409));
     await expect(client.config.list()).rejects.toThrow(SmplConflictError);
   });
+
+  it("passes pageNumber and pageSize through as query params", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_CONFIG] }));
+    await client.config.list({ pageNumber: 3, pageSize: 50 });
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=3/);
+    expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=50/);
+  });
+
+  it("omits pagination query params when not supplied", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [SAMPLE_CONFIG] }));
+    await client.config.list();
+    const req: Request = mockFetch.mock.calls[0][0];
+    expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+    expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
+  });
 });
 
 // ===========================================================================

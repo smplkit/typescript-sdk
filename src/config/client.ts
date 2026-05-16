@@ -309,18 +309,43 @@ export class ConfigClient {
    * (set via `_resolveManagement`) so runtime + management share one HTTP
    * client; falls back to a direct GET when running without `SmplClient`
    * bootstrap (e.g. unit tests that construct `ConfigClient` directly).
+   *
+   * Pages through the server until a short page (less than the requested
+   * size) is returned — accounts with more than 1000 configs would
+   * otherwise silently lose everything past page one.
    */
   private async _listConfigs(): Promise<Config[]> {
-    if (this._resolveManagement) {
-      return this._resolveManagement().config.list();
+    const PAGE_SIZE = 1000;
+    const all: Config[] = [];
+    let page = 1;
+    let lastPageWasFull = true;
+    while (lastPageWasFull) {
+      let rows: Config[];
+      if (this._resolveManagement) {
+        rows = await this._resolveManagement().config.list({
+          pageNumber: page,
+          pageSize: PAGE_SIZE,
+        });
+      } else {
+        const result = await this._http.GET("/api/v1/configs", {
+          params: {
+            query: {
+              "page[number]": page,
+              "page[size]": PAGE_SIZE,
+            } as unknown as Record<string, never>,
+          },
+        });
+        if (!result.response.ok) {
+          throw new SmplError(`Failed to list configs: ${result.response.status}`);
+        }
+        const data = result.data;
+        rows = data ? data.data.map((r) => resourceToConfig(r)) : [];
+      }
+      all.push(...rows);
+      lastPageWasFull = rows.length === PAGE_SIZE;
+      page++;
     }
-    const result = await this._http.GET("/api/v1/configs", {});
-    if (!result.response.ok) {
-      throw new SmplError(`Failed to list configs: ${result.response.status}`);
-    }
-    const data = result.data;
-    if (!data) return [];
-    return data.data.map((r) => resourceToConfig(r));
+    return all;
   }
 
   // ------------------------------------------------------------------

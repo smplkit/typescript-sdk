@@ -471,6 +471,86 @@ describe("FlagsClient runtime", () => {
   });
 });
 
+describe("FlagsClient — pagination", () => {
+  it("pages through flags when the first page is full", async () => {
+    const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: null, _metrics: null };
+
+    const PAGE_SIZE = 1000;
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      id: `flag-${i}`,
+      type: "flag",
+      attributes: {
+        name: `Flag ${i}`,
+        type: "BOOLEAN",
+        default: false,
+        values: [],
+        environments: {},
+      },
+    }));
+    const secondPage = [
+      {
+        id: "flag-last",
+        type: "flag",
+        attributes: {
+          name: "Last",
+          type: "BOOLEAN",
+          default: true,
+          values: [],
+          environments: {},
+        },
+      },
+    ];
+
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: firstPage }))
+      .mockResolvedValueOnce(jsonResponse({ data: secondPage }));
+
+    await client.initialize();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const url1 = mockFetch.mock.calls[0][0].url as string;
+    const url2 = mockFetch.mock.calls[1][0].url as string;
+    expect(url1).toMatch(/page(\[|%5B)number(\]|%5D)=1/);
+    expect(url1).toMatch(/page(\[|%5B)size(\]|%5D)=1000/);
+    expect(url2).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+
+    // Both pages were stored.
+    const handleFirst = client.booleanFlag("flag-0", false);
+    expect(handleFirst.get()).toBe(false);
+    const handleLast = client.booleanFlag("flag-last", false);
+    // flag-last has no env config so falls back to default `true`.
+    expect(handleLast.get()).toBe(true);
+  });
+
+  it("stops paging when the first page is short", async () => {
+    const client = makeFlagsClient();
+    client._parent = { _environment: "staging", _service: null, _metrics: null };
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            id: "only-flag",
+            type: "flag",
+            attributes: {
+              name: "Only Flag",
+              type: "BOOLEAN",
+              default: false,
+              values: [],
+              environments: {},
+            },
+          },
+        ],
+      }),
+    );
+
+    await client.initialize();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("FlagsClient — extraHeaders", () => {
   it("extraHeaders are present on every request, SDK headers win on collision", async () => {
     const seen: Request[] = [];

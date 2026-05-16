@@ -320,11 +320,23 @@ export class ManagementFlagsClient {
     return resourceToFlag(data.data, this);
   }
 
-  /** List all flags. */
-  async list(): Promise<Flag[]> {
+  /**
+   * List flags.
+   *
+   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
+   * Omit both to fetch the first page; pass them through to walk further
+   * pages. The wrapper does not loop on the customer's behalf — the
+   * customer chooses how to paginate.
+   */
+  async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Flag[]> {
+    const query: Record<string, number> = {};
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     let data: components["schemas"]["FlagListResponse"] | undefined;
     try {
-      const result = await this._http.GET("/api/v1/flags", {});
+      const result = await this._http.GET("/api/v1/flags", {
+        params: { query: query as unknown as Record<string, never> },
+      });
       if (!result.response.ok) await checkError(result.response);
       data = result.data;
     } catch (err) {

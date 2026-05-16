@@ -1828,6 +1828,156 @@ describe("LoggingClient — _listLoggers/_listLogGroups direct HTTP fallback", (
     await client.start();
     // No assertion on outcome; coverage of the AbortError branch is the point.
   });
+
+  it("pages through loggers when the first page is full (direct HTTP fallback)", async () => {
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+
+    const PAGE_SIZE = 1000;
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      id: `logger-${i}`,
+      type: "logger",
+      attributes: { name: `logger-${i}`, level: "INFO" },
+    }));
+    const secondPage = [
+      { id: "logger-last", type: "logger", attributes: { name: "logger-last", level: "DEBUG" } },
+    ];
+
+    let loggerCallCount = 0;
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/api/v1/loggers") && !url.includes("/log_groups")) {
+        loggerCallCount++;
+        if (loggerCallCount === 1) return Promise.resolve(jsonResponse({ data: firstPage }));
+        if (loggerCallCount === 2) return Promise.resolve(jsonResponse({ data: secondPage }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+
+    await client.start();
+
+    expect(loggerCallCount).toBe(2);
+  });
+
+  it("pages through log_groups when the first page is full (direct HTTP fallback)", async () => {
+    const client = makeClient();
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+
+    const PAGE_SIZE = 1000;
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      id: `group-${i}`,
+      type: "log_group",
+      attributes: { name: `group-${i}`, level: "INFO" },
+    }));
+    const secondPage = [
+      { id: "group-last", type: "log_group", attributes: { name: "group-last", level: "DEBUG" } },
+    ];
+
+    let groupCallCount = 0;
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/api/v1/log_groups")) {
+        groupCallCount++;
+        if (groupCallCount === 1) return Promise.resolve(jsonResponse({ data: firstPage }));
+        if (groupCallCount === 2) return Promise.resolve(jsonResponse({ data: secondPage }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+
+    await client.start();
+
+    expect(groupCallCount).toBe(2);
+  });
+
+  it("pages through loggers via the management plane when wired", async () => {
+    const client = makeClient();
+    const PAGE_SIZE = 1000;
+    const fakeMgmt = {
+      loggers: {
+        list: vi
+          .fn()
+          .mockResolvedValueOnce(
+            Array.from({ length: PAGE_SIZE }, (_, i) => ({
+              id: `logger-${i}`,
+              level: "INFO",
+              environments: null,
+            })),
+          )
+          .mockResolvedValueOnce([{ id: "logger-last", level: "DEBUG", environments: null }]),
+      },
+      logGroups: {
+        list: vi.fn().mockResolvedValueOnce([]),
+      },
+    };
+    client._resolveManagement = () => fakeMgmt as never;
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+
+    await client.start();
+
+    expect(fakeMgmt.loggers.list).toHaveBeenCalledTimes(2);
+    expect(fakeMgmt.loggers.list).toHaveBeenNthCalledWith(1, {
+      pageNumber: 1,
+      pageSize: PAGE_SIZE,
+    });
+    expect(fakeMgmt.loggers.list).toHaveBeenNthCalledWith(2, {
+      pageNumber: 2,
+      pageSize: PAGE_SIZE,
+    });
+  });
+
+  it("pages through log_groups via the management plane when wired", async () => {
+    const client = makeClient();
+    const PAGE_SIZE = 1000;
+    const fakeMgmt = {
+      loggers: { list: vi.fn().mockResolvedValueOnce([]) },
+      logGroups: {
+        list: vi
+          .fn()
+          .mockResolvedValueOnce(
+            Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `group-${i}`, level: "INFO" })),
+          )
+          .mockResolvedValueOnce([{ id: "group-last", level: "DEBUG" }]),
+      },
+    };
+    client._resolveManagement = () => fakeMgmt as never;
+    client.registerAdapter({
+      name: "noop",
+      discover: () => [],
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+
+    await client.start();
+
+    expect(fakeMgmt.logGroups.list).toHaveBeenCalledTimes(2);
+    expect(fakeMgmt.logGroups.list).toHaveBeenNthCalledWith(1, {
+      pageNumber: 1,
+      pageSize: PAGE_SIZE,
+    });
+    expect(fakeMgmt.logGroups.list).toHaveBeenNthCalledWith(2, {
+      pageNumber: 2,
+      pageSize: PAGE_SIZE,
+    });
+  });
 });
 
 describe("LoggingClient — extraHeaders", () => {

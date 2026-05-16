@@ -179,30 +179,76 @@ export class LoggingClient {
    * (set via `_resolveManagement`); falls back to a direct GET when running
    * without `SmplClient` bootstrap (e.g. unit tests that construct
    * `LoggingClient` directly).
+   *
+   * Pages through the server until a short page (less than the requested
+   * size) is returned — accounts with more than 1000 loggers would
+   * otherwise silently lose everything past page one.
    */
   private async _listLoggers(): Promise<Logger[]> {
-    if (this._resolveManagement) {
-      return this._resolveManagement().loggers.list();
+    const PAGE_SIZE = 1000;
+    const all: Logger[] = [];
+    let page = 1;
+    let lastPageWasFull = true;
+    while (lastPageWasFull) {
+      let rows: Logger[];
+      if (this._resolveManagement) {
+        rows = await this._resolveManagement().loggers.list({
+          pageNumber: page,
+          pageSize: PAGE_SIZE,
+        });
+      } else {
+        const result = await this._http.GET("/api/v1/loggers", {
+          params: {
+            query: {
+              "page[number]": page,
+              "page[size]": PAGE_SIZE,
+            } as unknown as Record<string, never>,
+          },
+        });
+        if (result.error !== undefined) {
+          throw new SmplError(`Failed to list loggers: ${result.response.status}`);
+        }
+        rows = result.data ? result.data.data.map((r) => this._loggerToModel(r)) : [];
+      }
+      all.push(...rows);
+      lastPageWasFull = rows.length === PAGE_SIZE;
+      page++;
     }
-    const result = await this._http.GET("/api/v1/loggers", {});
-    if (result.error !== undefined) {
-      throw new SmplError(`Failed to list loggers: ${result.response.status}`);
-    }
-    if (!result.data) return [];
-    return result.data.data.map((r) => this._loggerToModel(r));
+    return all;
   }
 
   /** @internal — see {@link _listLoggers}. */
   private async _listLogGroups(): Promise<LogGroup[]> {
-    if (this._resolveManagement) {
-      return this._resolveManagement().logGroups.list();
+    const PAGE_SIZE = 1000;
+    const all: LogGroup[] = [];
+    let page = 1;
+    let lastPageWasFull = true;
+    while (lastPageWasFull) {
+      let rows: LogGroup[];
+      if (this._resolveManagement) {
+        rows = await this._resolveManagement().logGroups.list({
+          pageNumber: page,
+          pageSize: PAGE_SIZE,
+        });
+      } else {
+        const result = await this._http.GET("/api/v1/log_groups", {
+          params: {
+            query: {
+              "page[number]": page,
+              "page[size]": PAGE_SIZE,
+            } as unknown as Record<string, never>,
+          },
+        });
+        if (result.error !== undefined) {
+          throw new SmplError(`Failed to list log groups: ${result.response.status}`);
+        }
+        rows = result.data ? result.data.data.map((r) => this._groupToModel(r)) : [];
+      }
+      all.push(...rows);
+      lastPageWasFull = rows.length === PAGE_SIZE;
+      page++;
     }
-    const result = await this._http.GET("/api/v1/log_groups", {});
-    if (result.error !== undefined) {
-      throw new SmplError(`Failed to list log groups: ${result.response.status}`);
-    }
-    if (!result.data) return [];
-    return result.data.data.map((r) => this._groupToModel(r));
+    return all;
   }
 
   // ------------------------------------------------------------------
