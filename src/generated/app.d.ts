@@ -489,7 +489,7 @@ export interface paths {
         };
         /**
          * List Contexts
-         * @description List all context instances for the authenticated account.
+         * @description List context instances for the authenticated account. `filter[context_type]` narrows the result to one context type. `filter[search]` does a case-insensitive substring match against the context `key`, `name`, and every attribute value, returning any context where at least one of those fields contains the search term.
          */
         get: operations["list_contexts"];
         put?: never;
@@ -523,6 +523,30 @@ export interface paths {
          * @description Delete a context instance by composite id (type:key).
          */
         delete: operations["delete_context"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/context_values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Context Values
+         * @description Return distinct values observed for a single attribute across context instances of one context type. The intended use case is a typeahead picker in a rule-building UI: the customer chooses a context type and an attribute name, then this endpoint streams back the distinct values matching what they've typed so far.
+         *
+         *     `filter[context_type]` and `filter[attribute]` are required. `filter[attribute]` accepts any attribute name — including the two first-class columns `key` and `name` — and is treated uniformly from the customer's perspective; the server adjusts the underlying query accordingly.
+         *
+         *     `filter[search]` does a case-insensitive starts-with match. The returned set excludes empty strings and NULL values.
+         */
+        get: operations["list_context_values"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1037,7 +1061,10 @@ export interface paths {
          * List Invoices
          * @description Return invoice history for the account from Stripe.
          *
-         *     Default sort is `-created_at` (newest first).
+         *     Default sort is `-created_at` (newest first). The endpoint fetches the
+         *     most recent 100 invoices from Stripe (its per-request cap) and pages
+         *     over the result in memory; clients should not depend on more than 100
+         *     invoices being visible at once.
          */
         get: operations["list_invoices"];
         put?: never;
@@ -1435,6 +1462,7 @@ export interface components {
         ApiKeyListResponse: {
             /** Data */
             data: components["schemas"]["ApiKeyResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ApiKeyRequest
@@ -1517,11 +1545,17 @@ export interface components {
          *       },
          *       "context_type": "user",
          *       "created_at": "2026-03-31T10:00:00Z",
+         *       "key": "alice-123",
          *       "name": "Alice Smith",
          *       "updated_at": "2026-03-31T10:00:00Z"
          *     }
          */
         Context: {
+            /**
+             * Key
+             * @description Entity identifier within the context type (e.g. `alice-123`). Together with `context_type` it forms the composite `id` `context_type:key`. Set by the bulk-register API; not editable.
+             */
+            readonly key: string;
             /**
              * Name
              * @description Human-readable display name for the context instance.
@@ -1612,6 +1646,7 @@ export interface components {
         ContextListResponse: {
             /** Data */
             data: components["schemas"]["ContextResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ContextRequest
@@ -1624,8 +1659,7 @@ export interface components {
          * ContextResource
          * @description JSON:API resource envelope for a context instance.
          *
-         *     `id` is the composite identifier `context_type:key`. It must not be
-         *     specified for create requests (the server assigns it).
+         *     `id` is the composite identifier `context_type:key` (e.g. `user:alice-123`).
          * @example {
          *       "attributes": {
          *         "attributes": {
@@ -1634,6 +1668,7 @@ export interface components {
          *         },
          *         "context_type": "user",
          *         "created_at": "2026-03-31T10:00:00Z",
+         *         "key": "alice-123",
          *         "name": "Alice Smith",
          *         "updated_at": "2026-03-31T10:00:00Z"
          *       },
@@ -1709,6 +1744,7 @@ export interface components {
         ContextTypeListResponse: {
             /** Data */
             data: components["schemas"]["ContextTypeResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ContextTypeRequest
@@ -1753,6 +1789,57 @@ export interface components {
          */
         ContextTypeResponse: {
             data: components["schemas"]["ContextTypeResource"];
+        };
+        /**
+         * ContextValue
+         * @description A single distinct attribute value observed across context instances.
+         *
+         *     Returned by `GET /api/v1/context_values` to power typeahead pickers in
+         *     rule-building UIs. The set of values reflects what has been registered
+         *     via the bulk-context endpoint — it is observational, not a customer-
+         *     declared enumeration.
+         * @example {
+         *       "value": "Michael"
+         *     }
+         */
+        ContextValue: {
+            /**
+             * Value
+             * @description The distinct attribute value as it appears on at least one context instance of the requested type.
+             */
+            value: string;
+        };
+        /**
+         * ContextValueListResponse
+         * @description JSON:API collection response envelope for distinct context values.
+         */
+        ContextValueListResponse: {
+            /** Data */
+            data: components["schemas"]["ContextValueResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * ContextValueResource
+         * @description JSON:API resource envelope for a distinct context-attribute value.
+         *
+         *     `id` is the value itself.
+         * @example {
+         *       "attributes": {
+         *         "value": "Michael"
+         *       },
+         *       "id": "Michael",
+         *       "type": "context_value"
+         *     }
+         */
+        ContextValueResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "context_value";
+            attributes: components["schemas"]["ContextValue"];
         };
         /**
          * Email
@@ -1862,6 +1949,7 @@ export interface components {
         EnvironmentListResponse: {
             /** Data */
             data: components["schemas"]["EnvironmentResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * EnvironmentRequest
@@ -2133,6 +2221,7 @@ export interface components {
         InvitationListResponse: {
             /** Data */
             data: components["schemas"]["InvitationResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * InvitationResource
@@ -2243,6 +2332,7 @@ export interface components {
         InvoiceListResponse: {
             /** Data */
             data: components["schemas"]["InvoiceResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * InvoiceResource
@@ -2308,6 +2398,13 @@ export interface components {
              * @description Optional formatter hint for rendering the limit value in customer-facing UI.
              */
             display_format?: string | null;
+        };
+        /**
+         * ListMeta
+         * @description Top-level ``meta`` block included on every JSON:API list response.
+         */
+        ListMeta: {
+            pagination: components["schemas"]["PaginationMeta"];
         };
         /**
          * LoginRequest
@@ -2410,6 +2507,7 @@ export interface components {
         MetricListResponse: {
             /** Data */
             data: components["schemas"]["MetricResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * MetricNameItem
@@ -2434,6 +2532,7 @@ export interface components {
         MetricNamesResponse: {
             /** Data */
             data: components["schemas"]["MetricNameItem"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * MetricResource
@@ -2506,6 +2605,7 @@ export interface components {
         MetricRollupListResponse: {
             /** Data */
             data: components["schemas"]["MetricRollupResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * MetricRollupResource
@@ -2556,30 +2656,35 @@ export interface components {
          */
         OidcProvider: "google" | "microsoft";
         /**
-         * PageMeta
-         * @description Pagination metadata returned with a collection response.
+         * PaginationMeta
+         * @description Pagination block returned inside ``meta`` on every list response.
+         *
+         *     ``page`` and ``size`` are always present and echo the parameters that
+         *     served the response (their defaults when the client omitted them).
+         *     ``total`` and ``total_pages`` are present only when the request included
+         *     ``meta[total]=true``.
          */
-        PageMeta: {
+        PaginationMeta: {
+            /**
+             * Page
+             * @description 1-based page number returned.
+             */
+            page: number;
             /**
              * Size
-             * @description Page size used for this response.
+             * @description Number of items per page.
              */
             size: number;
             /**
-             * Number
-             * @description 1-based page number returned.
+             * Total
+             * @description Total number of matching items across all pages. Present only when the request included `meta[total]=true`.
              */
-            number: number;
-            /**
-             * Total Items
-             * @description Total number of matching items across all pages.
-             */
-            total_items: number;
+            total?: number | null;
             /**
              * Total Pages
-             * @description Total number of pages at the current page size.
+             * @description Total number of pages at the requested page size. Present only when the request included `meta[total]=true`.
              */
-            total_pages: number;
+            total_pages?: number | null;
         };
         /**
          * PaymentMethod
@@ -2662,6 +2767,7 @@ export interface components {
         PaymentMethodListResponse: {
             /** Data */
             data: components["schemas"]["PaymentMethodResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * PaymentMethodRequest
@@ -2756,6 +2862,7 @@ export interface components {
         PlanListResponse: {
             /** Data */
             data: components["schemas"]["PlanResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * PlanResource
@@ -2833,6 +2940,7 @@ export interface components {
         ProductListResponse: {
             /** Data */
             data: components["schemas"]["ProductResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ProductResource
@@ -2948,6 +3056,7 @@ export interface components {
         ServiceListResponse: {
             /** Data */
             data: components["schemas"]["ServiceResource"][];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * ServiceRequest
@@ -3457,10 +3566,6 @@ export interface components {
              */
             readonly created_at?: string | null;
         };
-        /** UserListMeta */
-        UserListMeta: {
-            page: components["schemas"]["PageMeta"];
-        };
         /**
          * UserListResponse
          * @description JSON:API collection response for users.
@@ -3468,7 +3573,7 @@ export interface components {
         UserListResponse: {
             /** Data */
             data: components["schemas"]["UserResource"][];
-            meta?: components["schemas"]["UserListMeta"];
+            meta: components["schemas"]["ListMeta"];
         };
         /**
          * UserRequest
@@ -4533,6 +4638,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -4890,6 +5001,12 @@ export interface operations {
                 "filter[status]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `expires_at`, `-expires_at`, `last_used_at`, `-last_used_at`, `name`, `-name`, `status`, `-status`. */
                 sort?: "created_at" | "-created_at" | "expires_at" | "-expires_at" | "last_used_at" | "-last_used_at" | "name" | "-name" | "status" | "-status";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -5243,6 +5360,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -5596,9 +5719,18 @@ export interface operations {
     list_contexts: {
         parameters: {
             query?: {
+                /** @description Limit results to context instances of this context type (e.g. `user`). */
                 "filter[context_type]"?: string | null;
+                /** @description Case-insensitive substring match against the `key`, `name`, and any attribute value. A context is returned if at least one of those fields contains the search term. */
+                "filter[search]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -5829,11 +5961,86 @@ export interface operations {
             };
         };
     };
+    list_context_values: {
+        parameters: {
+            query?: {
+                /** @description Context type key whose instances should be searched (e.g. `user`). */
+                "filter[context_type]"?: string | null;
+                /** @description Attribute name whose distinct values should be returned (e.g. `first_name`). Accepts `key` and `name` as well as any attribute key stored on the context instance. */
+                "filter[attribute]"?: string | null;
+                /** @description Optional case-insensitive starts-with match against the projected attribute value. When omitted, all distinct values are returned in the page. */
+                "filter[search]"?: string | null;
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ContextValueListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_services: {
         parameters: {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -6131,6 +6338,12 @@ export interface operations {
                 "filter[token]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `email`, `-email`, `status`, `-status`. */
                 sort?: "created_at" | "-created_at" | "email" | "-email" | "status" | "-status";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -6575,6 +6788,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `name`, `-name`. */
                 sort?: "name" | "-name";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -6694,6 +6913,12 @@ export interface operations {
                 "filter[recorded_at]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-recorded_at`. Allowed values: `recorded_at`, `-recorded_at`, `value`, `-value`. */
                 sort?: "recorded_at" | "-recorded_at" | "value" | "-value";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -6756,6 +6981,12 @@ export interface operations {
                 "filter[recorded_at]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `bucket`. Allowed values: `bucket`, `-bucket`. */
                 sort?: "bucket" | "-bucket";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -6817,12 +7048,14 @@ export interface operations {
                 "filter[email]"?: string | null;
                 /** @description Case-insensitive substring match against display_name and email. If the value is a valid UUID, also matches user id exactly. */
                 "filter[search]"?: string | null;
-                /** @description 1-based page number */
-                "page[number]"?: number;
-                /** @description Items per page */
-                "page[size]"?: number;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `email`. Allowed values: `created_at`, `-created_at`, `display_name`, `-display_name`, `email`, `-email`. */
                 sort?: "created_at" | "-created_at" | "display_name" | "-display_name" | "email" | "-email";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -7058,6 +7291,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `sort_order`. Allowed values: `display_name`, `-display_name`, `id`, `-id`, `sort_order`, `-sort_order`. */
                 sort?: "display_name" | "-display_name" | "id" | "-id" | "sort_order" | "-sort_order";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -7117,6 +7356,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `display_name`. Allowed values: `display_name`, `-display_name`, `id`, `-id`. */
                 sort?: "display_name" | "-display_name" | "id" | "-id";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -7414,6 +7659,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `exp_year`, `-exp_year`, `is_default`, `-is_default`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "exp_year" | "-exp_year" | "is_default" | "-is_default" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
@@ -7767,6 +8018,12 @@ export interface operations {
             query?: {
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `status`, `-status`, `total`, `-total`. */
                 sort?: "created_at" | "-created_at" | "status" | "-status" | "total" | "-total";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
             };
             header?: never;
             path?: never;
