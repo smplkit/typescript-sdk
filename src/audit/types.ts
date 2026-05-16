@@ -71,14 +71,17 @@ export interface ResourceType {
 }
 
 export interface ListResourceTypesParams {
+  /** 1-based page number to return. Defaults to 1. */
+  pageNumber?: number;
+  /** Items per page (1–1000). Defaults to 1000. */
   pageSize?: number;
-  pageAfter?: string;
+  /** Include `total` and `totalPages` in {@link Pagination}. Defaults to false. */
+  metaTotal?: boolean;
 }
 
 export interface ListResourceTypesPage {
   resourceTypes: ResourceType[];
-  /** Opaque cursor for the next page, or null if this is the last page. */
-  nextCursor: string | null;
+  pagination: Pagination;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,14 +97,17 @@ export interface Action {
 export interface ListActionsParams {
   /** When set, returns only the actions seen with this resource_type. */
   filterResourceType?: string;
+  /** 1-based page number to return. Defaults to 1. */
+  pageNumber?: number;
+  /** Items per page (1–1000). Defaults to 1000. */
   pageSize?: number;
-  pageAfter?: string;
+  /** Include `total` and `totalPages` in {@link Pagination}. Defaults to false. */
+  metaTotal?: boolean;
 }
 
 export interface ActionListPage {
   actions: Action[];
-  /** Opaque cursor for the next page, or null if this is the last page. */
-  nextCursor: string | null;
+  pagination: Pagination;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,11 +196,40 @@ export interface UpdateForwarderInput extends CreateForwarderInput {
 export interface ListForwardersParams {
   forwarderType?: ForwarderType;
   enabled?: boolean;
+  /** 1-based page number to return. Defaults to 1. */
+  pageNumber?: number;
+  /** Items per page (1–1000). Defaults to 1000. */
   pageSize?: number;
-  pageAfter?: string;
+  /** Include `total` and `totalPages` in {@link Pagination}. Defaults to false. */
+  metaTotal?: boolean;
 }
 
 export interface ListForwardersPage {
   forwarders: Forwarder[];
-  nextCursor: string | null;
+  pagination: Pagination;
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+/**
+ * Offset-pagination block echoed in `meta.pagination` on every list
+ * response (other than the documented cursor-paged endpoints — audit
+ * events and forwarder deliveries).
+ *
+ * `page` and `size` always reflect the parameters that served the
+ * response (the defaults when the caller omitted them). `total` and
+ * `totalPages` are only populated when the caller passed
+ * `metaTotal: true`, since computing them costs an extra `COUNT` query.
+ */
+export interface Pagination {
+  /** 1-based page number returned. */
+  page: number;
+  /** Number of items per page. */
+  size: number;
+  /** Total matching items across all pages. Only set when `metaTotal=true`. */
+  total?: number;
+  /** Total pages at the requested page size. Only set when `metaTotal=true`. */
+  totalPages?: number;
 }

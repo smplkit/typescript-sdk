@@ -158,12 +158,11 @@ describe("mgmt.audit.forwarders.create", () => {
 // ---------------------------------------------------------------------------
 
 describe("mgmt.audit.forwarders.list", () => {
-  test("returns forwarders and nextCursor", async () => {
+  test("returns forwarders and pagination", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: [_forwarderResource("A"), _forwarderResource("B")],
-        meta: { page_size: 20 },
-        links: { next: "/api/v1/forwarders?page[size]=1&page[after]=tok-2" },
+        meta: { pagination: { page: 1, size: 2 } },
       }),
     );
     const mgmt = makeClient();
@@ -173,16 +172,34 @@ describe("mgmt.audit.forwarders.list", () => {
       pageSize: 2,
     });
     expect(page.forwarders).toHaveLength(2);
-    expect(page.nextCursor).toBe("tok-2");
+    expect(page.pagination).toEqual({ page: 1, size: 2 });
   });
 
-  test("nextCursor is null when links.next absent", async () => {
+  test("passes page[number], page[size], meta[total] and surfaces totals", async () => {
     mockFetch.mockResolvedValueOnce(
-      jsonResponse({ data: [_forwarderResource()], meta: { page_size: 20 } }),
+      jsonResponse({
+        data: [_forwarderResource()],
+        meta: { pagination: { page: 2, size: 1, total: 3, total_pages: 3 } },
+      }),
     );
     const mgmt = makeClient();
+    const page = await mgmt.audit.forwarders.list({
+      pageNumber: 2,
+      pageSize: 1,
+      metaTotal: true,
+    });
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+    expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=1/);
+    expect(req.url).toMatch(/meta(\[|%5B)total(\]|%5D)=true/);
+    expect(page.pagination).toEqual({ page: 2, size: 1, total: 3, totalPages: 3 });
+  });
+
+  test("returns zeroed pagination when meta block missing", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_forwarderResource()] }));
+    const mgmt = makeClient();
     const page = await mgmt.audit.forwarders.list();
-    expect(page.nextCursor).toBeNull();
+    expect(page.pagination).toEqual({ page: 0, size: 0 });
   });
 
   test("throws SmplError on 500", async () => {

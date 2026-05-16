@@ -21,6 +21,7 @@ export type {
   ListForwardersParams,
   ListResourceTypesPage,
   ListResourceTypesParams,
+  Pagination,
   ResourceType,
   UpdateForwarderInput,
 } from "./types.js";
