@@ -804,7 +804,7 @@ export interface components {
             method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
             /**
              * Url
-             * @description Destination URL.
+             * @description Destination URL. Must be an absolute `http://` or `https://` URL with a hostname (e.g. `https://siem.example.com/in`).
              */
             url: string;
             /**
@@ -959,7 +959,7 @@ export interface components {
             method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
             /**
              * Url
-             * @description Destination URL.
+             * @description Destination URL. Must be an absolute `http://` or `https://` URL with a hostname (e.g. `https://siem.example.com/in`).
              */
             url: string;
             /**
