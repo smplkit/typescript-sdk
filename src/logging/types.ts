@@ -14,23 +14,21 @@ export enum LogLevel {
 }
 
 /**
- * Describes a logger configuration change. Frozen — fields cannot be
+ * Describes a logger effective-level change. Frozen — fields cannot be
  * mutated after construction so a listener cannot affect later listeners.
  *
- * The `level` field is a TypeScript-SDK-only convenience for callers that
- * want to act on the new effective level without re-fetching the logger.
+ * One instance per logger whose effective level moved; emitted in lockstep
+ * with the matching `adapter.applyLevel(...)` call.
  */
 export class LoggerChangeEvent {
   readonly id: string;
   readonly source: string;
-  readonly level?: LogLevel | null;
-  readonly deleted?: true;
+  readonly level: LogLevel;
 
-  constructor(fields: { id: string; source: string; level?: LogLevel | null; deleted?: true }) {
+  constructor(fields: { id: string; source: string; level: LogLevel }) {
     this.id = fields.id;
     this.source = fields.source;
-    if (fields.level !== undefined) this.level = fields.level;
-    if (fields.deleted) this.deleted = fields.deleted;
+    this.level = fields.level;
     Object.freeze(this);
   }
 }

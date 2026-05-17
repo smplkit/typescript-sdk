@@ -234,14 +234,31 @@ describe("LoggingClient — runtime", () => {
     });
   });
 
+  /**
+   * Set up a client whose registered adapter discovers a specific set of
+   * logger names — without that, the resolution path has nothing to apply
+   * to and listeners never fire (per the listener-fanout contract).
+   */
+  function prepareForStartWith(client: LoggingClient, names: string[]): void {
+    client.registerAdapter({
+      name: "test-adapter",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  }
+
   describe("onChange()", () => {
     it("should register a global listener", async () => {
       const client = makeClient();
-      prepareForStart(client);
-      // start() fetches empty list → _loggerStore is empty (level null for test.logger)
+      prepareForStartWith(client, ["test.logger"]);
       await client.start();
 
-      // Scoped re-fetch returns single logger with level INFO
+      // After start with empty server response, test.logger resolves to the
+      // INFO fallback. Scoped fetch reveals a server-side level of WARN —
+      // the resolved level moves INFO → WARN and the listener fires.
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
           data: {
@@ -249,9 +266,9 @@ describe("LoggingClient — runtime", () => {
             type: "logger",
             attributes: {
               name: "Test",
-              level: "INFO",
+              level: "WARN",
               group: null,
-              managed: false,
+              managed: true,
               environments: {},
               created_at: null,
               updated_at: null,
@@ -262,21 +279,19 @@ describe("LoggingClient — runtime", () => {
       const cb = vi.fn();
       client.onChange(cb);
 
-      // No level in payload — server never sends it
       lastMockWs._emit("logger_changed", { id: "test.logger" });
       await new Promise((r) => setTimeout(r, 10));
 
       expect(cb).toHaveBeenCalledWith({
         id: "test.logger",
-        level: "INFO",
+        level: "WARN",
         source: "websocket",
       });
     });
 
     it("should register an id-scoped listener", async () => {
       const client = makeClient();
-      prepareForStart(client);
-      // start() fetches empty list → _loggerStore is empty
+      prepareForStartWith(client, ["test.logger", "other.logger"]);
       await client.start();
 
       // Scoped re-fetch returns single logger with level DEBUG
@@ -289,7 +304,7 @@ describe("LoggingClient — runtime", () => {
               name: "Test",
               level: "DEBUG",
               group: null,
-              managed: false,
+              managed: true,
               environments: {},
               created_at: null,
               updated_at: null,
@@ -413,9 +428,20 @@ describe("LoggingClient — listener error swallowing", () => {
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
   }
 
+  function prepareForStartWith(client: LoggingClient, names: string[]): void {
+    client.registerAdapter({
+      name: "test-adapter",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
+      applyLevel: () => {},
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  }
+
   it("should swallow errors thrown by global listeners", async () => {
     const client = makeClient();
-    prepareForStart(client);
+    prepareForStartWith(client, ["test"]);
     const throwingCb = vi.fn(() => {
       throw new Error("listener boom");
     });
@@ -424,10 +450,9 @@ describe("LoggingClient — listener error swallowing", () => {
     client.onChange(throwingCb);
     client.onChange(goodCb);
 
-    // start() fetches empty list → _loggerStore has no entry for "test"
     await client.start();
 
-    // Scoped fetch returns logger with level INFO (different from null → listener fires)
+    // Scoped fetch returns logger with level INFO (different from fallback → listener fires)
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
@@ -435,9 +460,9 @@ describe("LoggingClient — listener error swallowing", () => {
           type: "logger",
           attributes: {
             name: "Test",
-            level: "INFO",
+            level: "WARN",
             group: null,
-            managed: false,
+            managed: true,
             environments: {},
             created_at: null,
             updated_at: null,
@@ -454,7 +479,7 @@ describe("LoggingClient — listener error swallowing", () => {
 
   it("should swallow errors thrown by id-scoped listeners", async () => {
     const client = makeClient();
-    prepareForStart(client);
+    prepareForStartWith(client, ["test"]);
     const throwingCb = vi.fn(() => {
       throw new Error("id listener boom");
     });
@@ -463,10 +488,9 @@ describe("LoggingClient — listener error swallowing", () => {
     client.onChange("test", throwingCb);
     client.onChange("test", goodCb);
 
-    // start() fetches empty list → _loggerStore has no entry for "test"
     await client.start();
 
-    // Scoped fetch returns logger with level DEBUG (different from null → listener fires)
+    // Scoped fetch returns logger with level DEBUG (different from fallback → listener fires)
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: {
@@ -476,7 +500,7 @@ describe("LoggingClient — listener error swallowing", () => {
             name: "Test",
             level: "DEBUG",
             group: null,
-            managed: false,
+            managed: true,
             environments: {},
             created_at: null,
             updated_at: null,
@@ -510,11 +534,16 @@ describe("LoggingClient — listener error swallowing", () => {
 // ===========================================================================
 
 describe("LoggingClient — WebSocket event behaviors", () => {
-  function prepareClient(): LoggingClient {
+  /**
+   * Build a client whose adapter discovers `names`. Listener fanout pairs
+   * 1:1 with `adapter.applyLevel` calls, so a logger has to be adapter-
+   * known for a listener to fire on it.
+   */
+  function prepareClient(names: string[] = []): LoggingClient {
     const client = makeClient();
     client.registerAdapter({
-      name: "noop",
-      discover: () => [],
+      name: "test-adapter",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
       applyLevel: () => {},
       installHook: () => {},
       uninstallHook: () => {},
@@ -562,14 +591,14 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   // -----------------------------------------------------------------------
 
   it("logger_changed: scoped fetch fires listener when level changed", async () => {
-    const client = prepareClient();
-    // start() fetches empty list → _loggerStore has no "sql" entry
+    const client = prepareClient(["sql"]);
+    // start() fetches empty list → no entry for "sql" yet, resolves to INFO fallback
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
     const cb = vi.fn();
     client.onChange(cb);
     await client.start();
 
-    // Scoped fetch returns logger with level WARN (different from null)
+    // Scoped fetch returns logger with level WARN (different from INFO fallback)
     mockFetch.mockResolvedValueOnce(makeSingleLoggerResponse("sql", "WARN"));
     lastMockWs._emit("logger_changed", { id: "sql" });
     await new Promise((r) => setTimeout(r, 10));
@@ -580,7 +609,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   });
 
   it("logger_changed: scoped fetch does NOT fire listener when level unchanged", async () => {
-    const client = prepareClient();
+    const client = prepareClient(["sql"]);
     // start() returns logger "sql" with level INFO
     mockFetch.mockImplementation(() =>
       Promise.resolve(
@@ -593,7 +622,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
                 name: "sql",
                 level: "INFO",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -607,7 +636,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     client.onChange(cb);
     await client.start();
 
-    // Scoped fetch returns same level (INFO)
+    // Scoped fetch returns same level (INFO) — only the name moved.
+    // No effective-level delta, no listener fire.
     mockFetch.mockResolvedValueOnce(makeSingleLoggerResponse("sql", "INFO"));
     lastMockWs._emit("logger_changed", { id: "sql" });
     await new Promise((r) => setTimeout(r, 10));
@@ -619,76 +649,178 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   // logger_deleted
   // -----------------------------------------------------------------------
 
-  it("logger_deleted: removes from store, fires with deleted=true, no HTTP fetch", async () => {
-    const client = prepareClient();
-    // start() returns logger "sql" with level INFO
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: false,
-                environments: {},
-                created_at: null,
-                updated_at: null,
+  it("logger_deleted: deleted key fires nothing; dependents re-resolve and fire", async () => {
+    // app.foo.db inherits its level from app.foo via dot-ancestry. Deleting
+    // app.foo causes app.foo.db to re-resolve WARN → INFO. The deleted key
+    // app.foo itself fires nothing, even though it's adapter-known.
+    const client = prepareClient(["app.foo", "app.foo.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.foo",
+                type: "logger",
+                attributes: {
+                  name: "app.foo",
+                  level: "WARN",
+                  group: null,
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
               },
-            },
-          ],
-        }),
-      ),
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    const globalCb = vi.fn();
+    const dbCb = vi.fn();
+    const fooCb = vi.fn();
+    client.onChange(globalCb);
+    client.onChange("app.foo.db", dbCb);
+    client.onChange("app.foo", fooCb);
+    await client.start();
+
+    globalCb.mockClear();
+    dbCb.mockClear();
+    fooCb.mockClear();
+
+    const fetchCountBefore = mockFetch.mock.calls.length;
+    lastMockWs._emit("logger_deleted", { id: "app.foo" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // The deleted key fires nothing — even though app.foo is adapter-known
+    // and its resolved level moved WARN → INFO, deletion is not a level-
+    // change notification.
+    expect(fooCb).not.toHaveBeenCalled();
+
+    // app.foo.db's effective level moved WARN → INFO via the now-deleted
+    // ancestor — it fires once.
+    expect(dbCb).toHaveBeenCalledTimes(1);
+    expect(dbCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "app.foo.db", level: "INFO", source: "websocket" }),
     );
+    expect(dbCb.mock.calls[0]![0]).not.toHaveProperty("deleted");
+
+    // Global fires exactly once with the dependent's payload — no summary
+    // event, no fire for the deleted key.
+    expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(globalCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "app.foo.db", level: "INFO" }),
+    );
+
+    // No HTTP fetch — `logger_deleted` evicts from cache without re-fetching.
+    expect(mockFetch.mock.calls.length).toBe(fetchCountBefore);
+  });
+
+  it("logger_deleted: deleted key with no dependents fires nothing", async () => {
+    const client = prepareClient();
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
     const cb = vi.fn();
     const keyedCb = vi.fn();
     client.onChange(cb);
     client.onChange("sql", keyedCb);
     await client.start();
 
-    const fetchCountBefore = mockFetch.mock.calls.length;
     lastMockWs._emit("logger_deleted", { id: "sql" });
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", deleted: true }));
-    expect(keyedCb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", deleted: true }));
-    // No additional HTTP fetch
-    expect(mockFetch.mock.calls.length).toBe(fetchCountBefore);
+    expect(cb).not.toHaveBeenCalled();
+    expect(keyedCb).not.toHaveBeenCalled();
   });
 
-  it("logger_deleted: swallows errors from global listeners", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  it("logger_deleted: swallows errors from listeners during dependent re-resolution", async () => {
+    // app.foo.db inherits from app.foo. Deleting app.foo cascades to
+    // app.foo.db.
+    const client = prepareClient(["app.foo.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.foo",
+                type: "logger",
+                attributes: {
+                  name: "app.foo",
+                  level: "WARN",
+                  group: null,
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
     const throwingCb = vi.fn(() => {
-      throw new Error("global throws on delete");
+      throw new Error("global throws on dependent re-resolution");
     });
     const goodCb = vi.fn();
     client.onChange(throwingCb);
     client.onChange(goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
-    lastMockWs._emit("logger_deleted", { id: "sql" });
+    lastMockWs._emit("logger_deleted", { id: "app.foo" });
     await new Promise((r) => setTimeout(r, 10));
 
+    // app.foo.db re-resolves WARN → INFO when its ancestor is gone; both
+    // global listeners fire and the thrown error doesn't break the second.
     expect(throwingCb).toHaveBeenCalledTimes(1);
     expect(goodCb).toHaveBeenCalledTimes(1);
   });
 
-  it("logger_deleted: swallows errors from per-key listeners", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  it("logger_deleted: per-key listener errors are swallowed during dependent re-resolution", async () => {
+    const client = prepareClient(["app.foo.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.foo",
+                type: "logger",
+                attributes: {
+                  name: "app.foo",
+                  level: "WARN",
+                  group: null,
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
     const throwingCb = vi.fn(() => {
-      throw new Error("key throws on delete");
+      throw new Error("key throws on dependent re-resolution");
     });
     const goodCb = vi.fn();
-    client.onChange("sql", throwingCb);
-    client.onChange("sql", goodCb);
+    client.onChange("app.foo.db", throwingCb);
+    client.onChange("app.foo.db", goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
-    lastMockWs._emit("logger_deleted", { id: "sql" });
+    lastMockWs._emit("logger_deleted", { id: "app.foo" });
     await new Promise((r) => setTimeout(r, 10));
 
     expect(throwingCb).toHaveBeenCalledTimes(1);
@@ -820,85 +952,226 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   // group_deleted
   // -----------------------------------------------------------------------
 
-  it("group_deleted: removes from store, fires with deleted=true, no HTTP fetch", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const cb = vi.fn();
-    const keyedCb = vi.fn();
-    client.onChange(cb);
-    client.onChange("db-group", keyedCb);
+  it("group_deleted: deleted key fires nothing; dependents re-resolve and fire", async () => {
+    // app.db inherits its level from group "db" — when "db" is deleted,
+    // app.db re-resolves from WARN to INFO. The deleted group id itself
+    // fires nothing.
+    const client = prepareClient(["app.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "db",
+                type: "log_group",
+                attributes: {
+                  name: "db",
+                  level: "WARN",
+                  parent_id: null,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.db",
+                type: "logger",
+                attributes: {
+                  name: "app.db",
+                  level: null,
+                  group: "db",
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    const globalCb = vi.fn();
+    const dbCb = vi.fn();
+    const groupCb = vi.fn();
+    client.onChange(globalCb);
+    client.onChange("app.db", dbCb);
+    client.onChange("db", groupCb);
     await client.start();
 
-    // Populate group store
-    (
-      client as unknown as {
-        _groupsCache: Record<
-          string,
-          { level: string | null; group: string | null; environments: unknown }
-        >;
-      }
-    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
+    globalCb.mockClear();
+    dbCb.mockClear();
+    groupCb.mockClear();
 
     const fetchCountBefore = mockFetch.mock.calls.length;
-    lastMockWs._emit("group_deleted", { id: "db-group" });
+    lastMockWs._emit("group_deleted", { id: "db" });
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "db-group", deleted: true }));
-    expect(keyedCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "db-group", deleted: true }),
+    // The deleted group id never fires.
+    expect(groupCb).not.toHaveBeenCalled();
+    // app.db re-resolves WARN → INFO and fires once on both per-key and global.
+    expect(dbCb).toHaveBeenCalledTimes(1);
+    expect(dbCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "app.db", level: "INFO", source: "websocket" }),
     );
+    expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(globalCb).toHaveBeenCalledWith(expect.objectContaining({ id: "app.db", level: "INFO" }));
+    // Payload must not carry any `deleted` flag.
+    const event = dbCb.mock.calls[0]![0];
+    expect(event).not.toHaveProperty("deleted");
+    // No HTTP fetch — `group_deleted` evicts from cache without re-fetching.
     expect(mockFetch.mock.calls.length).toBe(fetchCountBefore);
   });
 
-  it("group_deleted: swallows errors from global listeners", async () => {
+  it("group_deleted: deleted group with no dependents fires nothing", async () => {
     const client = prepareClient();
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    const cb = vi.fn();
+    const groupCb = vi.fn();
+    client.onChange(cb);
+    client.onChange("db-group", groupCb);
+    await client.start();
+
+    lastMockWs._emit("group_deleted", { id: "db-group" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(cb).not.toHaveBeenCalled();
+    expect(groupCb).not.toHaveBeenCalled();
+  });
+
+  it("group_deleted: swallows errors from listeners during dependent re-resolution", async () => {
+    const client = prepareClient(["app.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "db",
+                type: "log_group",
+                attributes: {
+                  name: "db",
+                  level: "WARN",
+                  parent_id: null,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.db",
+                type: "logger",
+                attributes: {
+                  name: "app.db",
+                  level: null,
+                  group: "db",
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
     const throwingCb = vi.fn(() => {
-      throw new Error("global throws on group delete");
+      throw new Error("global throws on dependent re-resolution");
     });
     const goodCb = vi.fn();
     client.onChange(throwingCb);
     client.onChange(goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
-    // Populate group store
-    (
-      client as unknown as {
-        _groupsCache: Record<
-          string,
-          { level: string | null; group: string | null; environments: unknown }
-        >;
-      }
-    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
-
-    lastMockWs._emit("group_deleted", { id: "db-group" });
+    lastMockWs._emit("group_deleted", { id: "db" });
     await new Promise((r) => setTimeout(r, 10));
 
     expect(throwingCb).toHaveBeenCalledTimes(1);
     expect(goodCb).toHaveBeenCalledTimes(1);
   });
 
-  it("group_deleted: swallows errors from per-key listeners", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+  it("group_deleted: swallows per-key listener errors during dependent re-resolution", async () => {
+    const client = prepareClient(["app.db"]);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "db",
+                type: "log_group",
+                attributes: {
+                  name: "db",
+                  level: "WARN",
+                  parent_id: null,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              {
+                id: "app.db",
+                type: "logger",
+                attributes: {
+                  name: "app.db",
+                  level: null,
+                  group: "db",
+                  managed: true,
+                  environments: {},
+                  created_at: null,
+                  updated_at: null,
+                },
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
     const throwingCb = vi.fn(() => {
-      throw new Error("key throws on group delete");
+      throw new Error("key throws on dependent re-resolution");
     });
     const goodCb = vi.fn();
-    client.onChange("db-group", throwingCb);
-    client.onChange("db-group", goodCb);
+    client.onChange("app.db", throwingCb);
+    client.onChange("app.db", goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
-    (
-      client as unknown as {
-        _groupsCache: Record<
-          string,
-          { level: string | null; group: string | null; environments: unknown }
-        >;
-      }
-    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
-
-    lastMockWs._emit("group_deleted", { id: "db-group" });
+    lastMockWs._emit("group_deleted", { id: "db" });
     await new Promise((r) => setTimeout(r, 10));
 
     expect(throwingCb).toHaveBeenCalledTimes(1);
@@ -917,8 +1190,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     expect(lastMockWs.on).toHaveBeenCalledWith("loggers_changed", expect.any(Function));
   });
 
-  it("loggers_changed: full refetch, global fires once, per-key for changed keys", async () => {
-    const client = prepareClient();
+  it("loggers_changed: full refetch fires global once per changed id, per-key only for changed", async () => {
+    const client = prepareClient(["sql", "http"]);
     // Initial: sql=INFO, http=DEBUG
     mockFetch.mockImplementation(() =>
       Promise.resolve(
@@ -931,7 +1204,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
                 name: "sql",
                 level: "INFO",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -944,7 +1217,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
                 name: "http",
                 level: "DEBUG",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -975,7 +1248,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
                 name: "sql",
                 level: "INFO",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -988,7 +1261,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
                 name: "http",
                 level: "WARN",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -1002,20 +1275,101 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     lastMockWs._emit("loggers_changed", {});
     await new Promise((r) => setTimeout(r, 20));
 
-    // Global fires once
+    // Only http moved → global fires exactly once with http's payload (no
+    // summary event, no fire for unchanged sql).
     expect(globalCb).toHaveBeenCalledTimes(1);
-    // sql unchanged → no per-key listener
+    expect(globalCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "http", level: "WARN", source: "websocket" }),
+    );
     expect(sqlCb).not.toHaveBeenCalled();
-    // http changed → per-key listener fires
     expect(httpCb).toHaveBeenCalledTimes(1);
     expect(httpCb).toHaveBeenCalledWith(
       expect.objectContaining({ id: "http", level: "WARN", source: "websocket" }),
     );
   });
 
-  it("loggers_changed: detects deleted logger and fires listener", async () => {
-    const client = prepareClient();
-    // Initial: sql logger exists
+  it("loggers_changed: global fires N times when N loggers change", async () => {
+    const client = prepareClient(["a", "b", "c"]);
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          data: [
+            {
+              id: "a",
+              type: "logger",
+              attributes: {
+                name: "a",
+                level: "INFO",
+                group: null,
+                managed: true,
+                environments: {},
+              },
+            },
+            {
+              id: "b",
+              type: "logger",
+              attributes: {
+                name: "b",
+                level: "INFO",
+                group: null,
+                managed: true,
+                environments: {},
+              },
+            },
+            {
+              id: "c",
+              type: "logger",
+              attributes: {
+                name: "c",
+                level: "INFO",
+                group: null,
+                managed: true,
+                environments: {},
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const globalCb = vi.fn();
+    client.onChange(globalCb);
+    await client.start();
+    globalCb.mockClear();
+
+    // All three move INFO → ERROR.
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: ["a", "b", "c"].map((id) => ({
+            id,
+            type: "logger",
+            attributes: {
+              name: id,
+              level: "ERROR",
+              group: null,
+              managed: true,
+              environments: {},
+            },
+          })),
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    lastMockWs._emit("loggers_changed", {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(globalCb).toHaveBeenCalledTimes(3);
+    const ids = globalCb.mock.calls.map((c) => c[0].id).sort();
+    expect(ids).toEqual(["a", "b", "c"]);
+    for (const call of globalCb.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ level: "ERROR", source: "websocket" }));
+    }
+  });
+
+  it("loggers_changed: detects deleted logger and fires listener when fallback differs", async () => {
+    // sql is adapter-known with WARN. Server drops sql from the list →
+    // it re-resolves via fallback to INFO. Listener fires WARN → INFO.
+    const client = prepareClient(["sql"]);
     mockFetch.mockImplementation(() =>
       Promise.resolve(
         jsonResponse({
@@ -1025,9 +1379,9 @@ describe("LoggingClient — WebSocket event behaviors", () => {
               type: "logger",
               attributes: {
                 name: "sql",
-                level: "INFO",
+                level: "WARN",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -1040,35 +1394,20 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     const cb = vi.fn();
     client.onChange(cb);
     await client.start();
+    cb.mockClear();
 
-    // loggers_changed: sql is gone, also returns groups
     mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // loggers: empty (sql deleted)
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db-group",
-              type: "log_group",
-              attributes: {
-                name: "DB",
-                level: "WARN",
-                parent_id: null,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      ); // groups: db-group
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) // sql gone
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
 
     lastMockWs._emit("loggers_changed", {});
     await new Promise((r) => setTimeout(r, 20));
 
-    // sql was deleted → changedLoggerIds includes sql → global fires
     expect(cb).toHaveBeenCalledTimes(1);
-    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", source: "websocket" }));
+    expect(cb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "INFO", source: "websocket" }),
+    );
+    expect(cb.mock.calls[0]![0]).not.toHaveProperty("deleted");
   });
 
   it("loggers_changed: does not crash if fetch throws", async () => {
@@ -1084,7 +1423,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   });
 
   it("loggers_changed: swallows errors thrown by global listeners", async () => {
-    const client = prepareClient();
+    const client = prepareClient(["sql"]);
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
     const throwingCb = vi.fn(() => {
       throw new Error("listener boom");
@@ -1093,8 +1432,10 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     client.onChange(throwingCb);
     client.onChange(goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
-    // Fetch returns logger with level INFO — different from null (change detected)
+    // Fetch returns logger with level WARN — different from INFO fallback.
     mockFetch
       .mockResolvedValueOnce(
         jsonResponse({
@@ -1104,9 +1445,9 @@ describe("LoggingClient — WebSocket event behaviors", () => {
               type: "logger",
               attributes: {
                 name: "sql",
-                level: "INFO",
+                level: "WARN",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -1125,7 +1466,7 @@ describe("LoggingClient — WebSocket event behaviors", () => {
   });
 
   it("loggers_changed: swallows errors thrown by per-key listeners", async () => {
-    const client = prepareClient();
+    const client = prepareClient(["sql"]);
     mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
     const throwingCb = vi.fn(() => {
       throw new Error("key listener boom");
@@ -1134,6 +1475,8 @@ describe("LoggingClient — WebSocket event behaviors", () => {
     client.onChange("sql", throwingCb);
     client.onChange("sql", goodCb);
     await client.start();
+    throwingCb.mockClear();
+    goodCb.mockClear();
 
     mockFetch
       .mockResolvedValueOnce(
@@ -1144,9 +1487,9 @@ describe("LoggingClient — WebSocket event behaviors", () => {
               type: "logger",
               attributes: {
                 name: "sql",
-                level: "INFO",
+                level: "WARN",
                 group: null,
-                managed: false,
+                managed: true,
                 environments: {},
                 created_at: null,
                 updated_at: null,
@@ -1319,9 +1662,15 @@ describe("LoggingClient — refresh()", () => {
     );
   });
 
-  it("fires global listener exactly once and per-key for each changed id", async () => {
-    const { client } = prepareClient();
+  it("fires global once per changed id and per-key only for changed ids", async () => {
+    const { client } = prepareClient({
+      discover: () => [
+        { name: "sql", level: "INFO" },
+        { name: "http", level: "INFO" },
+      ],
+    });
     mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
       .mockResolvedValueOnce(
         loggerListResponse([
           { id: "sql", level: "INFO" },
@@ -1349,7 +1698,11 @@ describe("LoggingClient — refresh()", () => {
 
     await client.refresh();
 
+    // Only http changed → global fires once (per-id, not a summary).
     expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(globalCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "http", level: "WARN", source: "manual" }),
+    );
     expect(sqlCb).not.toHaveBeenCalled();
     expect(httpCb).toHaveBeenCalledTimes(1);
     expect(httpCb).toHaveBeenCalledWith(
@@ -1357,35 +1710,51 @@ describe("LoggingClient — refresh()", () => {
     );
   });
 
-  it("detects deleted loggers and fires for them", async () => {
-    const { client } = prepareClient();
+  it("detects deleted loggers and fires for them when fallback differs", async () => {
+    const { client } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
     mockFetch
-      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "INFO" }]))
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
+      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "WARN" }]))
       .mockResolvedValueOnce(groupListResponse());
     const globalCb = vi.fn();
     const sqlCb = vi.fn();
     client.onChange(globalCb);
     client.onChange("sql", sqlCb);
     await client.start();
+    globalCb.mockClear();
+    sqlCb.mockClear();
 
-    // refresh: sql is gone
+    // refresh: sql disappears server-side → adapter-known sql re-resolves
+    // to the INFO fallback. Fires WARN → INFO, with no `deleted` flag.
     mockFetch
       .mockResolvedValueOnce(loggerListResponse([]))
       .mockResolvedValueOnce(groupListResponse());
 
     await client.refresh();
 
-    expect(globalCb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", source: "manual" }));
+    expect(globalCb).toHaveBeenCalledTimes(1);
+    expect(globalCb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "INFO", source: "manual" }),
+    );
     expect(sqlCb).toHaveBeenCalledTimes(1);
+    expect(sqlCb.mock.calls[0]![0]).not.toHaveProperty("deleted");
   });
 
   it("does not fire listeners when nothing changed", async () => {
-    const { client } = prepareClient();
+    const { client } = prepareClient({
+      discover: () => [{ name: "sql", level: "INFO" }],
+    });
     const list = () => loggerListResponse([{ id: "sql", level: "INFO" }]);
-    mockFetch.mockResolvedValueOnce(list()).mockResolvedValueOnce(groupListResponse());
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      .mockResolvedValueOnce(list())
+      .mockResolvedValueOnce(groupListResponse());
     const globalCb = vi.fn();
     client.onChange(globalCb);
     await client.start();
+    globalCb.mockClear();
 
     mockFetch.mockResolvedValueOnce(list()).mockResolvedValueOnce(groupListResponse());
 
