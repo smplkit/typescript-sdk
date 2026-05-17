@@ -59,6 +59,9 @@ function _eventBodyFromInput(input: CreateEventInput): GenEventResponse {
     attrs.occurred_at =
       input.occurredAt instanceof Date ? input.occurredAt.toISOString() : input.occurredAt;
   }
+  if (input.actorType !== undefined) attrs.actor_type = input.actorType;
+  if (input.actorId !== undefined) attrs.actor_id = input.actorId;
+  if (input.actorLabel !== undefined) attrs.actor_label = input.actorLabel;
   if (input.data !== undefined) {
     attrs.data = input.data as { [key: string]: unknown };
   }
@@ -77,9 +80,9 @@ function _eventFromResource(resource: {
     resourceId: String(attrs.resource_id ?? ""),
     occurredAt: String(attrs.occurred_at ?? ""),
     createdAt: String(attrs.created_at ?? ""),
-    actorType: String(attrs.actor_type ?? ""),
+    actorType: (attrs.actor_type as string | null) ?? null,
     actorId: (attrs.actor_id as string | null) ?? null,
-    actorLabel: String(attrs.actor_label ?? ""),
+    actorLabel: (attrs.actor_label as string | null) ?? null,
     data: (attrs.data as Record<string, unknown> | undefined) ?? {},
     idempotencyKey: String(attrs.idempotency_key ?? ""),
     doNotForward: Boolean(attrs.do_not_forward ?? false),

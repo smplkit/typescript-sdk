@@ -86,6 +86,93 @@ describe("AuditClient", () => {
     await client._close();
   });
 
+  test("get surfaces null actor fields and free-form actor_id", async () => {
+    const eventId = "55555555-5555-5555-5555-555555555555";
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              id: eventId,
+              type: "event",
+              attributes: {
+                action: "invoice.created",
+                resource_type: "invoice",
+                resource_id: "inv-1",
+                occurred_at: "2026-05-06T12:00:00+00:00",
+                created_at: "2026-05-06T12:00:01+00:00",
+                actor_type: "EXTERNAL_SERVICE",
+                actor_id: "not-a-uuid:billing-bot",
+                actor_label: null,
+                data: {},
+                idempotency_key: "auto-abc",
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        ),
+    );
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
+    });
+    const ev = await client.events.get(eventId);
+    expect(ev.actorType).toBe("EXTERNAL_SERVICE");
+    expect(ev.actorId).toBe("not-a-uuid:billing-bot");
+    expect(ev.actorLabel).toBeNull();
+    await client._close();
+  });
+
+  test("record passes actor fields onto the wire", async () => {
+    const seenBodies: string[] = [];
+    const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      seenBodies.push(await req.text());
+      return new Response(
+        JSON.stringify({
+          data: {
+            id: "00000000-0000-0000-0000-000000000001",
+            type: "event",
+            attributes: {
+              action: "user.created",
+              resource_type: "user",
+              resource_id: "u-1",
+              occurred_at: "2026-05-06T12:00:00+00:00",
+              created_at: "2026-05-06T12:00:01+00:00",
+              actor_type: "EXTERNAL_SERVICE",
+              actor_id: "not-a-uuid:billing-bot",
+              actor_label: "Billing Bot",
+              data: {},
+              idempotency_key: "auto",
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
+    });
+    client.events.record({
+      action: "user.created",
+      resourceType: "user",
+      resourceId: "u-1",
+      actorType: "EXTERNAL_SERVICE",
+      actorId: "not-a-uuid:billing-bot",
+      actorLabel: "Billing Bot",
+    });
+    await client.events.flush(2_000);
+    const body = JSON.parse(seenBodies[0]!);
+    expect(body.data.attributes.actor_type).toBe("EXTERNAL_SERVICE");
+    expect(body.data.attributes.actor_id).toBe("not-a-uuid:billing-bot");
+    expect(body.data.attributes.actor_label).toBe("Billing Bot");
+    await client._close();
+  });
+
   test("get throws SmplNotFoundError on 404", async () => {
     const fetchMock = vi.fn(
       async () =>

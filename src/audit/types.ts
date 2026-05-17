@@ -21,20 +21,21 @@ export interface AuditEvent {
   /** ISO-8601-with-offset timestamp of when the audit service ingested the event. */
   createdAt: string;
   /**
-   * Type of the actor that performed the action (`"user"`, `"api_key"`,
-   * `"system"`, …). Empty string when unknown.
+   * Kind of actor that caused the event — e.g. `"USER"`, `"API_KEY"`,
+   * `"SYSTEM"`, or any label the caller chose. `null` when the caller
+   * did not supply one; the audit service never backfills.
    */
-  actorType: string;
+  actorType: string | null;
   /**
-   * UUID of the actor, when the actor is a tracked entity
-   * (user, api_key). `null` for system actors or anonymous events.
+   * Identifier of the actor that caused the event. Free-form — any
+   * identifier scheme is accepted. `null` when not supplied.
    */
   actorId: string | null;
   /**
-   * Display label for the actor — typically a name or email. Empty
-   * string when unknown.
+   * Human-readable label for the actor (e.g. an email address or API
+   * key name). `null` when not supplied.
    */
-  actorLabel: string;
+  actorLabel: string | null;
   /**
    * Free-form per-event payload defined by the customer. Surfaced on
    * the audit-event resource as a structured JSONB column.
@@ -61,6 +62,17 @@ export interface CreateEventInput {
   resourceId: string;
   /** Defaults to server-side `now()` if omitted. */
   occurredAt?: Date | string;
+  /**
+   * Free-form label for the kind of actor that caused the event (e.g.
+   * `"USER"`, `"API_KEY"`, `"SYSTEM"`, or any custom value). The audit
+   * service never backfills this from the request credential — supply
+   * it explicitly when you want the event attributed.
+   */
+  actorType?: string;
+  /** Free-form identifier of the actor. Any string scheme is accepted. */
+  actorId?: string;
+  /** Human-readable label for the actor (e.g. email or API key name). */
+  actorLabel?: string;
   /**
    * Free-form contextual JSON. To record a resource snapshot, nest it
    * inside `data` — smplkit's internal convention is `data.snapshot`,
