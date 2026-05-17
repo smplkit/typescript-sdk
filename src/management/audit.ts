@@ -16,17 +16,18 @@ import { SmplError, SmplkitConnectionError, throwForStatus } from "../errors.js"
 import type {
   CreateForwarderInput,
   Forwarder,
-  ForwarderHttp,
+  HttpConfiguration,
   HttpHeader,
   ListForwardersPage,
   ListForwardersParams,
   Pagination,
+  TransformType,
   UpdateForwarderInput,
 } from "../audit/types.js";
 
 type AuditHttp = ReturnType<typeof createClient<paths>>;
 type GenForwarder = components["schemas"]["Forwarder"];
-type GenForwarderHttpType = components["schemas"]["ForwarderHttp"];
+type GenHttpConfiguration = components["schemas"]["HttpConfiguration"];
 type GenForwarderResponse = components["schemas"]["ForwarderResponse"];
 
 /** @internal */
@@ -61,17 +62,16 @@ function _paginationFromBody(body: {
   return out;
 }
 
-function _httpToWire(http: ForwarderHttp): GenForwarderHttpType {
+function _configurationToWire(config: HttpConfiguration): GenHttpConfiguration {
   return {
-    method: http.method as GenForwarderHttpType["method"],
-    url: http.url,
-    headers: http.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
-    body: http.body,
-    success_status: http.successStatus,
+    method: config.method as GenHttpConfiguration["method"],
+    url: config.url,
+    headers: config.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
+    success_status: config.successStatus,
   };
 }
 
-function _httpFromWire(raw: Record<string, unknown> | undefined): ForwarderHttp {
+function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpConfiguration {
   const r = raw ?? {};
   const headers = ((r.headers as Array<{ name?: string; value?: string }>) ?? []).map((h) => ({
     name: String(h.name ?? ""),
@@ -81,7 +81,6 @@ function _httpFromWire(raw: Record<string, unknown> | undefined): ForwarderHttp 
     method: String(r.method ?? "POST"),
     url: String(r.url ?? ""),
     headers,
-    body: (r.body as string | null) ?? null,
     successStatus: String(r.success_status ?? "2xx"),
   };
 }
@@ -91,11 +90,13 @@ function _forwarderAttributes(input: CreateForwarderInput | UpdateForwarderInput
     name: input.name,
     forwarder_type: input.forwarderType,
     enabled: input.enabled ?? true,
-    http: _httpToWire(input.http),
+    configuration: _configurationToWire(input.configuration),
   };
+  if (input.description !== undefined) attrs.description = input.description;
   if (input.filter !== undefined) {
     attrs.filter = input.filter as { [key: string]: unknown };
   }
+  if (input.transformType !== undefined) attrs.transform_type = input.transformType;
   if (input.transform !== undefined) attrs.transform = input.transform;
   return attrs;
 }
@@ -108,12 +109,13 @@ function _forwarderFromResource(resource: {
   return {
     id: resource.id,
     name: String(a.name ?? ""),
-    slug: String(a.slug ?? ""),
+    description: (a.description as string | null) ?? null,
     forwarderType: a.forwarder_type as Forwarder["forwarderType"],
     enabled: Boolean(a.enabled ?? true),
     filter: (a.filter as Record<string, unknown> | null) ?? null,
-    transform: (a.transform as string | null) ?? null,
-    http: _httpFromWire(a.http as Record<string, unknown> | undefined),
+    transformType: (a.transform_type as TransformType | null) ?? null,
+    transform: a.transform ?? null,
+    configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
     createdAt: (a.created_at as string | null) ?? null,
     updatedAt: (a.updated_at as string | null) ?? null,
     deletedAt: (a.deleted_at as string | null) ?? null,

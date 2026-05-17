@@ -11,8 +11,8 @@ export type {
   CreateEventInput,
   CreateForwarderInput,
   Forwarder,
-  ForwarderHttp,
   ForwarderType,
+  HttpConfiguration,
   HttpHeader,
   ListActionsParams,
   ListEventsPage,
@@ -23,5 +23,6 @@ export type {
   ListResourceTypesParams,
   Pagination,
   ResourceType,
+  TransformType,
   UpdateForwarderInput,
 } from "./types.js";
