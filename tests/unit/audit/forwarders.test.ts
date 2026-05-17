@@ -206,24 +206,28 @@ describe("Forwarder.save() — create", () => {
     expect(body.data.attributes.transform).toBe("{ event: action }");
   });
 
-  test("transform: unknown — non-string values round-trip on the wire", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
-    const structured = { kind: "future-engine", body: { nested: true } };
+  test("save() throws when transformType is JSONATA but transform is not a string", async () => {
     const { forwarder } = _newForwarder({
       transformType: TransformType.JSONATA,
-      transform: structured,
+      transform: { kind: "future-engine", body: { nested: true } },
     });
-    await forwarder.save();
-    const req = mockFetch.mock.calls[0]![0] as Request;
-    const body = JSON.parse(await req.text());
-    expect(body.data.attributes.transform).toEqual(structured);
+    await expect(forwarder.save()).rejects.toThrow(/JSONATA/);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   test("save() throws when transform is set without transformType", async () => {
     const { forwarder } = _newForwarder();
     forwarder.transform = "$";
     // transformType is null — save must reject before fetch.
-    await expect(forwarder.save()).rejects.toThrow(/transformType/);
+    await expect(forwarder.save()).rejects.toThrow(/together|both/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("save() throws when transformType is set without transform", async () => {
+    const { forwarder } = _newForwarder();
+    forwarder.transformType = TransformType.JSONATA;
+    // transform is null — save must reject before fetch.
+    await expect(forwarder.save()).rejects.toThrow(/together|both/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

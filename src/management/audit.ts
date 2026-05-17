@@ -99,15 +99,26 @@ function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
   if (forwarder.filter !== null) {
     attrs.filter = forwarder.filter as { [key: string]: unknown };
   }
-  // The server requires `transform_type` whenever `transform` is set.
-  // The SDK enforces the same constraint at save time rather than
-  // auto-filling, so customers stay in control as more transform
-  // engines come online.
+  // transform and transformType travel as a pair: either both are set or
+  // neither is. The SDK enforces the constraint at save time so the
+  // mistake surfaces in the SDK call site, not as a server-side 400.
   const hasTransform = forwarder.transform !== null && forwarder.transform !== undefined;
-  if (hasTransform && forwarder.transformType === null) {
-    throw new Error("Forwarder.transform requires Forwarder.transformType to be set");
+  const hasTransformType =
+    forwarder.transformType !== null && forwarder.transformType !== undefined;
+  if (hasTransform !== hasTransformType) {
+    throw new Error(
+      "Forwarder.transform and Forwarder.transformType must be set together (or both unset)",
+    );
   }
   if (hasTransform) {
+    if (
+      forwarder.transformType === TransformType.JSONATA &&
+      typeof forwarder.transform !== "string"
+    ) {
+      throw new Error(
+        "Forwarder.transform must be a string when Forwarder.transformType is JSONATA",
+      );
+    }
     attrs.transform_type = forwarder.transformType as TransformType;
     attrs.transform = forwarder.transform;
   }
@@ -159,15 +170,15 @@ export class ForwardersClient implements ForwarderModelClient {
    *                               don't match are recorded as
    *                               `filtered_out` deliveries.
    * @param fields.transformType   Engine used to evaluate `transform`.
-   *                               Required whenever `transform` is set;
-   *                               today only {@link TransformType.JSONATA}
-   *                               is supported.
+   *                               Today only {@link TransformType.JSONATA}
+   *                               is supported. Must be supplied together
+   *                               with `transform` (both or neither).
    * @param fields.transform       Optional template applied to each
    *                               event before delivery. The value is
-   *                               arbitrary JSON — for JSONATA, supply
-   *                               an expression string; future engines
-   *                               may accept other shapes. Omit (or pass
-   *                               `null`) to deliver events unchanged.
+   *                               arbitrary JSON — for JSONATA, it
+   *                               must be a string containing a JSONata
+   *                               expression. Must be supplied together
+   *                               with `transformType` (both or neither).
    */
   new(fields: {
     name: string;
