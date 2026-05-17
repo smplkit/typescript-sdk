@@ -151,28 +151,56 @@ export const FORWARDER_TYPES: readonly ForwarderType[] = [
   "ELASTIC",
 ] as const;
 
-export interface ForwarderHttp {
+/**
+ * Transport-specific delivery configuration. Today every destination
+ * type uses HTTP; future transports (FTP, SQS, ...) will join this as
+ * members of a discriminated union under {@link Forwarder.configuration}.
+ */
+export interface HttpConfiguration {
+  /** HTTP method: GET, POST, PUT, PATCH, or DELETE. */
   method: string;
+  /** Destination URL. */
   url: string;
+  /** HTTP headers attached to each delivery request. */
   headers: HttpHeader[];
-  body: string | null;
   /**
-   * 3-character string: an exact HTTP code (e.g. `"200"`, `"204"`) or a
-   * class (`"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`).
+   * Either an exact HTTP code (e.g. `"200"`, `"204"`) or a status class
+   * (`"1xx"`, `"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`).
    */
   successStatus: string;
 }
 
+/**
+ * Engine used to evaluate {@link Forwarder.transform}. Must be set
+ * whenever `transform` is set. Today only `JSONATA` is supported.
+ */
+export type TransformType = "JSONATA";
+
 export interface Forwarder {
+  /** UUID assigned by the server at creation time. */
   id: string;
   name: string;
-  slug: string;
+  /** Free-text description for the forwarder. */
+  description: string | null;
   forwarderType: ForwarderType;
   enabled: boolean;
   filter: Record<string, unknown> | null;
-  transform: string | null;
-  /** Header values are returned redacted on reads. */
-  http: ForwarderHttp;
+  /**
+   * Engine used to evaluate {@link transform}. Paired 1:1 with
+   * `transform` — both set, or both `null`.
+   */
+  transformType: TransformType | null;
+  /**
+   * Template applied to each event before delivery. Shape depends on
+   * {@link transformType}; for `JSONATA`, a string containing a JSONata
+   * expression. `null` when no transform is configured.
+   */
+  transform: unknown | null;
+  /**
+   * Transport-specific delivery configuration. Header values are
+   * returned redacted on reads.
+   */
+  configuration: HttpConfiguration;
   createdAt: string | null;
   updatedAt: string | null;
   deletedAt: string | null;
@@ -182,10 +210,13 @@ export interface Forwarder {
 export interface CreateForwarderInput {
   name: string;
   forwarderType: ForwarderType;
-  http: ForwarderHttp;
+  configuration: HttpConfiguration;
   enabled?: boolean;
+  description?: string;
   filter?: Record<string, unknown>;
-  transform?: string;
+  /** Required when {@link transform} is set; today must be `"JSONATA"`. */
+  transformType?: TransformType;
+  transform?: unknown;
 }
 
 export interface UpdateForwarderInput extends CreateForwarderInput {
