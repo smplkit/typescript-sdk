@@ -1068,8 +1068,8 @@ export interface components {
             "filter[search]"?: string | null;
             /**
              * Page[Size]
-             * @description Maximum events to return. Range 1..1000, default 10. The default is intentionally smaller than the list endpoint's default of 1000 because the search UI typically renders results one card at a time.
-             * @default 10
+             * @description Maximum events to return. Range 1..1000, default 1000 — matches every other list / search endpoint on the platform. Set explicitly to a smaller value when the consumer is rendering results card-by-card.
+             * @default 1000
              */
             "page[size]": number;
             /**
