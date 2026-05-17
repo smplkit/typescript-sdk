@@ -339,14 +339,19 @@ export class Forwarder {
   filter: Record<string, unknown> | null;
   /**
    * Optional template applied to each event before delivery. Shape
-   * depends on {@link transformType}; for `"JSONATA"`, a JSONata
-   * expression string. `null` delivers the event JSON as-is.
+   * depends on {@link transformType}; for {@link TransformType.JSONATA}
+   * the value is a JSONata expression string, but the wire schema
+   * widens to arbitrary JSON to leave room for future transform engines
+   * carrying structured templates. `null` delivers the event JSON as-is.
+   *
+   * Whenever {@link transform} is set, {@link transformType} must also
+   * be set; the SDK enforces this at save time.
    */
-  transform: string | null;
+  transform: unknown;
   /**
-   * Engine used to evaluate {@link transform}. Currently only
-   * `"JSONATA"` is supported. Auto-filled by the SDK whenever
-   * {@link transform} is set on save.
+   * Engine used to evaluate {@link transform}. Required whenever
+   * {@link transform} is set. Today only {@link TransformType.JSONATA}
+   * is supported.
    */
   transformType: TransformType | null;
   /**
@@ -374,7 +379,7 @@ export class Forwarder {
       enabled?: boolean;
       description?: string | null;
       filter?: Record<string, unknown> | null;
-      transform?: string | null;
+      transform?: unknown;
       transformType?: TransformType | null;
       createdAt?: string | null;
       updatedAt?: string | null;

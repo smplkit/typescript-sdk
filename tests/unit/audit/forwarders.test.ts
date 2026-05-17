@@ -76,7 +76,11 @@ function _forwarderResource(
 }
 
 function _newForwarder(
-  overrides: Partial<{ filter: Record<string, unknown>; transform: string }> = {},
+  overrides: Partial<{
+    filter: Record<string, unknown>;
+    transform: unknown;
+    transformType: TransformType;
+  }> = {},
 ) {
   const mgmt = makeClient();
   return {
@@ -176,6 +180,7 @@ describe("Forwarder.save() — create", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
     const { forwarder } = _newForwarder({
       filter: { "==": [{ var: "action" }, "user.created"] },
+      transformType: TransformType.JSONATA,
       transform: "$",
     });
     await forwarder.save();
@@ -188,14 +193,48 @@ describe("Forwarder.save() — create", () => {
     expect(method).toBe("POST");
   });
 
-  test("auto-fills transform_type=JSONATA whenever transform is set", async () => {
+  test("forwards transform_type and transform exactly as supplied", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
-    const { forwarder } = _newForwarder({ transform: "{ event: action }" });
+    const { forwarder } = _newForwarder({
+      transformType: TransformType.JSONATA,
+      transform: "{ event: action }",
+    });
     await forwarder.save();
     const req = mockFetch.mock.calls[0]![0] as Request;
     const body = JSON.parse(await req.text());
     expect(body.data.attributes.transform_type).toBe("JSONATA");
     expect(body.data.attributes.transform).toBe("{ event: action }");
+  });
+
+  test("transform: unknown — non-string values round-trip on the wire", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const structured = { kind: "future-engine", body: { nested: true } };
+    const { forwarder } = _newForwarder({
+      transformType: TransformType.JSONATA,
+      transform: structured,
+    });
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.transform).toEqual(structured);
+  });
+
+  test("save() throws when transform is set without transformType", async () => {
+    const { forwarder } = _newForwarder();
+    forwarder.transform = "$";
+    // transformType is null — save must reject before fetch.
+    await expect(forwarder.save()).rejects.toThrow(/transformType/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("save() omits transform_type and transform when neither is set", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes).not.toHaveProperty("transform_type");
+    expect(body.data.attributes).not.toHaveProperty("transform");
   });
 
   test("sends description when set", async () => {

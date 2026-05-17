@@ -16,7 +16,12 @@ import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 
 import { SmplManagementClient } from "../src/index.js";
-import { ForwarderType, HttpConfiguration, HttpMethod } from "../src/audit/index.js";
+import {
+  ForwarderType,
+  HttpConfiguration,
+  HttpMethod,
+  TransformType,
+} from "../src/audit/index.js";
 
 // JSON Logic filter — only forward `invoice.*` actions.
 // Events that don't match are recorded as `filtered_out` deliveries.
@@ -51,6 +56,7 @@ async function main(): Promise<void> {
         headers: [{ name: "X-Showcase", value: "ok" }],
       }),
       filter: INVOICE_FILTER,
+      transformType: TransformType.JSONATA,
       transform: SIEM_TRANSFORM,
     });
     await forwarder.save();

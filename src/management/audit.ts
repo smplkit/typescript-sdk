@@ -99,10 +99,16 @@ function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
   if (forwarder.filter !== null) {
     attrs.filter = forwarder.filter as { [key: string]: unknown };
   }
-  if (forwarder.transform !== null) {
-    // Server requires `transform_type` whenever `transform` is set; only
-    // JSONATA is supported today, so the SDK auto-fills it.
-    attrs.transform_type = TransformType.JSONATA;
+  // The server requires `transform_type` whenever `transform` is set.
+  // The SDK enforces the same constraint at save time rather than
+  // auto-filling, so customers stay in control as more transform
+  // engines come online.
+  const hasTransform = forwarder.transform !== null && forwarder.transform !== undefined;
+  if (hasTransform && forwarder.transformType === null) {
+    throw new Error("Forwarder.transform requires Forwarder.transformType to be set");
+  }
+  if (hasTransform) {
+    attrs.transform_type = forwarder.transformType as TransformType;
     attrs.transform = forwarder.transform;
   }
   return attrs;
@@ -141,20 +147,27 @@ export class ForwardersClient implements ForwarderModelClient {
    * Construct an unsaved {@link Forwarder}. Call {@link Forwarder.save}
    * to persist.
    *
-   * @param fields.name           Display name. Free-form.
-   * @param fields.forwarderType  Destination type — see {@link ForwarderType}.
-   * @param fields.configuration  Destination HTTP request configuration.
-   *                              Headers carry credentials and are
-   *                              encrypted at rest server-side; reads
-   *                              return them redacted.
-   * @param fields.enabled        Whether the forwarder is active. Defaults true.
-   * @param fields.description    Optional free-text description.
-   * @param fields.filter         Optional JSON Logic filter; events that
-   *                              don't match are recorded as
-   *                              `filtered_out` deliveries.
-   * @param fields.transform      Optional JSONata template applied to
-   *                              the event payload before POST. `null`
-   *                              delivers the event as-is.
+   * @param fields.name            Display name. Free-form.
+   * @param fields.forwarderType   Destination type — see {@link ForwarderType}.
+   * @param fields.configuration   Destination HTTP request configuration.
+   *                               Headers carry credentials and are
+   *                               encrypted at rest server-side; reads
+   *                               return them redacted.
+   * @param fields.enabled         Whether the forwarder is active. Defaults true.
+   * @param fields.description     Optional free-text description.
+   * @param fields.filter          Optional JSON Logic filter; events that
+   *                               don't match are recorded as
+   *                               `filtered_out` deliveries.
+   * @param fields.transformType   Engine used to evaluate `transform`.
+   *                               Required whenever `transform` is set;
+   *                               today only {@link TransformType.JSONATA}
+   *                               is supported.
+   * @param fields.transform       Optional template applied to each
+   *                               event before delivery. The value is
+   *                               arbitrary JSON — for JSONATA, supply
+   *                               an expression string; future engines
+   *                               may accept other shapes. Omit (or pass
+   *                               `null`) to deliver events unchanged.
    */
   new(fields: {
     name: string;
@@ -163,7 +176,8 @@ export class ForwardersClient implements ForwarderModelClient {
     enabled?: boolean;
     description?: string | null;
     filter?: Record<string, unknown> | null;
-    transform?: string | null;
+    transformType?: TransformType | null;
+    transform?: unknown;
   }): Forwarder {
     return new Forwarder(this, {
       name: fields.name,
@@ -172,6 +186,7 @@ export class ForwardersClient implements ForwarderModelClient {
       enabled: fields.enabled,
       description: fields.description,
       filter: fields.filter,
+      transformType: fields.transformType,
       transform: fields.transform,
     });
   }
