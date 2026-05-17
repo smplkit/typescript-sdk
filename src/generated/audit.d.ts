@@ -24,13 +24,19 @@ export interface paths {
          *     which is a case-insensitive substring match against `resource_id` or
          *     `description`.
          *
-         *     To bound the rows scanned per request, the endpoint requires either:
+         *     Two filter-combination rules:
          *
-         *     - `filter[resource_id]` (which must be accompanied by
-         *       `filter[resource_type]`), or
-         *     - `filter[occurred_at]` with a span no greater than 30 days.
+         *     - `filter[resource_id]` must be accompanied by `filter[resource_type]`
+         *       (the index is keyed on the pair).
+         *     - `filter[search]` must be accompanied by either `filter[occurred_at]`
+         *       or `filter[resource_type]` + `filter[resource_id]` (substring
+         *       matching has no index, so an unbounded substring scan is rejected).
          *
-         *     `page[size]` defaults to 50 and must not exceed 1000.
+         *     No other filter combinations are required — calling the endpoint with
+         *     no query parameters returns the latest events for the account,
+         *     paginated.
+         *
+         *     `page[size]` defaults to 1000 and must not exceed 1000.
          */
         get: operations["list_events"];
         put?: never;
