@@ -356,12 +356,12 @@ export interface components {
         Event: {
             /**
              * Action
-             * @description Slug for what happened, e.g. `user.created`. Lowercase, dot-separated.
+             * @description What happened, e.g. `user.created`. Any non-empty string.
              */
             action: string;
             /**
              * Resource Type
-             * @description Slug for the kind of resource the event is about, e.g. `user`. Lowercase, dot-separated.
+             * @description Kind of resource the event is about, e.g. `user`. Any non-empty string.
              */
             resource_type: string;
             /**
@@ -380,6 +380,21 @@ export interface components {
              */
             occurred_at?: string | null;
             /**
+             * Actor Type
+             * @description Kind of actor that caused the event, e.g. `USER`, `API_KEY`, `SYSTEM`, or any other label you choose. Free-form string; the API does not constrain or interpret it.
+             */
+            actor_type?: string | null;
+            /**
+             * Actor Id
+             * @description Identifier of the actor that caused the event. Free-form string — any identifier scheme is accepted.
+             */
+            actor_id?: string | null;
+            /**
+             * Actor Label
+             * @description Human-readable label for the actor (e.g. an email address or API key name) at the time the event was recorded.
+             */
+            actor_label?: string | null;
+            /**
              * Data
              * @description Free-form payload attached to the event. Use it for resource snapshots (by convention under `data.snapshot`), request identifiers, or any other context the event needs to carry.
              */
@@ -397,21 +412,6 @@ export interface components {
              * @description When the event was received and recorded.
              */
             readonly created_at?: string | null;
-            /**
-             * Actor Type
-             * @description Kind of credential that emitted the event, e.g. `USER` or `API_KEY`. Resolved server-side from the request credential.
-             */
-            readonly actor_type?: string | null;
-            /**
-             * Actor Id
-             * @description Identifier of the actor that emitted the event.
-             */
-            readonly actor_id?: string | null;
-            /**
-             * Actor Label
-             * @description Human-readable label for the actor (e.g. the user's email address or the API key name) at the time the event was recorded.
-             */
-            readonly actor_label?: string | null;
             /**
              * Idempotency Key
              * @description The idempotency key used to deduplicate the record. Echoes the `Idempotency-Key` header if one was supplied, otherwise a key derived from the event's content.
