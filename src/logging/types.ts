@@ -2,15 +2,21 @@
  * Public types for the Logging SDK.
  */
 
-/** Log level values matching the smplkit platform. */
+/**
+ * Log severity levels used by the Smpl Logging service.
+ *
+ * Members are declared in alphabetical order. Severity ordering is not
+ * derived from declaration order — it lives in the framework adapter
+ * code that maps these to each framework's native numeric level.
+ */
 export enum LogLevel {
-  TRACE = "TRACE",
   DEBUG = "DEBUG",
-  INFO = "INFO",
-  WARN = "WARN",
   ERROR = "ERROR",
   FATAL = "FATAL",
+  INFO = "INFO",
   SILENT = "SILENT",
+  TRACE = "TRACE",
+  WARN = "WARN",
 }
 
 /**

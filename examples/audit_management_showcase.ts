@@ -16,6 +16,7 @@ import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 
 import { SmplManagementClient } from "../src/index.js";
+import { ForwarderType, HttpConfiguration, HttpMethod } from "../src/audit/index.js";
 
 // JSON Logic filter — only forward `invoice.*` actions.
 // Events that don't match are recorded as `filtered_out` deliveries.
@@ -40,73 +41,43 @@ async function main(): Promise<void> {
   try {
     const forwarderName = `showcase-${randomUUID().slice(0, 6)}`;
 
-    // create a forwarder
-    const forwarder = await manage.audit.forwarders.create({
+    // create a new forwarder
+    const forwarder = manage.audit.forwarders.new({
       name: forwarderName,
-      description: "Showcase forwarder for the management SDK example.",
-      forwarderType: "HTTP",
-      configuration: {
-        method: "POST",
+      forwarderType: ForwarderType.HTTP,
+      configuration: new HttpConfiguration({
+        method: HttpMethod.POST,
         url: "https://httpbin.org/post",
         headers: [{ name: "X-Showcase", value: "ok" }],
-        successStatus: "2xx",
-      },
+      }),
       filter: INVOICE_FILTER,
-      transformType: "JSONATA",
       transform: SIEM_TRANSFORM,
     });
-    assert.equal(forwarder.name, forwarderName);
-    assert.equal(forwarder.enabled, true);
-    assert.deepEqual(forwarder.filter, INVOICE_FILTER);
-    assert.equal(forwarder.transformType, "JSONATA");
-    assert.equal(forwarder.transform, SIEM_TRANSFORM);
-    console.log(`Created forwarder: ${forwarder.id}`);
-
-    // fetch a forwarder
-    const fetched = await manage.audit.forwarders.get(forwarder.id);
-    assert.equal(fetched.id, forwarder.id);
-    assert.equal(fetched.name, forwarderName);
-    assert.deepEqual(fetched.filter, INVOICE_FILTER);
-    assert.equal(fetched.transform, SIEM_TRANSFORM);
-    console.log(`Fetched forwarder: ${fetched.name}`);
+    await forwarder.save();
+    console.log(`Created forwarder: ${forwarder.name} (id=${forwarder.id})`);
 
     // list forwarders
     const listed = await manage.audit.forwarders.list();
-    assert(
-      listed.forwarders.some((f) => f.id === forwarder.id),
-      `Expected forwarder ${forwarder.id} in list`,
-    );
+    assert(listed.forwarders.some((f) => f.id === forwarder.id));
     console.log(`Account has ${listed.forwarders.length} forwarder(s)`);
 
-    // update a forwarder (PUT — full replace, so every field is re-supplied)
-    const renamed = `${forwarder.name}-renamed`;
-    const updated = await manage.audit.forwarders.update(forwarder.id, {
-      name: renamed,
-      description: forwarder.description ?? undefined,
-      forwarderType: forwarder.forwarderType,
-      configuration: {
-        method: "POST",
-        url: "https://httpbin.org/post",
-        headers: [{ name: "X-Showcase", value: "ok" }],
-        successStatus: "2xx",
-      },
-      enabled: false,
-      filter: INVOICE_FILTER,
-      transformType: "JSONATA",
-      transform: SIEM_TRANSFORM,
-    });
-    assert.equal(updated.name, renamed);
-    assert.equal(updated.enabled, false);
-    console.log(`Updated forwarder: ${updated.name} (enabled=${updated.enabled})`);
+    // get a forwarder
+    const fetched = await manage.audit.forwarders.get(forwarder.id!);
+    assert.equal(fetched.id, forwarder.id);
+    assert.equal(fetched.enabled, true);
+    console.log(`Fetched forwarder: ${fetched.name}`);
+
+    // update a forwarder
+    fetched.enabled = false;
+    await fetched.save();
+    assert.equal(fetched.enabled, false);
+    console.log(`Disabled forwarder: ${fetched.name} (enabled=${fetched.enabled})`);
 
     // delete a forwarder
-    await manage.audit.forwarders.delete(forwarder.id);
+    await fetched.delete();
     const remaining = await manage.audit.forwarders.list();
-    assert(
-      !remaining.forwarders.some((f) => f.id === forwarder.id),
-      `Expected forwarder ${forwarder.id} to be gone after delete`,
-    );
-    console.log(`Deleted forwarder: ${forwarder.id}`);
+    assert(!remaining.forwarders.some((f) => f.id === forwarder.id));
+    console.log(`Deleted forwarder: ${fetched.name}`);
 
     console.log("Done!");
   } finally {

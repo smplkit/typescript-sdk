@@ -1,10 +1,12 @@
 /**
  * Smpl Audit management surface — `mgmt.audit.*`.
  *
- * Counterpart to the runtime `AuditClient`. The runtime client owns event
- * recording and read-side queries; this client owns SIEM forwarder CRUD:
+ * Counterpart to the runtime `AuditClient`. The runtime client owns
+ * event recording and read-side queries; this client owns SIEM
+ * forwarder CRUD via the active-record {@link Forwarder} model:
  *
- *   mgmt.audit.forwarders.{create,get,list,update,delete}
+ *   mgmt.audit.forwarders.{new,get,list,delete}
+ *   Forwarder.{save,delete}
  *
  * New audit-management capabilities should be added here, not in
  * `src/audit/client.ts`.
@@ -13,16 +15,17 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "../generated/audit.d.ts";
 import { SmplError, SmplkitConnectionError, throwForStatus } from "../errors.js";
-import type {
-  CreateForwarderInput,
+import {
   Forwarder,
+  ForwarderType,
   HttpConfiguration,
-  HttpHeader,
-  ListForwardersPage,
-  ListForwardersParams,
-  Pagination,
+  HttpMethod,
   TransformType,
-  UpdateForwarderInput,
+  type ForwarderModelClient,
+  type HttpHeader,
+  type ListForwardersPage,
+  type ListForwardersParams,
+  type Pagination,
 } from "../audit/types.js";
 
 type AuditHttp = ReturnType<typeof createClient<paths>>;
@@ -77,73 +80,111 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
     name: String(h.name ?? ""),
     value: String(h.value ?? ""),
   }));
-  return {
-    method: String(r.method ?? "POST"),
+  return new HttpConfiguration({
+    method: (r.method as HttpMethod | undefined) ?? HttpMethod.POST,
     url: String(r.url ?? ""),
     headers,
     successStatus: String(r.success_status ?? "2xx"),
-  };
+  });
 }
 
-function _forwarderAttributes(input: CreateForwarderInput | UpdateForwarderInput): GenForwarder {
+function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
   const attrs: GenForwarder = {
-    name: input.name,
-    forwarder_type: input.forwarderType,
-    enabled: input.enabled ?? true,
-    configuration: _configurationToWire(input.configuration),
+    name: forwarder.name,
+    forwarder_type: forwarder.forwarderType,
+    enabled: forwarder.enabled,
+    configuration: _configurationToWire(forwarder.configuration),
   };
-  if (input.description !== undefined) attrs.description = input.description;
-  if (input.filter !== undefined) {
-    attrs.filter = input.filter as { [key: string]: unknown };
+  if (forwarder.description !== null) attrs.description = forwarder.description;
+  if (forwarder.filter !== null) {
+    attrs.filter = forwarder.filter as { [key: string]: unknown };
   }
-  if (input.transformType !== undefined) attrs.transform_type = input.transformType;
-  if (input.transform !== undefined) attrs.transform = input.transform;
+  if (forwarder.transform !== null) {
+    // Server requires `transform_type` whenever `transform` is set; only
+    // JSONATA is supported today, so the SDK auto-fills it.
+    attrs.transform_type = TransformType.JSONATA;
+    attrs.transform = forwarder.transform;
+  }
   return attrs;
 }
 
-function _forwarderFromResource(resource: {
-  id: string;
-  attributes: Record<string, unknown>;
-}): Forwarder {
+function _forwarderFromResource(
+  resource: { id: string; attributes: Record<string, unknown> },
+  client: ForwarderModelClient,
+): Forwarder {
   const a = resource.attributes;
-  return {
+  return new Forwarder(client, {
     id: resource.id,
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
-    forwarderType: a.forwarder_type as Forwarder["forwarderType"],
+    forwarderType: a.forwarder_type as ForwarderType,
     enabled: Boolean(a.enabled ?? true),
     filter: (a.filter as Record<string, unknown> | null) ?? null,
     transformType: (a.transform_type as TransformType | null) ?? null,
-    transform: a.transform ?? null,
+    transform: (a.transform as string | null) ?? null,
     configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
     createdAt: (a.created_at as string | null) ?? null,
     updatedAt: (a.updated_at as string | null) ?? null,
     deletedAt: (a.deleted_at as string | null) ?? null,
     version: (a.version as number | null) ?? null,
-  };
+  });
 }
 
-/** `mgmt.audit.forwarders.*` — CRUD for SIEM forwarders. */
-export class ForwardersClient {
+/**
+ * `mgmt.audit.forwarders.*` — active-record CRUD for SIEM forwarders.
+ */
+export class ForwardersClient implements ForwarderModelClient {
   /** @internal */
   constructor(private readonly _http: AuditHttp) {}
 
-  async create(input: CreateForwarderInput): Promise<Forwarder> {
-    const body: GenForwarderResponse = {
-      data: { id: "", type: "forwarder", attributes: _forwarderAttributes(input) },
-    };
-    let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
-    try {
-      const result = await this._http.POST("/api/v1/forwarders", { body });
-      if (!result.response.ok) await checkError(result.response);
-      data = result.data as typeof data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data?.data) throw new SmplError("Unexpected empty response from audit");
-    return _forwarderFromResource(data.data);
+  /**
+   * Construct an unsaved {@link Forwarder}. Call {@link Forwarder.save}
+   * to persist.
+   *
+   * @param fields.name           Display name. Free-form.
+   * @param fields.forwarderType  Destination type — see {@link ForwarderType}.
+   * @param fields.configuration  Destination HTTP request configuration.
+   *                              Headers carry credentials and are
+   *                              encrypted at rest server-side; reads
+   *                              return them redacted.
+   * @param fields.enabled        Whether the forwarder is active. Defaults true.
+   * @param fields.description    Optional free-text description.
+   * @param fields.filter         Optional JSON Logic filter; events that
+   *                              don't match are recorded as
+   *                              `filtered_out` deliveries.
+   * @param fields.transform      Optional JSONata template applied to
+   *                              the event payload before POST. `null`
+   *                              delivers the event as-is.
+   */
+  new(fields: {
+    name: string;
+    forwarderType: ForwarderType;
+    configuration: HttpConfiguration;
+    enabled?: boolean;
+    description?: string | null;
+    filter?: Record<string, unknown> | null;
+    transform?: string | null;
+  }): Forwarder {
+    return new Forwarder(this, {
+      name: fields.name,
+      forwarderType: fields.forwarderType,
+      configuration: fields.configuration,
+      enabled: fields.enabled,
+      description: fields.description,
+      filter: fields.filter,
+      transform: fields.transform,
+    });
   }
 
+  /**
+   * List forwarders for the authenticated account.
+   *
+   * Offset paginated per ADR-014: pass {@link ListForwardersParams.pageNumber}
+   * (1-based) and {@link ListForwardersParams.pageSize} (default 1000,
+   * max 1000). Pass `metaTotal=true` to populate `total` and `totalPages`
+   * in the returned `pagination` (costs an extra `COUNT` query
+   * server-side).
+   */
   async list(params: ListForwardersParams = {}): Promise<ListForwardersPage> {
     const query: Record<string, string | number | boolean> = {};
     if (params.forwarderType !== undefined) query["filter[forwarder_type]"] = params.forwarderType;
@@ -167,11 +208,16 @@ export class ForwardersClient {
     return {
       forwarders: (
         (data?.data ?? []) as Array<{ id: string; attributes: Record<string, unknown> }>
-      ).map(_forwarderFromResource),
+      ).map((r) => _forwarderFromResource(r, this)),
       pagination: _paginationFromBody(data ?? {}),
     };
   }
 
+  /**
+   * Fetch a single forwarder by id. The returned instance is bound to
+   * this client so {@link Forwarder.save} and {@link Forwarder.delete}
+   * round-trip back here.
+   */
   async get(forwarderId: string): Promise<Forwarder> {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
@@ -184,34 +230,10 @@ export class ForwardersClient {
       wrapFetchError(err);
     }
     if (!data?.data) throw new SmplError("Unexpected empty response from audit");
-    return _forwarderFromResource(data.data);
+    return _forwarderFromResource(data.data, this);
   }
 
-  /**
-   * Full-replace update. PUT semantics — every field is overwritten.
-   *
-   * Header values must be re-supplied as plaintext; the GET path
-   * returns them in plaintext for exactly this round-trip.
-   */
-  async update(forwarderId: string, input: UpdateForwarderInput): Promise<Forwarder> {
-    const body: GenForwarderResponse = {
-      data: { id: forwarderId, type: "forwarder", attributes: _forwarderAttributes(input) },
-    };
-    let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
-    try {
-      const result = await this._http.PUT("/api/v1/forwarders/{forwarder_id}", {
-        params: { path: { forwarder_id: forwarderId } },
-        body,
-      });
-      if (!result.response.ok) await checkError(result.response);
-      data = result.data as typeof data;
-    } catch (err) {
-      wrapFetchError(err);
-    }
-    if (!data?.data) throw new SmplError("Unexpected empty response from audit");
-    return _forwarderFromResource(data.data);
-  }
-
+  /** Soft-delete a forwarder by id. */
   async delete(forwarderId: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/forwarders/{forwarder_id}", {
@@ -221,6 +243,58 @@ export class ForwardersClient {
     } catch (err) {
       wrapFetchError(err);
     }
+  }
+
+  /**
+   * @internal Called by `Forwarder.save()` on unsaved instances.
+   */
+  async _createForwarder(forwarder: Forwarder): Promise<Forwarder> {
+    const body: GenForwarderResponse = {
+      data: { id: "", type: "forwarder", attributes: _forwarderAttrs(forwarder) },
+    };
+    let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
+    try {
+      const result = await this._http.POST("/api/v1/forwarders", { body });
+      if (!result.response.ok) await checkError(result.response);
+      data = result.data as typeof data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data?.data) throw new SmplError("Unexpected empty response from audit");
+    return _forwarderFromResource(data.data, this);
+  }
+
+  /**
+   * @internal Full-replace PUT. Called by `Forwarder.save()` on
+   * instances that already have a `createdAt`. Header values must be
+   * re-supplied as plaintext; the GET path redacts them, so a PUT body
+   * containing `"<redacted>"` would persist that literal.
+   */
+  async _updateForwarder(forwarder: Forwarder): Promise<Forwarder> {
+    if (forwarder.id === null) {
+      throw new Error("cannot update a Forwarder with no id");
+    }
+    const body: GenForwarderResponse = {
+      data: { id: forwarder.id, type: "forwarder", attributes: _forwarderAttrs(forwarder) },
+    };
+    let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
+    try {
+      const result = await this._http.PUT("/api/v1/forwarders/{forwarder_id}", {
+        params: { path: { forwarder_id: forwarder.id } },
+        body,
+      });
+      if (!result.response.ok) await checkError(result.response);
+      data = result.data as typeof data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data?.data) throw new SmplError("Unexpected empty response from audit");
+    return _forwarderFromResource(data.data, this);
+  }
+
+  /** @internal Called by `Forwarder.delete()`. */
+  async _deleteForwarder(id: string): Promise<void> {
+    return this.delete(id);
   }
 }
 

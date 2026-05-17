@@ -3,16 +3,12 @@
  */
 
 export { AuditClient } from "./client.js";
-export { FORWARDER_TYPES } from "./types.js";
+export { Forwarder, ForwarderType, HttpConfiguration, HttpMethod, TransformType } from "./types.js";
 export type {
   Action,
   ActionListPage,
   AuditEvent,
   CreateEventInput,
-  CreateForwarderInput,
-  Forwarder,
-  ForwarderType,
-  HttpConfiguration,
   HttpHeader,
   ListActionsParams,
   ListEventsPage,
@@ -23,6 +19,4 @@ export type {
   ListResourceTypesParams,
   Pagination,
   ResourceType,
-  TransformType,
-  UpdateForwarderInput,
 } from "./types.js";

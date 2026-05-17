@@ -1,5 +1,6 @@
 /**
- * Tests for the management audit forwarder surface — `mgmt.audit.forwarders.*`.
+ * Tests for the management audit forwarder surface — `mgmt.audit.forwarders.*`
+ * and the active-record {@link Forwarder} model.
  *
  * Uses SmplManagementClient with a stubbed global fetch. Coverage target
  * is 100% on the management/audit.ts wrapper layer.
@@ -8,7 +9,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SmplManagementClient } from "../../../src/management/client.js";
 import { ManagementAuditClient, ForwardersClient } from "../../../src/management/audit.js";
-import type { Forwarder } from "../../../src/audit/types.js";
+import {
+  Forwarder,
+  ForwarderType,
+  HttpConfiguration,
+  HttpMethod,
+  TransformType,
+} from "../../../src/audit/types.js";
 import { SmplNotFoundError, SmplError, SmplConnectionError } from "../../../src/errors.js";
 
 const FWD_ID = "11111111-2222-3333-4444-555555555555";
@@ -38,20 +45,23 @@ function jsonResponse(body: object, status = 200): Response {
   });
 }
 
-function _forwarderResource(name = "Datadog production") {
+function _forwarderResource(
+  attrs: Partial<Record<string, unknown>> = {},
+  id: string = FWD_ID,
+): { id: string; type: string; attributes: Record<string, unknown> } {
   return {
-    id: FWD_ID,
+    id,
     type: "forwarder",
     attributes: {
-      name,
+      name: "Datadog production",
       description: null,
-      forwarder_type: "DATADOG",
+      forwarder_type: ForwarderType.DATADOG,
       enabled: true,
       filter: null,
       transform_type: null,
       transform: null,
       configuration: {
-        method: "POST",
+        method: HttpMethod.POST,
         url: "https://siem.example.com/in",
         headers: [{ name: "DD-API-KEY", value: "<redacted>" }],
         success_status: "2xx",
@@ -60,16 +70,61 @@ function _forwarderResource(name = "Datadog production") {
       updated_at: "2026-05-07T12:00:00+00:00",
       deleted_at: null,
       version: 1,
+      ...attrs,
     },
   };
 }
 
-const _configInput = {
-  method: "POST",
-  url: "https://siem.example.com/in",
-  headers: [{ name: "DD-API-KEY", value: "real-secret" }],
-  successStatus: "2xx",
-};
+function _newForwarder(
+  overrides: Partial<{ filter: Record<string, unknown>; transform: string }> = {},
+) {
+  const mgmt = makeClient();
+  return {
+    mgmt,
+    forwarder: mgmt.audit.forwarders.new({
+      name: "Datadog production",
+      forwarderType: ForwarderType.DATADOG,
+      configuration: new HttpConfiguration({
+        method: HttpMethod.POST,
+        url: "https://siem.example.com/in",
+        headers: [{ name: "DD-API-KEY", value: "real-secret" }],
+      }),
+      ...overrides,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+describe("audit enums", () => {
+  test("ForwarderType is declared in alphabetical order", () => {
+    // Each entry's source position lines up with iteration order on the
+    // enum object — verify the literal source order matches sorted order.
+    const keys = Object.keys(ForwarderType).filter((k) => isNaN(Number(k)));
+    expect(keys).toEqual([...keys].sort());
+    expect(keys).toEqual([
+      "DATADOG",
+      "ELASTIC",
+      "HONEYCOMB",
+      "HTTP",
+      "NEW_RELIC",
+      "SPLUNK_HEC",
+      "SUMO_LOGIC",
+    ]);
+  });
+
+  test("HttpMethod is declared in alphabetical order", () => {
+    const keys = Object.keys(HttpMethod).filter((k) => isNaN(Number(k)));
+    expect(keys).toEqual([...keys].sort());
+    expect(keys).toEqual(["DELETE", "GET", "PATCH", "POST", "PUT"]);
+  });
+
+  test("TransformType exposes JSONATA only", () => {
+    expect(Object.values(TransformType)).toEqual(["JSONATA"]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Class shape
@@ -82,61 +137,85 @@ test("ManagementAuditClient exposes forwarders namespace", () => {
 });
 
 // ---------------------------------------------------------------------------
-// create
+// new()
 // ---------------------------------------------------------------------------
 
-describe("mgmt.audit.forwarders.create", () => {
-  test("posts JSON:API and returns a Forwarder", async () => {
+describe("mgmt.audit.forwarders.new", () => {
+  test("returns an unsaved Forwarder bound to the client", () => {
+    const { forwarder } = _newForwarder();
+    expect(forwarder).toBeInstanceOf(Forwarder);
+    expect(forwarder.id).toBeNull();
+    expect(forwarder.createdAt).toBeNull();
+    // active-record link is set so .save() / .delete() round-trip back.
+    expect(forwarder._client).not.toBeNull();
+  });
+
+  test("defaults enabled to true and description/filter/transform to null", () => {
+    const { forwarder } = _newForwarder();
+    expect(forwarder.enabled).toBe(true);
+    expect(forwarder.description).toBeNull();
+    expect(forwarder.filter).toBeNull();
+    expect(forwarder.transform).toBeNull();
+    expect(forwarder.transformType).toBeNull();
+  });
+
+  test("HttpConfiguration defaults method=POST and success_status=2xx", () => {
+    const c = new HttpConfiguration({ url: "https://x.example/in" });
+    expect(c.method).toBe(HttpMethod.POST);
+    expect(c.successStatus).toBe("2xx");
+    expect(c.headers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forwarder.save() — create
+// ---------------------------------------------------------------------------
+
+describe("Forwarder.save() — create", () => {
+  test("POSTs JSON:API and refreshes fields from the response", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
-    const mgmt = makeClient();
-    const fwd = await mgmt.audit.forwarders.create({
-      name: "Datadog production",
-      forwarderType: "DATADOG",
-      configuration: _configInput,
+    const { forwarder } = _newForwarder({
       filter: { "==": [{ var: "action" }, "user.created"] },
-      transformType: "JSONATA",
       transform: "$",
     });
-    expect(fwd.id).toBe(FWD_ID);
+    await forwarder.save();
+    expect(forwarder.id).toBe(FWD_ID);
+    expect(forwarder.createdAt).toBe("2026-05-07T12:00:00+00:00");
+
     // openapi-fetch may pass a Request object or (url, init)
     const firstArg = mockFetch.mock.calls[0]![0] as Request | string;
     const method = firstArg instanceof Request ? firstArg.method : "POST";
     expect(method).toBe("POST");
   });
 
-  test("passes enabled=false and description in the request body", async () => {
+  test("auto-fills transform_type=JSONATA whenever transform is set", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
-    const mgmt = makeClient();
-    await mgmt.audit.forwarders.create({
-      name: "x",
-      forwarderType: "HTTP",
-      configuration: _configInput,
-      enabled: false,
-      description: "internal notes",
-    });
-    const req = mockFetch.mock.calls[0]![0] as Request;
-    const body = JSON.parse(await req.text());
-    expect(body.data.attributes.enabled).toBe(false);
-    expect(body.data.attributes.description).toBe("internal notes");
-    // Wire shape: `configuration`, not `http`.
-    expect(body.data.attributes.configuration.url).toBe(_configInput.url);
-    expect(body.data.attributes).not.toHaveProperty("http");
-  });
-
-  test("includes transform_type and transform when supplied", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
-    const mgmt = makeClient();
-    await mgmt.audit.forwarders.create({
-      name: "x",
-      forwarderType: "HTTP",
-      configuration: _configInput,
-      transformType: "JSONATA",
-      transform: "{ event: action }",
-    });
+    const { forwarder } = _newForwarder({ transform: "{ event: action }" });
+    await forwarder.save();
     const req = mockFetch.mock.calls[0]![0] as Request;
     const body = JSON.parse(await req.text());
     expect(body.data.attributes.transform_type).toBe("JSONATA");
     expect(body.data.attributes.transform).toBe("{ event: action }");
+  });
+
+  test("sends description when set", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    forwarder.description = "internal notes";
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.description).toBe("internal notes");
+  });
+
+  test("wire body uses `configuration`, not `http`", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.configuration.url).toBe("https://siem.example.com/in");
+    expect(body.data.attributes).not.toHaveProperty("http");
   });
 
   test("throws SmplError on non-2xx response", async () => {
@@ -146,38 +225,95 @@ describe("mgmt.audit.forwarders.create", () => {
         headers: { "Content-Type": "application/vnd.api+json" },
       }),
     );
-    const mgmt = makeClient();
-    await expect(
-      mgmt.audit.forwarders.create({
-        name: "x",
-        forwarderType: "HTTP",
-        configuration: _configInput,
-      }),
-    ).rejects.toBeInstanceOf(SmplError);
+    const { forwarder } = _newForwarder();
+    await expect(forwarder.save()).rejects.toBeInstanceOf(SmplError);
   });
 
   test("wraps TypeError network errors in SmplConnectionError", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
-    const mgmt = makeClient();
-    await expect(
-      mgmt.audit.forwarders.create({
-        name: "x",
-        forwarderType: "HTTP",
-        configuration: _configInput,
-      }),
-    ).rejects.toBeInstanceOf(SmplConnectionError);
+    const { forwarder } = _newForwarder();
+    await expect(forwarder.save()).rejects.toBeInstanceOf(SmplConnectionError);
   });
 
-  test("wraps non-TypeError errors in SmplConnectionError via fallback path", async () => {
+  test("wraps non-TypeError errors in SmplConnectionError via fallback", async () => {
     mockFetch.mockRejectedValueOnce(new Error("generic error"));
+    const { forwarder } = _newForwarder();
+    await expect(forwarder.save()).rejects.toBeInstanceOf(SmplConnectionError);
+  });
+
+  test("throws when the response body is empty", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 201));
+    const { forwarder } = _newForwarder();
+    await expect(forwarder.save()).rejects.toBeInstanceOf(SmplError);
+  });
+
+  test("throws when constructed without a client", async () => {
+    const detached = new Forwarder(null, {
+      name: "x",
+      forwarderType: ForwarderType.HTTP,
+      configuration: new HttpConfiguration({ url: "https://x.example" }),
+    });
+    await expect(detached.save()).rejects.toThrow(/no client|cannot save/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forwarder.save() — update
+// ---------------------------------------------------------------------------
+
+describe("Forwarder.save() — update", () => {
+  test("PUTs full body when createdAt is set", async () => {
     const mgmt = makeClient();
-    await expect(
-      mgmt.audit.forwarders.create({
-        name: "x",
-        forwarderType: "HTTP",
-        configuration: _configInput,
-      }),
-    ).rejects.toBeInstanceOf(SmplConnectionError);
+    // First call: GET returns the existing forwarder so we have a
+    // populated active-record bound to the client.
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
+    // Second call: PUT returns the renamed forwarder.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _forwarderResource({ name: "Renamed" }) }),
+    );
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    fwd.name = "Renamed";
+    fwd.enabled = false;
+    await fwd.save();
+
+    const reqs = mockFetch.mock.calls.map((c) => c[0]) as Request[];
+    expect(reqs[1]!.method).toBe("PUT");
+    expect(fwd.name).toBe("Renamed");
+  });
+
+  test("propagates SmplError on update failure", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(fwd.save()).rejects.toBeInstanceOf(SmplError);
+  });
+
+  test("throws when response body is empty", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+    await expect(fwd.save()).rejects.toBeInstanceOf(SmplError);
+  });
+
+  test("wraps TypeError network errors in SmplConnectionError", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+
+    mockFetch.mockRejectedValueOnce(new TypeError("network down"));
+    await expect(fwd.save()).rejects.toBeInstanceOf(SmplConnectionError);
+  });
+
+  test("throws when the underlying model has no id", async () => {
+    // _updateForwarder is exposed for the active-record path; it should
+    // refuse without an id even though save() normally guarantees one.
+    const { mgmt, forwarder } = _newForwarder();
+    forwarder.createdAt = "2026-05-07T12:00:00+00:00"; // pretend it was saved
+    await expect(mgmt.audit.forwarders._updateForwarder(forwarder)).rejects.toThrow(/no id/i);
   });
 });
 
@@ -189,17 +325,21 @@ describe("mgmt.audit.forwarders.list", () => {
   test("returns forwarders and pagination", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
-        data: [_forwarderResource("A"), _forwarderResource("B")],
+        data: [
+          _forwarderResource(),
+          _forwarderResource({}, "22222222-2222-2222-2222-222222222222"),
+        ],
         meta: { pagination: { page: 1, size: 2 } },
       }),
     );
     const mgmt = makeClient();
     const page = await mgmt.audit.forwarders.list({
-      forwarderType: "DATADOG",
+      forwarderType: ForwarderType.DATADOG,
       enabled: true,
       pageSize: 2,
     });
     expect(page.forwarders).toHaveLength(2);
+    expect(page.forwarders[0]).toBeInstanceOf(Forwarder);
     expect(page.pagination).toEqual({ page: 1, size: 2 });
   });
 
@@ -242,13 +382,16 @@ describe("mgmt.audit.forwarders.list", () => {
 // ---------------------------------------------------------------------------
 
 describe("mgmt.audit.forwarders.get", () => {
-  test("fetches by id and returns Forwarder", async () => {
+  test("fetches by id and returns a client-bound Forwarder", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
     const mgmt = makeClient();
-    const fwd: Forwarder = await mgmt.audit.forwarders.get(FWD_ID);
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    expect(fwd).toBeInstanceOf(Forwarder);
     expect(fwd.id).toBe(FWD_ID);
-    expect(fwd.configuration.headers[0]!.value).toBe("<redacted>");
     // Header values arrive redacted on reads.
+    expect(fwd.configuration.headers[0]!.value).toBe("<redacted>");
+    // round-trip-bound to this client.
+    expect(fwd._client).not.toBeNull();
   });
 
   test("throws SmplNotFoundError on 404", async () => {
@@ -261,40 +404,17 @@ describe("mgmt.audit.forwarders.get", () => {
     const mgmt = makeClient();
     await expect(mgmt.audit.forwarders.get(FWD_ID)).rejects.toBeInstanceOf(SmplNotFoundError);
   });
-});
 
-// ---------------------------------------------------------------------------
-// update
-// ---------------------------------------------------------------------------
-
-describe("mgmt.audit.forwarders.update", () => {
-  test("sends PUT and returns updated Forwarder", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource("Renamed") }));
+  test("throws when response body is empty", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
     const mgmt = makeClient();
-    const fwd = await mgmt.audit.forwarders.update(FWD_ID, {
-      name: "Renamed",
-      forwarderType: "DATADOG",
-      configuration: _configInput,
-      enabled: false,
-      filter: { "==": [1, 1] },
-      transformType: "JSONATA",
-      transform: "$",
-    });
-    const req = mockFetch.mock.calls[0]![0] as Request;
-    expect(req.method).toBe("PUT");
-    expect(fwd.name).toBe("Renamed");
+    await expect(mgmt.audit.forwarders.get(FWD_ID)).rejects.toBeInstanceOf(SmplError);
   });
 
-  test("throws SmplNotFoundError on 404", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({}, 404));
+  test("wraps TypeError network errors in SmplConnectionError", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("network down"));
     const mgmt = makeClient();
-    await expect(
-      mgmt.audit.forwarders.update(FWD_ID, {
-        name: "x",
-        forwarderType: "HTTP",
-        configuration: _configInput,
-      }),
-    ).rejects.toBeInstanceOf(SmplError);
+    await expect(mgmt.audit.forwarders.get(FWD_ID)).rejects.toBeInstanceOf(SmplConnectionError);
   });
 });
 
@@ -302,8 +422,34 @@ describe("mgmt.audit.forwarders.update", () => {
 // delete
 // ---------------------------------------------------------------------------
 
-describe("mgmt.audit.forwarders.delete", () => {
-  test("sends DELETE and resolves on 204", async () => {
+describe("Forwarder.delete() and mgmt.audit.forwarders.delete()", () => {
+  test("Forwarder.delete() soft-deletes the server-side record", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }));
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await fwd.delete();
+    const reqs = mockFetch.mock.calls.map((c) => c[0]) as Request[];
+    expect(reqs[1]!.method).toBe("DELETE");
+  });
+
+  test("Forwarder.delete() throws when constructed without a client", async () => {
+    const detached = new Forwarder(null, {
+      name: "x",
+      forwarderType: ForwarderType.HTTP,
+      configuration: new HttpConfiguration({ url: "https://x.example" }),
+      id: FWD_ID,
+    });
+    await expect(detached.delete()).rejects.toThrow(/no client|cannot delete/i);
+  });
+
+  test("Forwarder.delete() throws when id is null", async () => {
+    const { forwarder } = _newForwarder();
+    await expect(forwarder.delete()).rejects.toThrow(/no client or id|cannot delete/i);
+  });
+
+  test("mgmt.audit.forwarders.delete(id) resolves on 204", async () => {
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
     const mgmt = makeClient();
     await mgmt.audit.forwarders.delete(FWD_ID);
@@ -311,10 +457,16 @@ describe("mgmt.audit.forwarders.delete", () => {
     expect(req.method).toBe("DELETE");
   });
 
-  test("throws SmplError on non-204 error response", async () => {
+  test("mgmt.audit.forwarders.delete throws SmplError on non-204 error", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}, 404));
     const mgmt = makeClient();
     await expect(mgmt.audit.forwarders.delete(FWD_ID)).rejects.toBeInstanceOf(SmplError);
+  });
+
+  test("mgmt.audit.forwarders.delete wraps TypeError in SmplConnectionError", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("net"));
+    const mgmt = makeClient();
+    await expect(mgmt.audit.forwarders.delete(FWD_ID)).rejects.toBeInstanceOf(SmplConnectionError);
   });
 });
 
@@ -339,8 +491,8 @@ describe("Forwarder defaults from sparse wire shape", () => {
       }),
     );
     const mgmt = makeClient();
-    const fwd: Forwarder = await mgmt.audit.forwarders.get(FWD_ID);
-    expect(fwd.configuration.method).toBe("POST");
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    expect(fwd.configuration.method).toBe(HttpMethod.POST);
     expect(fwd.configuration.headers).toEqual([]);
     expect(fwd.configuration.successStatus).toBe("2xx");
     expect(fwd.filter).toBeNull();

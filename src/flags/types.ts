@@ -11,14 +11,14 @@
  * can validate calls. Raw strings are still accepted for flexibility.
  */
 export enum Op {
+  CONTAINS = "contains",
   EQ = "==",
-  NEQ = "!=",
-  LT = "<",
-  LTE = "<=",
   GT = ">",
   GTE = ">=",
   IN = "in",
-  CONTAINS = "contains",
+  LT = "<",
+  LTE = "<=",
+  NEQ = "!=",
 }
 
 const CONTEXT_FIELDS = new Set([

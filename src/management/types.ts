@@ -2,16 +2,17 @@
  * Shared types for the management namespace.
  */
 
-/** Whether an environment participates in the canonical ordering.
+/**
+ * Whether an environment participates in the canonical ordering.
  *
- * STANDARD environments are the customer's deploy targets (production,
- * staging, development, etc.) and appear in the environment_order list.
- * AD_HOC environments are transient targets (preview branches,
+ * `AD_HOC` environments are transient targets (preview branches,
  * developer sandboxes) that are excluded from the standard ordering.
+ * `STANDARD` environments are the customer's deploy targets (production,
+ * staging, development, etc.) and appear in the environment_order list.
  */
 export enum EnvironmentClassification {
-  STANDARD = "STANDARD",
   AD_HOC = "AD_HOC",
+  STANDARD = "STANDARD",
 }
 
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;

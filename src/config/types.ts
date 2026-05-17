@@ -6,10 +6,10 @@
 
 /** Type of a {@link ConfigItem} value. */
 export enum ItemType {
-  STRING = "STRING",
-  NUMBER = "NUMBER",
   BOOLEAN = "BOOLEAN",
   JSON = "JSON",
+  NUMBER = "NUMBER",
+  STRING = "STRING",
 }
 
 /** @internal Config client surface used by the active-record `Config.save`/`delete`. */
