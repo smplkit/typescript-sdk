@@ -78,6 +78,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Events
+         * @description Search audit events with column filters and an optional JSON Logic expression.
+         *
+         *     Without a JSON Logic `filter`: behaves like `GET /api/v1/events`
+         *     with the same column filters.
+         *
+         *     With a JSON Logic `filter`: the search is silently capped to the
+         *     last 30 days by `occurred_at` (intersected with any explicit
+         *     `filter[occurred_at]` the caller supplied), the column filters
+         *     narrow the candidate set in SQL, and the JSON Logic expression
+         *     runs in memory against each candidate row using the same
+         *     `json-logic-qubit` evaluator the forwarder pipeline uses. Up to
+         *     50,000 rows are scanned per request; the response's `meta.scan`
+         *     block reports the scan stats so a selective filter doesn't look
+         *     like "0 matches" when the truth is "ceiling reached."
+         */
+        post: operations["search_events"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -948,6 +981,148 @@ export interface components {
              */
             failed: number;
         };
+        /** SearchEventsListLinks */
+        SearchEventsListLinks: {
+            /**
+             * Next
+             * @description Opaque cursor token for the next page. POST the same body with `page[after]` set to this value to fetch the next page. Unlike the URL-form `links.next` returned by `GET /api/v1/events`, this is a bare cursor token — the client must re-issue a POST with its body, which the URL form cannot capture.
+             */
+            next?: string | null;
+        };
+        /**
+         * SearchEventsListMeta
+         * @description Cursor-pagination + scan meta for the search response.
+         *
+         *     Mirrors `EventListMeta` (cursor pagination — `page_size` is the
+         *     only pagination field) and adds the `scan` block above.
+         */
+        SearchEventsListMeta: {
+            /** Page Size */
+            page_size: number;
+            scan: components["schemas"]["SearchScanMeta"];
+        };
+        /**
+         * SearchEventsRequest
+         * @description Request body for ``POST /api/v1/search/events``.
+         *
+         *     Mirrors every column filter accepted by ``GET /api/v1/events`` with
+         *     identical semantics, and adds a top-level ``filter`` field carrying
+         *     a JSON Logic expression. When ``filter`` is present the search is
+         *     silently capped to the last 30 days by ``occurred_at``; the
+         *     expression is then evaluated in memory against each row that passes
+         *     the column filters using the same ``json-logic-qubit`` evaluator
+         *     that runs in the forwarder pipeline (so search results match what
+         *     would be forwarded).
+         *
+         *     Filter-combination rules match ``GET /api/v1/events`` exactly:
+         *
+         *     - ``filter[resource_id]`` must be accompanied by
+         *       ``filter[resource_type]`` — the index is keyed on the pair.
+         *     - ``filter[search]`` must be accompanied by either
+         *       ``filter[occurred_at]`` or ``filter[resource_type]`` +
+         *       ``filter[resource_id]`` — substring matching has no index, so an
+         *       unbounded substring scan is rejected.
+         */
+        SearchEventsRequest: {
+            /**
+             * Filter
+             * @description Optional JSON Logic expression evaluated against each row after column filters narrow the candidate set. Null, absent, or an empty object disables JSON Logic filtering. When present, the search is silently capped to the last 30 days by `occurred_at` (intersected with any explicit `filter[occurred_at]` the caller supplied).
+             */
+            filter?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Filter[Action]
+             * @description Exact match on the event's `action` field.
+             */
+            "filter[action]"?: string | null;
+            /**
+             * Filter[Resource Type]
+             * @description Exact match on the event's `resource_type` field.
+             */
+            "filter[resource_type]"?: string | null;
+            /**
+             * Filter[Resource Id]
+             * @description Exact match on the event's `resource_id` field. Must be accompanied by `filter[resource_type]`.
+             */
+            "filter[resource_id]"?: string | null;
+            /**
+             * Filter[Actor Type]
+             * @description Exact match on the event's `actor_type` field.
+             */
+            "filter[actor_type]"?: string | null;
+            /**
+             * Filter[Actor Id]
+             * @description Exact match on the event's `actor_id` field.
+             */
+            "filter[actor_id]"?: string | null;
+            /**
+             * Filter[Occurred At]
+             * @description Date range using interval notation, e.g. `[2026-04-01T00:00:00Z,2026-04-15T00:00:00Z)`. Required by `filter[search]` when the resource pair isn't provided. When a JSON Logic `filter` is present, the effective range is intersected with the last 30 days.
+             */
+            "filter[occurred_at]"?: string | null;
+            /**
+             * Filter[Search]
+             * @description Case-insensitive substring match on `resource_id` or `description`. Must be accompanied by either `filter[occurred_at]` or `filter[resource_type]` + `filter[resource_id]`.
+             */
+            "filter[search]"?: string | null;
+            /**
+             * Page[Size]
+             * @description Maximum events to return. Range 1..1000, default 10. The default is intentionally smaller than the list endpoint's default of 1000 because the search UI typically renders results one card at a time.
+             * @default 10
+             */
+            "page[size]": number;
+            /**
+             * Page[After]
+             * @description Opaque cursor — pass the previous response's `links.next` cursor verbatim to fetch the next page. Keep the same `sort` value across paginated requests.
+             */
+            "page[after]"?: string | null;
+            /**
+             * Sort
+             * @description Sort field: `occurred_at` or `created_at`, optionally prefixed with `-` for descending order. Default `-occurred_at` (newest first).
+             * @default -occurred_at
+             */
+            sort: string;
+        };
+        /**
+         * SearchEventsResponse
+         * @description JSON:API list envelope returned by the search endpoint.
+         *
+         *     Structurally identical to ``EventListResponse`` from the list
+         *     endpoint — the only difference is the extra `scan` block inside
+         *     `meta` (`SearchEventsListMeta` vs `EventListMeta`).
+         */
+        SearchEventsResponse: {
+            /** Data */
+            data: components["schemas"]["EventResource"][];
+            meta: components["schemas"]["SearchEventsListMeta"];
+            links?: components["schemas"]["SearchEventsListLinks"] | null;
+        };
+        /**
+         * SearchScanMeta
+         * @description Scan statistics for a search response.
+         *
+         *     Exposed so a selective JSON Logic filter doesn't silently look like
+         *     "0 matches" when the truth is "the scan ceiling was reached before
+         *     the filter had a chance to find page[size] matches."
+         */
+        SearchScanMeta: {
+            /**
+             * Scanned
+             * @description Rows scanned after column filters narrowed the candidate set, before the JSON Logic expression was applied.
+             */
+            scanned: number;
+            /**
+             * Matched
+             * @description Rows the JSON Logic expression matched. Equal to `len(data)` for the page being returned plus any matches found beyond the page size.
+             */
+            matched: number;
+            /**
+             * Exhausted
+             * @description `true` if the server hit the per-request scan ceiling before finding `page[size]` matches. When true, paginate again with the returned `links.next` cursor to continue scanning past the ceiling.
+             */
+            exhausted: boolean;
+        };
         /**
          * TestForwarderRequest
          * @description Inputs to the test-forwarder action.
@@ -1167,6 +1342,30 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["EventResponse"];
+                };
+            };
+        };
+    };
+    search_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchEventsResponse"];
                 };
             };
         };
