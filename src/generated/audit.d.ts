@@ -693,7 +693,7 @@ export interface components {
         Forwarder: {
             /**
              * Name
-             * @description Human-readable name for the forwarder.
+             * @description Human-readable name for the forwarder. Must contain at least one non-whitespace character.
              */
             name: string;
             /**
