@@ -239,7 +239,7 @@ export interface components {
         Flag: {
             /**
              * Name
-             * @description Human-readable display name for the flag.
+             * @description Human-readable display name for the flag. Cannot be empty or whitespace-only.
              */
             name: string;
             /**
