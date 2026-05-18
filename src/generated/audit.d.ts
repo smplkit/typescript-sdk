@@ -726,7 +726,7 @@ export interface components {
              * @description Template applied to each event before delivery. The shape depends on ``transform_type``: for `JSONATA`, a string containing a JSONata expression. Omit to deliver the event JSON unchanged.
              */
             transform?: unknown | null;
-            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. */
+            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. Each managed vendor type (`DATADOG`, `NEW_RELIC`, `HONEYCOMB`, `SPLUNK_HEC`, `ELASTIC`) requires a vendor-specific authentication header to be present with a non-empty value; see the destination's documentation for the expected header name. */
             configuration: components["schemas"]["HttpConfiguration"];
             /**
              * Created At
@@ -1004,9 +1004,11 @@ export interface components {
          * HttpHeader
          * @description A single HTTP header attached to a forwarder delivery request.
          *
-         *     Header values carrying secrets (API keys, bearer tokens, HEC tokens)
-         *     are encrypted at the application layer before persistence; the wire
-         *     representation here is always plaintext.
+         *     Header values are encrypted at the application layer before
+         *     persistence regardless of header name; the wire representation here
+         *     is always plaintext on both the request and the response, so a
+         *     `GET → mutate → PUT` round-trip preserves header values without
+         *     requiring the customer to re-enter secrets.
          */
         HttpHeader: {
             /**
@@ -1016,7 +1018,7 @@ export interface components {
             name: string;
             /**
              * Value
-             * @description Header value.
+             * @description Header value. Stored encrypted at rest; returned as plaintext on `GET`.
              */
             value: string;
         };
