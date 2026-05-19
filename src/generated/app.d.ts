@@ -906,6 +906,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discount_tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Discount Tiers
+         * @description Return the multi-product volume discount schedule.
+         *
+         *     Each tier is identified by the minimum number of paid products at
+         *     which the discount applies. The first tier (1 product) carries no
+         *     discount; subsequent tiers grant a progressively larger percent off
+         *     every paid subscription item. Default sort is `products_count`
+         *     ascending, which is the natural ladder customers traverse as they
+         *     add products.
+         */
+        get: operations["list_discount_tiers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/current/subscription": {
         parameters: {
             query?: never;
@@ -1840,6 +1867,53 @@ export interface components {
              */
             type: "context_value";
             attributes: components["schemas"]["ContextValue"];
+        };
+        /**
+         * DiscountTier
+         * @description A single tier of the multi-product volume discount schedule.
+         */
+        DiscountTier: {
+            /**
+             * Products Count
+             * @description Minimum number of paid product subscriptions a customer must hold for this tier's discount to apply. Counts above the highest defined tier are clamped to that tier.
+             */
+            products_count: number;
+            /**
+             * Percent Off
+             * @description Discount percentage applied to every paid subscription item when the customer holds at least ``products_count`` paid products. 0 means no discount at this tier.
+             */
+            percent_off: number;
+        };
+        /**
+         * DiscountTierListResponse
+         * @description JSON:API collection response for the volume discount schedule.
+         */
+        DiscountTierListResponse: {
+            /** Data */
+            data: components["schemas"]["DiscountTierResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * DiscountTierResource
+         * @description JSON:API resource envelope for a volume discount tier.
+         * @example {
+         *       "attributes": {
+         *         "percent_off": 15,
+         *         "products_count": 2
+         *       },
+         *       "id": "2",
+         *       "type": "discount_tier"
+         *     }
+         */
+        DiscountTierResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "discount_tier";
+            attributes: components["schemas"]["DiscountTier"];
         };
         /**
          * Email
@@ -7394,6 +7468,71 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["ProductListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_discount_tiers: {
+        parameters: {
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `products_count`. Allowed values: `percent_off`, `-percent_off`, `products_count`, `-products_count`. */
+                sort?: "percent_off" | "-percent_off" | "products_count" | "-products_count";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["DiscountTierListResponse"];
                 };
             };
             /** @description Validation error or malformed request */
