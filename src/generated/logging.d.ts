@@ -300,11 +300,8 @@ export interface components {
              * @description Human-readable label for the group.
              */
             name: string;
-            /**
-             * Level
-             * @description Default level applied to every logger in the group. `null` leaves member loggers to inherit from elsewhere.
-             */
-            level?: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT") | null;
+            /** @description Default level applied to every logger in the group. `null` leaves member loggers to inherit from elsewhere. */
+            level?: components["schemas"]["LogLevel"] | null;
             /**
              * Parent Id
              * @description Reserved for nested groups. Must be `null` in this version; nested groups are not yet supported.
@@ -385,6 +382,14 @@ export interface components {
             data: components["schemas"]["LogGroupResource"];
         };
         /**
+         * LogLevel
+         * @description Severity level of a logger.
+         *
+         *     Ordered from most-verbose (`TRACE`) to least-verbose (`SILENT`).
+         * @enum {string}
+         */
+        LogLevel: "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT";
+        /**
          * Logger
          * @description A logger configured for the account.
          *
@@ -416,11 +421,8 @@ export interface components {
              * @description Human-readable label for the logger.
              */
             name: string;
-            /**
-             * Level
-             * @description Account-wide log level applied to this logger. `null` means no override at the logger level — the level is inherited from the logger's group or the framework default.
-             */
-            level?: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT") | null;
+            /** @description Account-wide log level applied to this logger. `null` means no override at the logger level — the level is inherited from the logger's group or the framework default. */
+            level?: components["schemas"]["LogLevel"] | null;
             /**
              * Group
              * @description Key of the log group this logger belongs to, or `null` if the logger is not grouped. Assigning a logger to a group promotes it to managed; assigning a group cascades to unmanaged descendants by clearing their group reference.
@@ -450,7 +452,7 @@ export interface components {
              * @description Per-environment summary of what runtimes are reporting for this logger. Keyed by environment name; each value is the list of distinct resolved levels observed across all source rows in that environment, ordered from most-verbose (`TRACE`) to least-verbose (`SILENT`). A single-element list means every source agrees; a multi-element list means sources disagree. Environments with no observed sources are omitted — cross-reference `environments` to find environments that are configured but have not yet been reported in.
              */
             readonly effective_levels?: {
-                [key: string]: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT")[];
+                [key: string]: components["schemas"]["LogLevel"][];
             } | null;
             /**
              * Created At
