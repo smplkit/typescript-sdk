@@ -670,6 +670,11 @@ export interface components {
              */
             "filter[search]"?: string | null;
             /**
+             * Filter[Do Not Forward]
+             * @description When set, restrict to events whose `do_not_forward` flag matches the given boolean. Forwarder previews typically pass `false` to match live-pipeline semantics (events flagged `do_not_forward=true` are skipped by the forwarder pipeline).
+             */
+            "filter[do_not_forward]"?: boolean | null;
+            /**
              * Page[Size]
              * @description Maximum events to return. Range 1..1000, default 1000 — matches every other list / search endpoint on the platform. Set explicitly to a smaller value when the consumer is rendering results card-by-card.
              * @default 1000
@@ -1416,6 +1421,11 @@ export interface components {
              * @description Per-request timeout in milliseconds. Capped at 30 seconds.
              */
             timeout_ms?: number | null;
+            /**
+             * Body
+             * @description Request body sent to the destination. When omitted, an empty body is sent (suitable for connectivity probes). When set, the body is sent verbatim — pair with an appropriate `Content-Type` entry in `headers` so the destination interprets it correctly. Limit 1 MiB.
+             */
+            body?: string | null;
         };
         /**
          * TestForwarderResponse
@@ -1524,6 +1534,8 @@ export interface operations {
                 "filter[resource_id]"?: string | null;
                 /** @description Case-insensitive substring match against `resource_id` or `description`. Use `filter[resource_id]` for an exact match on `resource_id`. */
                 "filter[search]"?: string | null;
+                /** @description When set, restrict to events whose `do_not_forward` flag matches the given boolean. Forwarder previews typically pass `false` to match live-pipeline semantics (events flagged `do_not_forward=true` are skipped by the forwarder pipeline). */
+                "filter[do_not_forward]"?: boolean | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-occurred_at`. Allowed values: `created_at`, `-created_at`, `occurred_at`, `-occurred_at`. */
