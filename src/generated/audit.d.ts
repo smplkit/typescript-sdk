@@ -286,6 +286,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/forwarder_types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Forwarder Types
+         * @description List all forwarder types in the catalog.
+         *
+         *     Returns every branded HTTP forwarder type defined in
+         *     `forwarder_types/*.yaml` plus the synthetic `http` (Custom HTTP) entry.
+         *     The response drives the console's create-forwarder UX, the docs
+         *     vendor-reference page, and audit's own server-side template validation.
+         */
+        get: operations["list_forwarder_types_api_v1_forwarder_types_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forwarder_types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Forwarder Type
+         * @description Fetch a single forwarder type from the catalog.
+         */
+        get: operations["get_forwarder_type_api_v1_forwarder_types__id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resource_types": {
         parameters: {
             query?: never;
@@ -726,7 +771,7 @@ export interface components {
              * @description Template applied to each event before delivery. The shape depends on ``transform_type``: for `JSONATA`, a string containing a JSONata expression. Omit to deliver the event JSON unchanged.
              */
             transform?: unknown | null;
-            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. Each managed vendor type (`DATADOG`, `NEW_RELIC`, `HONEYCOMB`, `SPLUNK_HEC`, `ELASTIC`) requires a vendor-specific authentication header to be present with a non-empty value; see the destination's documentation for the expected header name. */
+            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. Branded vendor types (everything except `http`) constrain the configuration against a per-vendor template — see `GET /api/v1/forwarder_types` for the URL pattern, fixed headers, and customer-supplied placeholders for each type. */
             configuration: components["schemas"]["HttpConfiguration"];
             /**
              * Created At
@@ -911,6 +956,10 @@ export interface components {
          *         "configuration": {
          *           "headers": [
          *             {
+         *               "name": "Content-Type",
+         *               "value": "application/json"
+         *             },
+         *             {
          *               "name": "DD-API-KEY",
          *               "value": "dd-api-key-plaintext"
          *             }
@@ -930,7 +979,7 @@ export interface components {
          *             "user.created"
          *           ]
          *         },
-         *         "forwarder_type": "DATADOG",
+         *         "forwarder_type": "datadog",
          *         "name": "Datadog production",
          *         "transform": "{ \"message\": action & ' on ' & resource_type }",
          *         "transform_type": "JSONATA",
@@ -960,10 +1009,216 @@ export interface components {
         };
         /**
          * ForwarderType
-         * @description Supported forwarder destination types.
+         * @description Supported forwarder destination types (ADR-050).
          * @enum {string}
          */
-        ForwarderType: "HTTP" | "DATADOG" | "SPLUNK_HEC" | "SUMO_LOGIC" | "NEW_RELIC" | "HONEYCOMB" | "ELASTIC";
+        ForwarderType: "datadog" | "elastic" | "honeycomb" | "http" | "new_relic" | "splunk_hec" | "sumo_logic";
+        /**
+         * ForwarderTypeAttributes
+         * @description The catalog entry's attributes — one branded forwarder type or the
+         *     synthetic Custom HTTP entry.
+         */
+        ForwarderTypeAttributes: {
+            /**
+             * Name
+             * @description Human-readable label shown in the type-picker.
+             */
+            name: string;
+            /**
+             * Icon
+             * @description Absolute URL to the icon asset, served by audit at `/api/v1/forwarder_types/{id}/icon`.
+             */
+            icon: string;
+            /**
+             * Base Type
+             * @description Transport family — today only `HTTP`. New base types will add their own configuration shape and runtime handler.
+             */
+            base_type: string;
+            /**
+             * Docs Url
+             * @description Link to the vendor's own documentation for this destination.
+             */
+            docs_url?: string | null;
+            /**
+             * Is Custom
+             * @description True for the synthetic `http` Custom HTTP entry, which has no vendor template — the customer supplies URL, headers, and transform from scratch. False for branded types.
+             */
+            is_custom: boolean;
+            /** @description Delivery template. Shape depends on `base_type`. */
+            configuration: components["schemas"]["ForwarderTypeHttpConfiguration"];
+            /**
+             * Placeholders
+             * @description UI metadata keyed by placeholder name. Each `{name}` token appearing in `configuration` (URL, header value) has a matching entry here describing how to prompt for it.
+             */
+            placeholders: {
+                [key: string]: components["schemas"]["ForwarderTypePlaceholder"];
+            };
+            /** @description Default transform shipped with the type, or `null` if none. */
+            transform?: components["schemas"]["ForwarderTypeTransform"] | null;
+        };
+        /**
+         * ForwarderTypeHeader
+         * @description A header entry in a catalog entry's configuration template.
+         *
+         *     ``value`` may contain ``{placeholder}`` tokens that the customer fills
+         *     in at create time; header values without placeholders are fixed by the
+         *     vendor and the server enforces the literal value.
+         */
+        ForwarderTypeHeader: {
+            /**
+             * Name
+             * @description Header name.
+             */
+            name: string;
+            /**
+             * Value
+             * @description Header value template. Strings of the form `{name}` are placeholders the customer fills in; look up `name` in `placeholders` for the UI metadata.
+             */
+            value: string;
+        };
+        /**
+         * ForwarderTypeHttpConfiguration
+         * @description HTTP-base-type delivery template.
+         */
+        ForwarderTypeHttpConfiguration: {
+            /**
+             * Method
+             * @description HTTP method.
+             */
+            method: string;
+            /**
+             * Url
+             * @description URL template. `null` for the synthetic `http` (Custom HTTP) entry, where the customer supplies the URL from scratch. May contain `{name}` placeholders that map to the `placeholders` block.
+             */
+            url: string | null;
+            /**
+             * Success Status
+             * @description HTTP response status indicating a successful delivery — either a specific code (`200`, `204`) or a class (`2xx`).
+             */
+            success_status: string;
+            /**
+             * Headers
+             * @description Headers attached to each delivery request.
+             */
+            headers: components["schemas"]["ForwarderTypeHeader"][];
+        };
+        /**
+         * ForwarderTypeListResponse
+         * @description JSON:API collection response for forwarder types.
+         */
+        ForwarderTypeListResponse: {
+            /** Data */
+            data: components["schemas"]["ForwarderTypeResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * ForwarderTypePlaceholder
+         * @description UI metadata for one ``{name}`` placeholder in the configuration.
+         */
+        ForwarderTypePlaceholder: {
+            /**
+             * Label
+             * @description Human-readable label for the input.
+             */
+            label: string;
+            /**
+             * Secret
+             * @description If true, mask the value in the UI and treat as a credential.
+             * @default false
+             */
+            secret: boolean;
+            /**
+             * Enum
+             * @description If set, the value must be one of the listed strings — render as a dropdown.
+             */
+            enum?: string[] | null;
+            /**
+             * Default
+             * @description Pre-selected value when `enum` is set, or the default for a free-text field.
+             */
+            default?: string | null;
+            /**
+             * Placeholder
+             * @description HTML-input hint text shown when the field is empty.
+             */
+            placeholder?: string | null;
+        };
+        /**
+         * ForwarderTypeResource
+         * @description JSON:API resource envelope for a forwarder type.
+         * @example {
+         *       "attributes": {
+         *         "base_type": "HTTP",
+         *         "configuration": {
+         *           "headers": [
+         *             {
+         *               "name": "Content-Type",
+         *               "value": "application/json"
+         *             },
+         *             {
+         *               "name": "DD-API-KEY",
+         *               "value": "{api_key}"
+         *             }
+         *           ],
+         *           "method": "POST",
+         *           "success_status": "2xx",
+         *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
+         *         },
+         *         "docs_url": "https://docs.datadoghq.com/api/latest/logs/",
+         *         "icon": "https://audit.smplkit.com/api/v1/forwarder_types/datadog.svg",
+         *         "is_custom": false,
+         *         "name": "Datadog Logs",
+         *         "placeholders": {
+         *           "api_key": {
+         *             "label": "Datadog API key",
+         *             "secret": true
+         *           }
+         *         },
+         *         "transform": {
+         *           "default": "{ \"ddsource\": \"smplkit\", \"message\": action }",
+         *           "type": "JSONATA"
+         *         }
+         *       },
+         *       "id": "datadog",
+         *       "type": "forwarder_type"
+         *     }
+         */
+        ForwarderTypeResource: {
+            /**
+             * Id
+             * @description Lowercase forwarder type id — matches `forwarder.forwarder_type` values and is the filename stem of `forwarder_types/<id>.yaml`.
+             */
+            id: string;
+            /**
+             * Type
+             * @default forwarder_type
+             */
+            type: string;
+            attributes: components["schemas"]["ForwarderTypeAttributes"];
+        };
+        /**
+         * ForwarderTypeResponse
+         * @description JSON:API single-resource response for a forwarder type.
+         */
+        ForwarderTypeResponse: {
+            data: components["schemas"]["ForwarderTypeResource"];
+        };
+        /**
+         * ForwarderTypeTransform
+         * @description Default transform shipped with the type.
+         */
+        ForwarderTypeTransform: {
+            /**
+             * Type
+             * @description Engine name. Today only `JSONATA`.
+             */
+            type: string;
+            /**
+             * Default
+             * @description Default template; customers can override per forwarder.
+             */
+            default: string;
+        };
         /**
          * HttpConfiguration
          * @description HTTP request configuration used to deliver an event to the destination.
@@ -1619,6 +1874,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestForwarderResponse"];
+                };
+            };
+        };
+    };
+    list_forwarder_types_api_v1_forwarder_types_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderTypeListResponse"];
+                };
+            };
+        };
+    };
+    get_forwarder_type_api_v1_forwarder_types__id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ForwarderTypeResponse"];
                 };
             };
         };

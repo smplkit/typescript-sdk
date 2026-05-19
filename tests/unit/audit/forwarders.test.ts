@@ -527,7 +527,7 @@ describe("Forwarder defaults from sparse wire shape", () => {
           attributes: {
             // intentionally minimal
             name: "x",
-            forwarder_type: "HTTP",
+            forwarder_type: "http",
             enabled: false,
           },
         },

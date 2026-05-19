@@ -231,13 +231,13 @@ export interface HttpHeader {
  * policies) and will get its own type if customer demand warrants.
  */
 export enum ForwarderType {
-  DATADOG = "DATADOG",
-  ELASTIC = "ELASTIC",
-  HONEYCOMB = "HONEYCOMB",
-  HTTP = "HTTP",
-  NEW_RELIC = "NEW_RELIC",
-  SPLUNK_HEC = "SPLUNK_HEC",
-  SUMO_LOGIC = "SUMO_LOGIC",
+  DATADOG = "datadog",
+  ELASTIC = "elastic",
+  HONEYCOMB = "honeycomb",
+  HTTP = "http",
+  NEW_RELIC = "new_relic",
+  SPLUNK_HEC = "splunk_hec",
+  SUMO_LOGIC = "sumo_logic",
 }
 
 /**
