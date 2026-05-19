@@ -447,10 +447,10 @@ export interface components {
             } | null;
             /**
              * Effective Levels
-             * @description Per-environment summary of what runtimes are reporting for this logger. Keyed by environment name; each entry is one of `{"status": "none"}`, `{"status": "agrees", "level": "<LEVEL>"}`, or `{"status": "varies"}`. `agrees` means every observed source in that environment reports the same resolved level; `varies` means at least two sources disagree.
+             * @description Per-environment summary of what runtimes are reporting for this logger. Keyed by environment name; each value is the list of distinct resolved levels observed across all source rows in that environment, ordered from most-verbose (`TRACE`) to least-verbose (`SILENT`). A single-element list means every source agrees; a multi-element list means sources disagree. Environments with no observed sources are omitted — cross-reference `environments` to find environments that are configured but have not yet been reported in.
              */
             readonly effective_levels?: {
-                [key: string]: unknown;
+                [key: string]: ("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL" | "SILENT")[];
             } | null;
             /**
              * Created At
