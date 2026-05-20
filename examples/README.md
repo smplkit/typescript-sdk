@@ -132,7 +132,7 @@ Demonstrates the runtime experience for Smpl Audit:
 - Optional `occurredAt` and `data` payload (snapshots nest inside `data`, e.g. `data.snapshot`)
 - Caller-supplied `idempotencyKey` for safe retries — server dedupes on `account_id + idempotency_key`
 - `flush(timeoutMs)` to drain the buffer before reading
-- Synchronous `list({...})` with server-side filters (`action`, `resourceType`, `resourceId`, `actorType`, `actorId`, `occurredAtRange`) and cursor pagination (`pageSize` / `pageAfter` / `nextCursor`)
+- Synchronous `list({...})` with server-side filters (`eventType`, `resourceType`, `resourceId`, `actorType`, `actorId`, `occurredAtRange`) and cursor pagination (`pageSize` / `pageAfter` / `nextCursor`)
 - Single-event read via `get(eventId)`
 
 > Audit has no management API — events are created at runtime and read via list/get. There is no separate management showcase.

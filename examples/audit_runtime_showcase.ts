@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 
     // record an event
     client.audit.events.record({
-      action: "invoice.created",
+      eventType: "invoice.created",
       resourceType: "invoice",
       resourceId: someResourceId,
       occurredAt: new Date(),
@@ -57,8 +57,8 @@ async function main(): Promise<void> {
     const event = await client.audit.events.get(recordedEventId);
     assert.equal(event.id, recordedEventId);
     assert.equal(event.resourceId, someResourceId);
-    assert.equal(event.action, "invoice.created");
-    console.log(`Fetched event ${event.id}: ${event.action}`);
+    assert.equal(event.eventType, "invoice.created");
+    console.log(`Fetched event ${event.id}: ${event.eventType}`);
 
     // list resource types observed
     const resourceTypesPage = await client.audit.resourceTypes.list();
@@ -70,13 +70,13 @@ async function main(): Promise<void> {
       `Observed resource types: ${resourceTypesPage.resourceTypes.map((rt) => rt.id).join(", ")}`,
     );
 
-    // list actions observed
-    const actionsPage = await client.audit.actions.list();
+    // list event types observed
+    const eventTypesPage = await client.audit.eventTypes.list();
     assert(
-      actionsPage.actions.some((a) => a.id === "invoice.created"),
-      `Expected "invoice.created" in actions`,
+      eventTypesPage.eventTypes.some((a) => a.id === "invoice.created"),
+      `Expected "invoice.created" in event types`,
     );
-    console.log(`Observed actions: ${actionsPage.actions.map((a) => a.id).join(", ")}`);
+    console.log(`Observed event types: ${eventTypesPage.eventTypes.map((a) => a.id).join(", ")}`);
 
     console.log("Done!");
   } finally {

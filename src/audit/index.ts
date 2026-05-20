@@ -5,12 +5,12 @@
 export { AuditClient } from "./client.js";
 export { Forwarder, ForwarderType, HttpConfiguration, HttpMethod, TransformType } from "./types.js";
 export type {
-  Action,
-  ActionListPage,
   AuditEvent,
   CreateEventInput,
+  EventType,
+  EventTypeListPage,
   HttpHeader,
-  ListActionsParams,
+  ListEventTypesParams,
   ListEventsPage,
   ListEventsParams,
   ListForwardersPage,

@@ -4,7 +4,7 @@
  * Public surface:
  *   client.audit.events.{record,list,get,flush}
  *   client.audit.resourceTypes.list(...)
- *   client.audit.actions.list(...)
+ *   client.audit.eventTypes.list(...)
  *
  * The runtime audit client owns event recording and read-side queries —
  * fire-and-forget `record`, plus the audit-log list/get and the
@@ -24,11 +24,11 @@ import type { components, paths } from "../generated/audit.d.ts";
 import { SmplError, throwForStatus } from "../errors.js";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import type {
-  Action,
-  ActionListPage,
   AuditEvent,
   CreateEventInput,
-  ListActionsParams,
+  EventType,
+  EventTypeListPage,
+  ListEventTypesParams,
   ListEventsPage,
   ListEventsParams,
   ListResourceTypesPage,
@@ -50,7 +50,7 @@ const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
 function _eventBodyFromInput(input: CreateEventInput): GenEventResponse {
   const attrs: GenEvent = {
-    action: input.action,
+    event_type: input.eventType,
     resource_type: input.resourceType,
     resource_id: input.resourceId,
     do_not_forward: input.doNotForward ?? false,
@@ -75,7 +75,7 @@ function _eventFromResource(resource: {
   const attrs = resource.attributes;
   return {
     id: resource.id,
-    action: String(attrs.action ?? ""),
+    eventType: String(attrs.event_type ?? ""),
     resourceType: String(attrs.resource_type ?? ""),
     resourceId: String(attrs.resource_id ?? ""),
     occurredAt: String(attrs.occurred_at ?? ""),
@@ -175,7 +175,7 @@ class EventsClient {
 
   async list(params: ListEventsParams = {}): Promise<ListEventsPage> {
     const query: Record<string, string | number> = {};
-    if (params.action !== undefined) query["filter[action]"] = params.action;
+    if (params.eventType !== undefined) query["filter[event_type]"] = params.eventType;
     if (params.resourceType !== undefined) query["filter[resource_type]"] = params.resourceType;
     if (params.resourceId !== undefined) query["filter[resource_id]"] = params.resourceId;
     if (params.actorType !== undefined) query["filter[actor_type]"] = params.actorType;
@@ -257,21 +257,21 @@ class ResourceTypesClient {
 }
 
 // ---------------------------------------------------------------------------
-// Actions
+// Event types
 // ---------------------------------------------------------------------------
 
-class ActionsClient {
+class EventTypesClient {
   constructor(private readonly _http: AuditHttp) {}
 
   /**
-   * List the distinct `action` slugs recorded for this account.
+   * List the distinct `event_type` slugs recorded for this account.
    *
-   * Without `filterResourceType`, returns one row per distinct action.
-   * With `filterResourceType`, returns only the actions recorded with
+   * Without `filterResourceType`, returns one row per distinct event type.
+   * With `filterResourceType`, returns only the event types recorded with
    * that resource_type, powering cascading-filter UIs (ADR-047 §2.5).
    * Sorted alphabetically; offset pagination via `pageNumber` / `pageSize`.
    */
-  async list(params: ListActionsParams = {}): Promise<ActionListPage> {
+  async list(params: ListEventTypesParams = {}): Promise<EventTypeListPage> {
     const query: Record<string, string | number | boolean> = {};
     if (params.filterResourceType !== undefined)
       query["filter[resource_type]"] = params.filterResourceType;
@@ -279,19 +279,19 @@ class ActionsClient {
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
 
-    const result = await this._http.GET("/api/v1/actions", {
+    const result = await this._http.GET("/api/v1/event_types", {
       params: { query: query as unknown as Record<string, never> },
     });
     if (!result.response.ok) await _throwForResponse(result.response);
     if (result.data === undefined) throw new SmplError("Unexpected empty response from audit");
     const body = result.data;
-    const actions: Action[] = (body.data ?? []).map(
+    const eventTypes: EventType[] = (body.data ?? []).map(
       (r: { id: string; attributes: Record<string, unknown> }) => ({
         id: r.id,
         createdAt: String((r.attributes as Record<string, unknown>).created_at ?? ""),
       }),
     );
-    return { actions, pagination: _paginationFromBody(body) };
+    return { eventTypes, pagination: _paginationFromBody(body) };
   }
 }
 
@@ -302,7 +302,7 @@ class ActionsClient {
 export class AuditClient {
   readonly events: EventsClient;
   readonly resourceTypes: ResourceTypesClient;
-  readonly actions: ActionsClient;
+  readonly eventTypes: EventTypesClient;
 
   constructor(opts: {
     apiKey: string;
@@ -313,7 +313,7 @@ export class AuditClient {
   }) {
     this.events = new EventsClient(opts);
     this.resourceTypes = new ResourceTypesClient(this.events._http);
-    this.actions = new ActionsClient(this.events._http);
+    this.eventTypes = new EventTypesClient(this.events._http);
   }
 
   /** @internal */

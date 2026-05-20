@@ -10,13 +10,13 @@
 export interface AuditEvent {
   /** Server-assigned UUID for this event. */
   id: string;
-  /** Action slug — e.g. `"user.created"`, `"invoice.paid"`. */
-  action: string;
-  /** Type of resource the action operated on — e.g. `"invoice"`. */
+  /** Event type slug — e.g. `"user.created"`, `"invoice.paid"`. */
+  eventType: string;
+  /** Type of resource the event operated on — e.g. `"invoice"`. */
   resourceType: string;
-  /** Customer-facing id of the resource the action operated on. */
+  /** Customer-facing id of the resource the event operated on. */
   resourceId: string;
-  /** ISO-8601-with-offset timestamp of when the action actually happened. */
+  /** ISO-8601-with-offset timestamp of when the event actually happened. */
   occurredAt: string;
   /** ISO-8601-with-offset timestamp of when the audit service ingested the event. */
   createdAt: string;
@@ -54,9 +54,9 @@ export interface AuditEvent {
  * Inputs for `client.audit.events.record(...)`.
  */
 export interface CreateEventInput {
-  /** Action slug — e.g. `"invoice.paid"`. */
-  action: string;
-  /** Type of resource the action operated on. */
+  /** Event type slug — e.g. `"invoice.paid"`. */
+  eventType: string;
+  /** Type of resource the event operated on. */
   resourceType: string;
   /** Customer-facing id of the resource. */
   resourceId: string;
@@ -96,8 +96,8 @@ export interface CreateEventInput {
  * `nextCursor` to walk forward.
  */
 export interface ListEventsParams {
-  /** Filter to this action slug. */
-  action?: string;
+  /** Filter to this event type slug. */
+  eventType?: string;
   /** Filter to this resource_type slug. */
   resourceType?: string;
   /** Filter to this resource id. */
@@ -162,28 +162,28 @@ export interface ListResourceTypesPage {
 }
 
 // ---------------------------------------------------------------------------
-// Actions (distinct action slugs seen in the account)
+// Event types (distinct event_type slugs seen in the account)
 // ---------------------------------------------------------------------------
 
 /**
- * A distinct action slug seen for the account.
+ * A distinct event type slug seen for the account.
  */
-export interface Action {
-  /** The action slug, surfaced as the JSON:API resource id. */
+export interface EventType {
+  /** The event type slug, surfaced as the JSON:API resource id. */
   id: string;
   /**
    * ISO-8601 timestamp of the earliest sighting for the account. When
    * the list call was filtered by `resourceType`, this is the first
-   * sighting of that specific (action, resource_type) pair.
+   * sighting of that specific (event_type, resource_type) pair.
    */
   createdAt: string;
 }
 
 /**
- * Parameters accepted by `client.audit.actions.list(...)`.
+ * Parameters accepted by `client.audit.eventTypes.list(...)`.
  */
-export interface ListActionsParams {
-  /** When set, returns only the actions seen with this resource_type. */
+export interface ListEventTypesParams {
+  /** When set, returns only the event types seen with this resource_type. */
   filterResourceType?: string;
   /** 1-based page number to return. Defaults to 1. */
   pageNumber?: number;
@@ -194,11 +194,11 @@ export interface ListActionsParams {
 }
 
 /**
- * Page of actions returned by `client.audit.actions.list(...)`.
+ * Page of event types returned by `client.audit.eventTypes.list(...)`.
  */
-export interface ActionListPage {
-  /** Actions on this page, alphabetically sorted. */
-  actions: Action[];
+export interface EventTypeListPage {
+  /** Event types on this page, alphabetically sorted. */
+  eventTypes: EventType[];
   /** Pagination metadata. */
   pagination: Pagination;
 }

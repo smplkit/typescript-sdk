@@ -1,5 +1,5 @@
 /**
- * Tests for the audit namespace — events, resource_types, actions.
+ * Tests for the audit namespace — events, resource_types, event_types.
  */
 
 import { describe, expect, test, vi } from "vitest";
@@ -31,7 +31,7 @@ describe("AuditClient", () => {
     const before = Date.now();
     for (let i = 0; i < 10; i++) {
       client.events.record({
-        action: "user.created",
+        eventType: "user.created",
         resourceType: "user",
         resourceId: `u-${i}`,
       });
@@ -55,7 +55,7 @@ describe("AuditClient", () => {
             id: eventId,
             type: "event",
             attributes: {
-              action: "invoice.created",
+              event_type: "invoice.created",
               resource_type: "invoice",
               resource_id: "inv-1",
               occurred_at: "2026-05-06T12:00:00+00:00",
@@ -80,7 +80,7 @@ describe("AuditClient", () => {
 
     const ev = await client.events.get(eventId);
     expect(ev.id).toBe(eventId);
-    expect(ev.action).toBe("invoice.created");
+    expect(ev.eventType).toBe("invoice.created");
     expect(ev.actorType).toBe("API_KEY");
     expect(ev.actorId).toBeNull();
     await client._close();
@@ -96,7 +96,7 @@ describe("AuditClient", () => {
               id: eventId,
               type: "event",
               attributes: {
-                action: "invoice.created",
+                event_type: "invoice.created",
                 resource_type: "invoice",
                 resource_id: "inv-1",
                 occurred_at: "2026-05-06T12:00:00+00:00",
@@ -136,7 +136,7 @@ describe("AuditClient", () => {
             id: "00000000-0000-0000-0000-000000000001",
             type: "event",
             attributes: {
-              action: "user.created",
+              event_type: "user.created",
               resource_type: "user",
               resource_id: "u-1",
               occurred_at: "2026-05-06T12:00:00+00:00",
@@ -158,7 +158,7 @@ describe("AuditClient", () => {
       fetch: fetchMock,
     });
     client.events.record({
-      action: "user.created",
+      eventType: "user.created",
       resourceType: "user",
       resourceId: "u-1",
       actorType: "EXTERNAL_SERVICE",
@@ -226,7 +226,7 @@ describe("AuditClient", () => {
             id: "00000000-0000-0000-0000-000000000001",
             type: "event",
             attributes: {
-              action: "x",
+              event_type: "x",
               resource_type: "x",
               resource_id: "1",
               occurred_at: "2026-05-06T12:00:00+00:00",
@@ -249,7 +249,7 @@ describe("AuditClient", () => {
     });
     const ts = new Date("2026-05-06T12:00:00Z");
     client.events.record({
-      action: "user.created",
+      eventType: "user.created",
       resourceType: "user",
       resourceId: "u-1",
       occurredAt: ts,
@@ -271,7 +271,7 @@ describe("AuditClient", () => {
       baseUrl: "https://audit.example.com",
       fetch: fetchMock,
     });
-    client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
     await client.events.flush(200);
     expect(calls.length).toBeGreaterThanOrEqual(1);
     await client._close();
@@ -286,7 +286,7 @@ describe("AuditClient", () => {
               id: "abc",
               type: "event",
               attributes: {
-                action: "user.created",
+                event_type: "user.created",
                 resource_type: "user",
                 resource_id: "u-1",
                 occurred_at: "2026-05-06T12:00:00+00:00",
@@ -331,7 +331,7 @@ describe("AuditClient — extraHeaders", () => {
             id: "00000000-0000-0000-0000-000000000001",
             type: "event",
             attributes: {
-              action: "x",
+              event_type: "x",
               resource_type: "y",
               resource_id: "1",
               occurred_at: "2026-05-06T12:00:00+00:00",
@@ -355,7 +355,7 @@ describe("AuditClient — extraHeaders", () => {
       extraHeaders: { "X-Test": "v" },
     });
 
-    client.events.record({ action: "x", resourceType: "y", resourceId: "1" });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
     await client.events.flush(2_000);
     expect(seen.length).toBeGreaterThanOrEqual(1);
     expect(seen[0]!.get("x-test")).toBe("v");
@@ -384,7 +384,7 @@ describe("AuditClient.events.record do_not_forward", () => {
               id: "33333333-4444-5555-6666-777777777777",
               type: "event",
               attributes: {
-                action: "user.created",
+                event_type: "user.created",
                 resource_type: "user",
                 resource_id: "u-1",
                 occurred_at: "2026-05-07T12:00:00+00:00",
@@ -403,7 +403,7 @@ describe("AuditClient.events.record do_not_forward", () => {
       }) as typeof fetch,
     });
     c.events.record({
-      action: "user.created",
+      eventType: "user.created",
       resourceType: "user",
       resourceId: "u-1",
       doNotForward: true,
@@ -425,7 +425,7 @@ describe("AuditClient.events.record do_not_forward", () => {
                 id: "33333333-4444-5555-6666-777777777777",
                 type: "event",
                 attributes: {
-                  action: "x",
+                  event_type: "x",
                   resource_type: "y",
                   resource_id: "z",
                   occurred_at: "2026-05-07T12:00:00+00:00",
@@ -542,10 +542,10 @@ describe("AuditClient.resourceTypes", () => {
 });
 
 // ---------------------------------------------------------------------------
-// actions
+// event_types
 // ---------------------------------------------------------------------------
 
-describe("AuditClient.actions", () => {
+describe("AuditClient.eventTypes", () => {
   function _newClient(handler: (req: Request) => Promise<Response>): AuditClient {
     return new AuditClient({
       apiKey: "sk_api_test",
@@ -557,7 +557,7 @@ describe("AuditClient.actions", () => {
     });
   }
 
-  test("list returns action slugs", async () => {
+  test("list returns event type slugs", async () => {
     const c = _newClient(
       async () =>
         new Response(
@@ -565,13 +565,13 @@ describe("AuditClient.actions", () => {
             data: [
               {
                 id: "invoice.created",
-                type: "action",
-                attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
+                type: "event_type",
+                attributes: { event_type: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
               },
               {
                 id: "user.updated",
-                type: "action",
-                attributes: { action: "user.updated", created_at: "2026-01-02T00:00:00Z" },
+                type: "event_type",
+                attributes: { event_type: "user.updated", created_at: "2026-01-02T00:00:00Z" },
               },
             ],
             meta: { pagination: { page: 1, size: 1000 } },
@@ -579,10 +579,10 @@ describe("AuditClient.actions", () => {
           { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
         ),
     );
-    const page = await c.actions.list();
-    expect(page.actions).toHaveLength(2);
-    expect(page.actions[0]!.id).toBe("invoice.created");
-    expect(page.actions[1]!.id).toBe("user.updated");
+    const page = await c.eventTypes.list();
+    expect(page.eventTypes).toHaveLength(2);
+    expect(page.eventTypes[0]!.id).toBe("invoice.created");
+    expect(page.eventTypes[1]!.id).toBe("user.updated");
     expect(page.pagination).toEqual({ page: 1, size: 1000 });
     await c._close();
   });
@@ -596,7 +596,7 @@ describe("AuditClient.actions", () => {
         { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
       );
     });
-    await c.actions.list({ filterResourceType: "invoice" });
+    await c.eventTypes.list({ filterResourceType: "invoice" });
     // openapi-fetch may or may not percent-encode brackets; check for either form
     expect(capturedUrl).toMatch(/filter(\[|%5B)resource_type(\]|%5D)=invoice/);
     await c._close();
@@ -611,8 +611,8 @@ describe("AuditClient.actions", () => {
           data: [
             {
               id: "invoice.created",
-              type: "action",
-              attributes: { action: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
+              type: "event_type",
+              attributes: { event_type: "invoice.created", created_at: "2026-01-01T00:00:00Z" },
             },
           ],
           meta: { pagination: { page: 2, size: 1, total: 3, total_pages: 3 } },
@@ -620,7 +620,7 @@ describe("AuditClient.actions", () => {
         { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
       );
     });
-    const page = await c.actions.list({ pageNumber: 2, pageSize: 1, metaTotal: true });
+    const page = await c.eventTypes.list({ pageNumber: 2, pageSize: 1, metaTotal: true });
     expect(capturedUrl).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
     expect(capturedUrl).toMatch(/page(\[|%5B)size(\]|%5D)=1/);
     expect(capturedUrl).toMatch(/meta(\[|%5B)total(\]|%5D)=true/);
@@ -630,7 +630,7 @@ describe("AuditClient.actions", () => {
 
   test("list throws SmplError on 500", async () => {
     const c = _newClient(async () => new Response("server error", { status: 500 }));
-    await expect(c.actions.list()).rejects.toBeInstanceOf(SmplError);
+    await expect(c.eventTypes.list()).rejects.toBeInstanceOf(SmplError);
     await c._close();
   });
 });

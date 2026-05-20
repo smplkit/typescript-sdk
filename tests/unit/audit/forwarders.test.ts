@@ -179,7 +179,7 @@ describe("Forwarder.save() — create", () => {
   test("POSTs JSON:API and refreshes fields from the response", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
     const { forwarder } = _newForwarder({
-      filter: { "==": [{ var: "action" }, "user.created"] },
+      filter: { "==": [{ var: "event_type" }, "user.created"] },
       transformType: TransformType.JSONATA,
       transform: "$",
     });
@@ -197,13 +197,13 @@ describe("Forwarder.save() — create", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
     const { forwarder } = _newForwarder({
       transformType: TransformType.JSONATA,
-      transform: "{ event: action }",
+      transform: "{ event: event_type }",
     });
     await forwarder.save();
     const req = mockFetch.mock.calls[0]![0] as Request;
     const body = JSON.parse(await req.text());
     expect(body.data.attributes.transform_type).toBe("JSONATA");
-    expect(body.data.attributes.transform).toBe("{ event: action }");
+    expect(body.data.attributes.transform).toBe("{ event: event_type }");
   });
 
   test("save() throws when transformType is JSONATA but transform is not a string", async () => {
