@@ -273,7 +273,7 @@ export interface paths {
         };
         /**
          * List Environments
-         * @description List all environments for the authenticated account.
+         * @description List all environments for the authenticated account. `filter[search]` does a case-insensitive substring match against the environment `key` and `name`. `filter[classification]` narrows the result to one classification (`STANDARD` or `AD_HOC`).
          */
         get: operations["list_environments"];
         put?: never;
@@ -345,7 +345,7 @@ export interface paths {
         };
         /**
          * List API Keys
-         * @description List all API keys for the authenticated account.
+         * @description List all API keys for the authenticated account. `filter[search]` does a case-insensitive substring match against the API key `name`.
          */
         get: operations["list_api_keys"];
         put?: never;
@@ -561,7 +561,7 @@ export interface paths {
         };
         /**
          * List Services
-         * @description List all services for the authenticated account.
+         * @description List all services for the authenticated account. `filter[search]` does a case-insensitive substring match against the service `key` and `name`.
          */
         get: operations["list_services"];
         put?: never;
@@ -4728,6 +4728,10 @@ export interface operations {
     list_environments: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match against the environment `key` and `name`. An environment is returned if either field contains the search term. */
+                "filter[search]"?: string | null;
+                /** @description Narrow the result to environments with the given classification. One of `STANDARD` or `AD_HOC`. */
+                "filter[classification]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
@@ -5091,6 +5095,8 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[status]"?: string | null;
+                /** @description Case-insensitive substring match against the API key `name`. */
+                "filter[search]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `expires_at`, `-expires_at`, `last_used_at`, `-last_used_at`, `name`, `-name`, `status`, `-status`. */
                 sort?: "created_at" | "-created_at" | "expires_at" | "-expires_at" | "last_used_at" | "-last_used_at" | "name" | "-name" | "status" | "-status";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
@@ -6125,6 +6131,8 @@ export interface operations {
     list_services: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match against the service `key` and `name`. A service is returned if either field contains the search term. */
+                "filter[search]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
