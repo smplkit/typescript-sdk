@@ -17,9 +17,10 @@ export interface paths {
          *
          *     Default sort is `key` ascending. Supports `filter[managed]` to narrow
          *     to managed (or unmanaged) loggers, `filter[service]` to keep only
-         *     loggers observed in a specific service, and `filter[last_seen]`
+         *     loggers observed in a specific service, `filter[last_seen]`
          *     (interval notation `[<from>,*)`) to keep only loggers with a source
-         *     observation at or after the given timestamp.
+         *     observation at or after the given timestamp, and `filter[search]`
+         *     for a case-insensitive substring match against `key` or `name`.
          *
          *     ``filter[service]`` and ``filter[last_seen]`` are applied via a
          *     cross-table membership check in Python after the SQL fetch, so
@@ -860,6 +861,8 @@ export interface operations {
                 "filter[managed]"?: boolean | null;
                 "filter[service]"?: string | null;
                 "filter[last_seen]"?: string | null;
+                /** @description Case-insensitive substring match against the logger `key` and `name`. A logger is returned if either field contains the search term. */
+                "filter[search]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
