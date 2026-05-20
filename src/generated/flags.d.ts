@@ -840,6 +840,8 @@ export interface operations {
                 "filter[references_context]"?: string | null;
                 /** @description Return flags whose rules reference any attribute of the given context type. */
                 "filter[references_context_type]"?: string | null;
+                /** @description Case-insensitive substring match against the flag `key` and `name`. A flag is returned if either field contains the search term. */
+                "filter[search]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `type`, `-type`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "type" | "-type" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
