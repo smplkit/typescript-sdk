@@ -355,7 +355,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/actions": {
+    "/api/v1/event_types": {
         parameters: {
             query?: never;
             header?: never;
@@ -363,15 +363,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Actions
-         * @description List the distinct `action` slugs recorded for this account.
+         * List Event Types
+         * @description List the distinct `event_type` slugs recorded for this account.
          *
          *     Default sort is `key` ascending; pass `sort=-key` for descending.
          *     Without `filter[resource_type]`, returns one row per distinct
-         *     action. With `filter[resource_type]`, returns the actions recorded
-         *     for that specific resource type.
+         *     event_type. With `filter[resource_type]`, returns the event_types
+         *     recorded for that specific resource type.
          */
-        get: operations["list_actions"];
+        get: operations["list_event_types"];
         put?: never;
         post?: never;
         delete?: never;
@@ -384,50 +384,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** ActionAttributes */
-        ActionAttributes: {
-            /**
-             * Action
-             * @description The action slug. Same as the JSON:API ``id``.
-             */
-            action: string;
-            /**
-             * Created At
-             * Format: date-time
-             * @description First sighting of this action for the account. When the request includes ``filter[resource_type]``, this is the first sighting of the (action, resource_type) triple rather than the action overall.
-             */
-            created_at: string;
-        };
-        /** ActionListResponse */
-        ActionListResponse: {
-            /** Data */
-            data: components["schemas"]["ActionResource"][];
-            meta: components["schemas"]["ListMeta"];
-        };
-        /**
-         * ActionResource
-         * @example {
-         *       "attributes": {
-         *         "action": "smpl.flag.created",
-         *         "created_at": "2026-04-12T15:23:01Z"
-         *       },
-         *       "id": "smpl.flag.created",
-         *       "type": "action"
-         *     }
-         */
-        ActionResource: {
-            /**
-             * Id
-             * @description The action slug.
-             */
-            id: string;
-            /**
-             * Type
-             * @default action
-             */
-            type: string;
-            attributes: components["schemas"]["ActionAttributes"];
-        };
         /**
          * Event
          * @description An audit event — a record that something happened, attributed to
@@ -439,10 +395,10 @@ export interface components {
          */
         Event: {
             /**
-             * Action
+             * Event Type
              * @description What happened, e.g. `user.created`. Any non-empty string.
              */
-            action: string;
+            event_type: string;
             /**
              * Resource Type
              * @description Kind of resource the event is about, e.g. `user`. Any non-empty string.
@@ -545,7 +501,6 @@ export interface components {
          *     `id` must not be specified for create requests (the server assigns it).
          * @example {
          *       "attributes": {
-         *         "action": "user.created",
          *         "actor_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
          *         "actor_label": "alice@example.com",
          *         "actor_type": "USER",
@@ -558,6 +513,7 @@ export interface components {
          *         },
          *         "description": "Alice signed up via the marketing site.",
          *         "do_not_forward": false,
+         *         "event_type": "user.created",
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
          *         "resource_id": "u-1",
@@ -635,10 +591,10 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
-             * Filter[Action]
-             * @description Exact match on the event's `action` field.
+             * Filter[Event Type]
+             * @description Exact match on the event's `event_type` field.
              */
-            "filter[action]"?: string | null;
+            "filter[event_type]"?: string | null;
             /**
              * Filter[Resource Type]
              * @description Exact match on the event's `resource_type` field.
@@ -730,6 +686,50 @@ export interface components {
              * @description `true` if the server hit the per-request scan ceiling before finding `page[size]` matches. When true, paginate again with the returned `links.next` cursor to continue scanning past the ceiling.
              */
             exhausted: boolean;
+        };
+        /** EventTypeAttributes */
+        EventTypeAttributes: {
+            /**
+             * Event Type
+             * @description The event_type slug. Same as the JSON:API ``id``.
+             */
+            event_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description First sighting of this event_type for the account. When the request includes ``filter[resource_type]``, this is the first sighting of the (event_type, resource_type) triple rather than the event_type overall.
+             */
+            created_at: string;
+        };
+        /** EventTypeListResponse */
+        EventTypeListResponse: {
+            /** Data */
+            data: components["schemas"]["EventTypeResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * EventTypeResource
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-04-12T15:23:01Z",
+         *         "event_type": "smpl.flag.created"
+         *       },
+         *       "id": "smpl.flag.created",
+         *       "type": "event_type"
+         *     }
+         */
+        EventTypeResource: {
+            /**
+             * Id
+             * @description The event_type slug.
+             */
+            id: string;
+            /**
+             * Type
+             * @default event_type
+             */
+            type: string;
+            attributes: components["schemas"]["EventTypeAttributes"];
         };
         /**
          * Forwarder
@@ -900,7 +900,7 @@ export interface components {
          *         "forwarder_id": "11111111-2222-3333-4444-555555555555",
          *         "latency_ms": 187,
          *         "request": {
-         *           "body": "{\"action\":\"user.created\",\"resource_id\":\"u-1\"}",
+         *           "body": "{\"event_type\":\"user.created\",\"resource_id\":\"u-1\"}",
          *           "headers": [
          *             {
          *               "name": "DD-API-KEY",
@@ -979,14 +979,14 @@ export interface components {
          *         "filter": {
          *           "==": [
          *             {
-         *               "var": "action"
+         *               "var": "event_type"
          *             },
          *             "user.created"
          *           ]
          *         },
          *         "forwarder_type": "datadog",
          *         "name": "Datadog production",
-         *         "transform": "{ \"message\": action & ' on ' & resource_type }",
+         *         "transform": "{ \"message\": event_type & ' on ' & resource_type }",
          *         "transform_type": "JSONATA",
          *         "updated_at": "2026-05-07T12:00:00Z",
          *         "version": 1
@@ -1180,7 +1180,7 @@ export interface components {
          *           }
          *         },
          *         "transform": {
-         *           "default": "{ \"ddsource\": \"smplkit\", \"message\": action }",
+         *           "default": "{ \"ddsource\": \"smplkit\", \"message\": event_type }",
          *           "type": "JSONATA"
          *         }
          *       },
@@ -1529,7 +1529,7 @@ export interface operations {
                 "filter[occurred_at]"?: string | null;
                 "filter[actor_type]"?: string | null;
                 "filter[actor_id]"?: string | null;
-                "filter[action]"?: string | null;
+                "filter[event_type]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 "filter[resource_id]"?: string | null;
                 /** @description Case-insensitive substring match against `resource_id` or `description`. Use `filter[resource_id]` for an exact match on `resource_id`. */
@@ -1961,7 +1961,7 @@ export interface operations {
             };
         };
     };
-    list_actions: {
+    list_event_types: {
         parameters: {
             query?: {
                 "filter[resource_type]"?: string | null;
@@ -1986,7 +1986,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": components["schemas"]["ActionListResponse"];
+                    "application/vnd.api+json": components["schemas"]["EventTypeListResponse"];
                 };
             };
         };
