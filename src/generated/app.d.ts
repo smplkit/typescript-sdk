@@ -1219,25 +1219,9 @@ export interface components {
             readonly show_sample_data?: boolean | null;
             /**
              * Discount Override Pct
-             * @description Custom discount percentage applied to the account in place of the volume-based discount schedule. `null` means the volume schedule applies.
+             * @description Custom discount percentage applied to the account in place of the volume-based discount schedule. `null` means the volume schedule applies. Who set it, when, and why are captured in the audit-event stream rather than on the subscription row.
              */
             readonly discount_override_pct?: number | null;
-            /**
-             * Discount Override Reason
-             * @description Free-form note explaining why the override was set.
-             */
-            readonly discount_override_reason?: string | null;
-            /**
-             * Discount Override Set By User Id
-             * @description UUID of the user who set the override.
-             */
-            readonly discount_override_set_by_user_id?: string | null;
-            /**
-             * Discount Override Set At
-             * Format: date-time
-             * @description When the override was last changed.
-             */
-            readonly discount_override_set_at?: string | null;
         };
         /**
          * AccountRequest
