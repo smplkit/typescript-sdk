@@ -13,9 +13,9 @@ export type { SmplManagementClientOptions } from "./management/client.js";
 // Audit
 export { AuditClient } from "./audit/client.js";
 export type {
-  Action as AuditAction,
-  ActionListPage as AuditActionListPage,
-  ListActionsParams as AuditListActionsParams,
+  EventType as AuditEventType,
+  EventTypeListPage as AuditEventTypeListPage,
+  ListEventTypesParams as AuditListEventTypesParams,
   AuditEvent,
   CreateEventInput as CreateAuditEventInput,
   ListEventsPage as AuditEventListPage,
