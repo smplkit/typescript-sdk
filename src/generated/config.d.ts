@@ -334,7 +334,7 @@ export interface components {
         UsageAttributes: {
             /**
              * Limit Key
-             * @description Identifier of the metered limit, e.g. `config.items` or `config.inheritance_depth`.
+             * @description Identifier of the metered limit, e.g. `config.managed_configurations` or `config.inheritance_depth`.
              */
             limit_key: string;
             /**
@@ -355,7 +355,7 @@ export interface components {
          *       "data": [
          *         {
          *           "attributes": {
-         *             "limit_key": "config.items",
+         *             "limit_key": "config.managed_configurations",
          *             "period": "current",
          *             "value": 3
          *           },
@@ -384,7 +384,7 @@ export interface components {
          * @description JSON:API resource envelope for a usage counter.
          * @example {
          *       "attributes": {
-         *         "limit_key": "config.items",
+         *         "limit_key": "config.managed_configurations",
          *         "period": "current",
          *         "value": 3
          *       },
