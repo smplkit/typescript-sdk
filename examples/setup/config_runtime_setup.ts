@@ -1,66 +1,41 @@
-/** Setup / cleanup helpers for `config_runtime_showcase.ts`. */
+/** Setup, simulation, and cleanup helpers for `config_runtime_showcase.ts`.
+ *
+ * The runtime showcase is intentionally runtime-only — declarations,
+ * typed getters, change listeners. In a real deployment the configs
+ * would either already exist (admin-curated) or be created by the
+ * SDK's discovery on first run. Here we pre-create them through the
+ * management API so the showcase can also demonstrate a live admin
+ * override end-to-end in a single process.
+ */
 
 import { SmplManagementClient, SmplkitNotFoundError } from "../../src/index.js";
 
-const DEMO_ENVIRONMENTS = ["staging", "production"];
-const DEMO_CONFIG_IDS = ["showcase-user-service", "showcase-auth-module", "showcase-common"];
+const DEMO_CONFIG_IDS = ["showcase-billing", "showcase-common"];
 
 export async function setupRuntimeShowcase(manage: SmplManagementClient): Promise<void> {
-  const existing = new Set((await manage.environments.list()).map((env) => env.id));
-  for (const envId of DEMO_ENVIRONMENTS) {
-    if (!existing.has(envId)) {
-      await manage.environments
-        .new(envId, { name: envId.charAt(0).toUpperCase() + envId.slice(1) })
-        .save();
-    }
-  }
   await cleanupRuntimeShowcase(manage);
 
-  const shared = manage.config.new("showcase-common", {
-    name: "Showcase Common",
-    description: "Showcase-only shared configuration.",
+  const common = manage.config.new("showcase-common", {
+    description: "Shared defaults for showcase services.",
   });
-  shared.setString("app_name", "Acme SaaS Platform");
-  shared.setString("support_email", "support@acme.dev");
-  shared.setNumber("max_retries", 3);
-  shared.setNumber("request_timeout_ms", 5000);
-  shared.setNumber("pagination_default_page_size", 25);
-  shared.setNumber("max_retries", 5, { environment: "production" });
-  shared.setNumber("request_timeout_ms", 10000, { environment: "production" });
-  shared.setNumber("max_retries", 2, { environment: "staging" });
-  await shared.save();
+  common.setString("app.name", "Acme SaaS");
+  common.setString("support.email", "support@acme.dev");
+  await common.save();
 
-  const userService = manage.config.new("showcase-user-service", {
-    name: "Showcase User Service",
-    description: "Configuration for the user microservice.",
-    parent: shared,
+  const billing = manage.config.new("showcase-billing", {
+    description: "Plan-limit configuration for billing.",
+    parent: "showcase-common",
   });
-  userService.setString("database.host", "localhost");
-  userService.setNumber("database.port", 5432);
-  userService.setString("database.name", "users_dev");
-  userService.setNumber("database.pool_size", 5);
-  userService.setNumber("cache_ttl_seconds", 300);
-  userService.setBoolean("enable_signup", true);
-  userService.setNumber("pagination_default_page_size", 50);
-  userService.setString("database.host", "prod-users-rds.internal.acme.dev", {
-    environment: "production",
-  });
-  userService.setString("database.name", "users_prod", { environment: "production" });
-  userService.setNumber("database.pool_size", 20, { environment: "production" });
-  userService.setNumber("cache_ttl_seconds", 600, { environment: "production" });
-  userService.setBoolean("enable_signup", false, { environment: "production" });
-  await userService.save();
+  billing.setNumber("plan.max_seats", 5, { description: "Maximum seats per organization." });
+  billing.setNumber("plan.trial_days", 14);
+  billing.setString("plan.tier", "free");
+  await billing.save();
+}
 
-  const authModule = manage.config.new("showcase-auth-module", {
-    name: "Showcase Auth Module",
-    description: "Authentication module within the user service.",
-    parent: shared,
-  });
-  authModule.setNumber("session_ttl_minutes", 60);
-  authModule.setBoolean("mfa_enabled", false);
-  authModule.setNumber("session_ttl_minutes", 30, { environment: "production" });
-  authModule.setBoolean("mfa_enabled", true, { environment: "production" });
-  await authModule.save();
+export async function simulateAdminOverride(manage: SmplManagementClient): Promise<void> {
+  const billing = await manage.config.get("showcase-billing");
+  billing.setNumber("plan.max_seats", 25, { environment: "production" });
+  await billing.save();
 }
 
 export async function cleanupRuntimeShowcase(manage: SmplManagementClient): Promise<void> {

@@ -85,12 +85,165 @@ function resourceToConfig(
   });
 }
 
+const CONFIG_REGISTRATION_FLUSH_SIZE = 50;
+
+interface ConfigBufferEntry {
+  id: string;
+  items: Record<string, { value: unknown; type: string; description?: string }>;
+  service?: string;
+  environment?: string;
+  parent?: string;
+  name?: string;
+  description?: string;
+}
+
+interface ConfigBufferMeta {
+  service: string | null;
+  environment: string | null;
+  parent: string | null;
+  name: string | null;
+  description: string | null;
+}
+
 /**
- * `mgmt.config.*` — CRUD client for configs.
+ * Buffer pending config declarations for bulk registration. @internal
+ *
+ * Configs differ from flags because each entry carries a nested `items`
+ * dict that grows incrementally as typed getters fire. We store per-config
+ * metadata permanently so post-flush deltas re-attribute correctly, and
+ * dedupe items per `(configId, itemKey)` so an already-sent item never
+ * re-sends. Mirrors Python's `_ConfigRegistrationBuffer`.
+ */
+export class ConfigRegistrationBuffer {
+  private _pending = new Map<string, ConfigBufferEntry>();
+  private _meta = new Map<string, ConfigBufferMeta>();
+  private _sentItems = new Set<string>();
+
+  declare(configId: string, meta: ConfigBufferMeta): void {
+    if (this._meta.has(configId)) return;
+    this._meta.set(configId, meta);
+    this._pending.set(configId, this._buildEntry(configId, {}));
+  }
+
+  addItem(
+    configId: string,
+    itemKey: string,
+    itemType: string,
+    defaultValue: unknown,
+    description: string | null,
+  ): void {
+    if (!this._meta.has(configId)) return;
+    const sentKey = `${configId}::${itemKey}`;
+    if (this._sentItems.has(sentKey)) return;
+    let entry = this._pending.get(configId);
+    if (!entry) {
+      entry = this._buildEntry(configId, {});
+      this._pending.set(configId, entry);
+    }
+    if (itemKey in entry.items) return;
+    const def: ConfigBufferEntry["items"][string] = { value: defaultValue, type: itemType };
+    if (description !== null) def.description = description;
+    entry.items[itemKey] = def;
+  }
+
+  private _buildEntry(configId: string, items: ConfigBufferEntry["items"]): ConfigBufferEntry {
+    const meta = this._meta.get(configId)!;
+    const entry: ConfigBufferEntry = { id: configId, items };
+    if (meta.service !== null) entry.service = meta.service;
+    if (meta.environment !== null) entry.environment = meta.environment;
+    if (meta.parent !== null) entry.parent = meta.parent;
+    if (meta.name !== null) entry.name = meta.name;
+    if (meta.description !== null) entry.description = meta.description;
+    return entry;
+  }
+
+  /** Destructive drain — records sent items so they aren't re-queued. */
+  drain(): ConfigBufferEntry[] {
+    const batch = Array.from(this._pending.values());
+    for (const entry of batch) {
+      for (const itemKey of Object.keys(entry.items)) {
+        this._sentItems.add(`${entry.id}::${itemKey}`);
+      }
+    }
+    this._pending.clear();
+    return batch;
+  }
+
+  get pendingCount(): number {
+    return this._pending.size;
+  }
+}
+
+/**
+ * `mgmt.config.*` — CRUD client for configs + bulk registration buffer.
  */
 export class ManagementConfigClient {
   /** @internal */
+  readonly _buffer = new ConfigRegistrationBuffer();
+
+  /** @internal */
   constructor(private readonly _http: ConfigHttp) {}
+
+  /** @internal — queue a configuration declaration for bulk-discovery upload. */
+  registerConfig(
+    configId: string,
+    meta: {
+      service: string | null;
+      environment: string | null;
+      parent?: string | null;
+      name?: string | null;
+      description?: string | null;
+    },
+  ): void {
+    this._buffer.declare(configId, {
+      service: meta.service,
+      environment: meta.environment,
+      parent: meta.parent ?? null,
+      name: meta.name ?? null,
+      description: meta.description ?? null,
+    });
+    if (this._buffer.pendingCount >= CONFIG_REGISTRATION_FLUSH_SIZE) {
+      void this.flush();
+    }
+  }
+
+  /** @internal — queue a config item declaration. */
+  registerConfigItem(
+    configId: string,
+    itemKey: string,
+    itemType: string,
+    defaultValue: unknown,
+    description: string | null,
+  ): void {
+    this._buffer.addItem(configId, itemKey, itemType, defaultValue, description);
+    if (this._buffer.pendingCount >= CONFIG_REGISTRATION_FLUSH_SIZE) {
+      void this.flush();
+    }
+  }
+
+  /** Send any pending config declarations to `POST /api/v1/configs/bulk`. */
+  async flush(): Promise<void> {
+    const batch = this._buffer.drain();
+    if (batch.length === 0) return;
+    try {
+      const result = await this._http.POST("/api/v1/configs/bulk", {
+        body: { configs: batch } as never,
+      });
+      if (!result.response.ok) {
+        // Per ADR-024 §2.9 bulk is plan-limit-exempt, but a transient
+        // failure shouldn't crash customer code. Drained entries are
+        // not requeued — the SDK will re-observe on the next process
+        // start. Mirrors Python's fire-and-forget behavior.
+      }
+    } catch {
+      // Fire-and-forget.
+    }
+  }
+
+  /** Number of pending config declarations awaiting flush. */
+  get pendingCount(): number {
+    return this._buffer.pendingCount;
+  }
 
   /** Construct an unsaved {@link Config}. Call `.save()` to persist. */
   new(

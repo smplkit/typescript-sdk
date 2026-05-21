@@ -161,6 +161,11 @@ export class ConfigClient {
    * cache for everyone (including descendants that inherit from it)
    * without a full re-list. Mirrors Python's `_raw_config_cache`. */
   private _configStore: Record<string, Config> = {};
+  /** Cache of LiveConfigProxy instances by config id — ensures repeat
+   * `get_or_create(id)` (or `get(id)` after discovery) returns the same
+   * handle so callers can reference it as a parent via direct ref.
+   * Mirrors Python's `_proxies`. */
+  private _proxies: Record<string, LiveConfigProxy<any>> = {};
   private _initialized = false;
   private _listeners: ChangeListener[] = [];
 
@@ -231,7 +236,89 @@ export class ConfigClient {
     if (metrics) {
       metrics.record("config.resolutions", 1, "resolutions", { config: id });
     }
-    return new LiveConfigProxy<T>(this, id, model);
+    return this._cachedProxy<T>(id, model);
+  }
+
+  /**
+   * Declare a configuration from code; return a live, dict-like view.
+   *
+   * Idempotent. Repeated calls with the same `id` return the same
+   * {@link LiveConfigProxy} instance. The first call queues a discovery
+   * payload (the config and any items declared via typed getters on the
+   * returned handle) for upload to `POST /api/v1/configs/bulk` on next
+   * flush. If the config already exists server-side, `managed=true`
+   * configs are left untouched; `managed=false` configs receive the
+   * SDK's items via source-row upsert per ADR-024 §2.9.
+   *
+   * Unlike {@link get}, this method does NOT raise `NotFoundError` when
+   * the id is absent from the cache — discovery handles that case.
+   *
+   * Mirrors Python's `client.config.get_or_create(id, ...)`.
+   */
+  async getOrCreate<T = Record<string, unknown>>(
+    id: string,
+    options: {
+      parent?: string | LiveConfigProxy<any> | null;
+      name?: string;
+      description?: string;
+      model?: new (data: any) => T;
+    } = {},
+  ): Promise<LiveConfigProxy<T>> {
+    const parent = options.parent;
+    const parentId =
+      parent instanceof LiveConfigProxy ? (parent as any)._key : (parent ?? null);
+
+    this._observeConfigDeclaration(id, parentId, options.name ?? null, options.description ?? null);
+
+    await this._ensureInitialized();
+    return this._cachedProxy<T>(id, options.model);
+  }
+
+  /** @internal — return (and cache) the canonical proxy for a config id. */
+  _cachedProxy<T>(
+    id: string,
+    model?: new (data: any) => T,
+  ): LiveConfigProxy<T> {
+    let proxy = this._proxies[id] as LiveConfigProxy<T> | undefined;
+    if (!proxy) {
+      proxy = new LiveConfigProxy<T>(this, id, model);
+      this._proxies[id] = proxy as LiveConfigProxy<any>;
+    } else if (model !== undefined && (proxy as any)._model === undefined) {
+      // First model-typed access — upgrade the proxy in place.
+      (proxy as any)._model = model;
+    }
+    return proxy;
+  }
+
+  /** @internal — queue a config declaration with the management buffer. */
+  _observeConfigDeclaration(
+    configId: string,
+    parent: string | null,
+    name: string | null,
+    description: string | null,
+  ): void {
+    const manage = this._resolveManagement?.();
+    if (!manage) return;
+    manage.config.registerConfig(configId, {
+      service: this._parent?._service ?? null,
+      environment: this._parent?._environment ?? "",
+      parent,
+      name,
+      description,
+    });
+  }
+
+  /** @internal — queue a config item declaration with the management buffer. */
+  _observeItemDeclaration(
+    configId: string,
+    itemKey: string,
+    itemType: string,
+    defaultValue: unknown,
+    description?: string,
+  ): void {
+    const manage = this._resolveManagement?.();
+    if (!manage) return;
+    manage.config.registerConfigItem(configId, itemKey, itemType, defaultValue, description ?? null);
   }
 
   // ------------------------------------------------------------------
@@ -369,6 +456,18 @@ export class ConfigClient {
     if (!environment) {
       throw new SmplError("No environment set. Ensure SmplClient is configured.");
     }
+
+    // Per ADR-037 §2.14: flush any buffered discovery declarations BEFORE
+    // the initial fetch so newly-discovered configs appear in the cache.
+    const manage = this._resolveManagement?.();
+    if (manage) {
+      try {
+        await manage.config.flush();
+      } catch (err) {
+        debug("config", `pre-start discovery flush failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     const configs = await this._listConfigs();
     const cache: Record<string, Record<string, unknown>> = {};
     const store: Record<string, Config> = {};

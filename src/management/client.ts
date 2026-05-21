@@ -850,6 +850,7 @@ export class SmplManagementClient {
       await this.contexts.flush();
       await this.flags.flush();
       await this.loggers.flush();
+      await this.config.flush();
     } catch {
       // Final flush best-effort.
     }

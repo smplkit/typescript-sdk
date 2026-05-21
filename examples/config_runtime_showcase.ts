@@ -6,107 +6,62 @@
  *   - A valid smplkit API key, provided via one of:
  *     - `SMPLKIT_API_KEY` environment variable
  *     - `~/.smplkit` configuration file (see SDK docs)
- *   - The smplkit Config service running and reachable
  *
  * Usage:
  *
  *   tsx examples/config_runtime_showcase.ts
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { strict as assert } from "node:assert";
 
 import { SmplClient } from "../src/index.js";
 import type { ConfigChangeEvent } from "../src/index.js";
-import { cleanupRuntimeShowcase, setupRuntimeShowcase } from "./setup/config_runtime_setup.js";
-
-class Database {
-  host!: string;
-  port!: number;
-  name!: string;
-  pool_size!: number;
-
-  constructor(data: any) {
-    Object.assign(this, data);
-  }
-}
-
-class CommonConfig {
-  app_name?: string | null = null;
-  support_email?: string | null = null;
-  max_retries: number = 3;
-  request_timeout_ms: number = 5000;
-
-  constructor(data: any) {
-    Object.assign(this, data);
-  }
-}
-
-class UserServiceConfig extends CommonConfig {
-  database!: Database;
-  cache_ttl_seconds!: number;
-  enable_signup!: boolean;
-  pagination_default_page_size!: number;
-
-  constructor(data: any) {
-    super(data);
-    this.database = new Database(data.database ?? {});
-    this.cache_ttl_seconds = data.cache_ttl_seconds;
-    this.enable_signup = data.enable_signup;
-    this.pagination_default_page_size = data.pagination_default_page_size;
-  }
-}
+import {
+  cleanupRuntimeShowcase,
+  setupRuntimeShowcase,
+  simulateAdminOverride,
+} from "./setup/config_runtime_setup.js";
 
 async function main(): Promise<void> {
-  // create the client (TypeScript has a single Promise-based client)
+
+  // create the client
   const client = new SmplClient({
     environment: "production",
-    service: "showcase-service",
+    service: "showcase-billing",
   });
   try {
     await setupRuntimeShowcase(client.manage);
-    // Block until the live-updates WebSocket subscription is registered
-    // server-side. Without this, writes fired immediately afterward can
-    // race the broadcast of their own change events (the SDK isn't in
-    // the subscriber registry yet) and silently miss them. Mirrors
-    // `await client.wait_until_ready()` in the Python showcase.
-    await client.waitUntilReady();
 
-    // get a config as a plain dict
-    const userSvcConfigDict = await client.config.get("showcase-user-service");
-    console.log(`Total resolved keys: ${Object.keys(userSvcConfigDict).length}`);
-    console.log(`database.host = ${userSvcConfigDict.get("database.host")}`);
-    console.log(`max_retries = ${userSvcConfigDict.get("max_retries")}`);
-    console.log(`cache_ttl_seconds = ${userSvcConfigDict.get("cache_ttl_seconds")}`);
-    console.log(
-      `pagination_default_page_size = ${userSvcConfigDict.get("pagination_default_page_size")}`,
-    );
-    console.log(`enable_signup = ${userSvcConfigDict.get("enable_signup")}`);
-    console.log(`nonexistent_key = ${userSvcConfigDict.get("nonexistent_key")}`);
+    // declare a common/shared configuration
+    const common = await client.config.getOrCreate("showcase-common", {
+      description: "Shared defaults for showcase services.",
+    });
 
-    // production overrides resolve through the inheritance chain
-    assert.equal(userSvcConfigDict.get("database.host"), "prod-users-rds.internal.acme.dev");
-    assert.equal(userSvcConfigDict.get("nonexistent_key"), undefined);
+    // declare a configuration that inherits from some parent
+    const billing = await client.config.getOrCreate("showcase-billing", {
+      parent: common,
+      description: "Plan-limit configuration discovered from code.",
+    });
 
-    // get a config as a typed model
-    const userSvcConfig = await client.config.get("showcase-user-service", UserServiceConfig);
-    console.log(`cfg.database.host = ${userSvcConfig.database.host}`);
-    console.log(`cfg.database.pool_size = ${userSvcConfig.database.pool_size}`);
-    console.log(`cfg.cache_ttl_seconds = ${userSvcConfig.cache_ttl_seconds}`);
-    console.log(`cfg.enable_signup = ${userSvcConfig.enable_signup}`);
-    console.log(`cfg.max_retries = ${userSvcConfig.max_retries}`);
-    console.log(`cfg.app_name = ${userSvcConfig.app_name}`);
+    // get a configured value
+    const appName = common.getString("app.name", "Acme SaaS");
+    const supportEmail = common.getString("support.email", "support@acme.dev");
+    const maxSeats = billing.getInt("plan.max_seats", 5, {
+      description: "Maximum seats per organization.",
+    });
+    const trialDays = billing.getInt("plan.trial_days", 14);
+    const tier = billing.getString("plan.tier", "free");
 
-    assert.ok(userSvcConfig.database instanceof Database);
-    assert.equal(userSvcConfig.max_retries, 5);
-    assert.equal(userSvcConfig.app_name, "Acme SaaS Platform");
+    console.log(`app.name = ${appName}`);
+    console.log(`support.email = ${supportEmail}`);
+    console.log(`plan.max_seats = ${maxSeats}`);
+    console.log(`plan.trial_days = ${trialDays}`);
+    console.log(`plan.tier = ${tier}`);
 
+    // listen for changes
     const changes: ConfigChangeEvent[] = [];
-    const retriesChanges: ConfigChangeEvent[] = [];
 
-    // global listener — fires when ANY config item changes
-    client.config.onChange((event) => {
+    billing.onChange("plan.max_seats", (event) => {
       changes.push(event);
       console.log(
         `    [CHANGE] ${event.configId}.${event.itemKey}: ` +
@@ -114,47 +69,23 @@ async function main(): Promise<void> {
       );
     });
 
-    // item-scoped listener via the live-proxy handle
-    const commonCfg = await client.config.get("showcase-common");
+    // simulate someone overriding a value in the console
+    await simulateAdminOverride(client.manage);
 
-    commonCfg.onChange("max_retries", (event) => {
-      retriesChanges.push(event);
-    });
+    // wait for the WebSocket push to deliver the change
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
-    // simulate someone making a change to trigger listeners
-    await updateMaxRetries(client, 7);
-
-    // wait for the WebSocket change event to be delivered (up to 10s)
-    await new Promise<void>((resolve, reject) => {
-      const deadline = Date.now() + 10_000;
-      const check = () => {
-        if (changes.length >= 1) return resolve();
-        if (Date.now() >= deadline) return reject(new Error("Timed out waiting for change event"));
-        setTimeout(check, 100);
-      };
-      check();
-    });
-
-    // userSvcConfig always reflects the latest values
-    console.log(`max_retries after update = ${userSvcConfig.max_retries}`);
-    console.log(`Global changes received: ${changes.length}`);
-    console.log(`Retries-specific changes received: ${retriesChanges.length}`);
-
-    assert.equal(userSvcConfig.max_retries, 7);
-    assert.ok(changes.length >= 1);
-    assert.ok(retriesChanges.length >= 1);
+    // get the latest value
+    const updatedSeats = billing.getInt("plan.max_seats", 5);
+    console.log(`plan.max_seats after override = ${updatedSeats}`);
+    assert.equal(updatedSeats, 25, `Expected 25, got ${updatedSeats}`);
+    assert.ok(changes.length >= 1, "Expected at least one change event");
 
     await cleanupRuntimeShowcase(client.manage);
     console.log("Done!");
   } finally {
     client.close();
   }
-}
-
-async function updateMaxRetries(client: SmplClient, maxRetries: number): Promise<void> {
-  const commonCfg = await client.manage.config.get("showcase-common");
-  commonCfg.setNumber("max_retries", maxRetries, { environment: "production" });
-  await commonCfg.save();
 }
 
 main().catch((err) => {

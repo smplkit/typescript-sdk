@@ -81,7 +81,20 @@ export class LiveConfigProxy<T = Record<string, unknown>> {
     this._key = key;
     this._model = model;
 
-    const ownMethods = new Set(["keys", "values", "items", "get", "onChange", "_currentValues"]);
+    const ownMethods = new Set([
+      "keys",
+      "values",
+      "items",
+      "get",
+      "onChange",
+      "getBool",
+      "getInt",
+      "getFloat",
+      "getString",
+      "getJson",
+      "_currentValues",
+      "_registerItem",
+    ]);
 
     return new Proxy(this, {
       get(target, prop, receiver) {
@@ -169,6 +182,85 @@ export class LiveConfigProxy<T = Record<string, unknown>> {
   get<V = unknown>(key: string, defaultValue?: V): V | unknown {
     const values = this._currentValues();
     return key in values ? values[key] : defaultValue;
+  }
+
+  // ------------------------------------------------------------------
+  // Typed getters (ADR-037 §2.13)
+  //
+  // Each registers the item (key, type, default, description) on first
+  // call within the process, then returns the resolved value. When the
+  // resolved value cannot be coerced to the getter's type — including
+  // the "not yet set on the server" case — the in-code default is
+  // returned and a structured warning is logged.
+  // ------------------------------------------------------------------
+
+  /** @internal */
+  private _registerItem(itemKey: string, itemType: string, defaultValue: unknown, description?: string): void {
+    this._client._observeItemDeclaration(this._key, itemKey, itemType, defaultValue, description);
+  }
+
+  /** Read a BOOLEAN item, registering the declaration on first call. */
+  getBool(key: string, defaultValue: boolean, options: { description?: string } = {}): boolean {
+    this._registerItem(key, "BOOLEAN", defaultValue, options.description);
+    const values = this._currentValues();
+    if (!(key in values)) return defaultValue;
+    const value = values[key];
+    if (typeof value === "boolean") return value;
+    console.warn(
+      `[smplkit] config ${JSON.stringify(this._key)} item ${JSON.stringify(key)}: ` +
+        `expected BOOLEAN, got ${typeof value}; returning default`,
+    );
+    return defaultValue;
+  }
+
+  /** Read a NUMBER item as int, registering the declaration on first call. */
+  getInt(key: string, defaultValue: number, options: { description?: string } = {}): number {
+    this._registerItem(key, "NUMBER", defaultValue, options.description);
+    const values = this._currentValues();
+    if (!(key in values)) return defaultValue;
+    const value = values[key];
+    if (typeof value === "number" && Number.isInteger(value)) return value;
+    console.warn(
+      `[smplkit] config ${JSON.stringify(this._key)} item ${JSON.stringify(key)}: ` +
+        `expected NUMBER (int), got ${typeof value}; returning default`,
+    );
+    return defaultValue;
+  }
+
+  /** Read a NUMBER item as float, registering the declaration on first call. */
+  getFloat(key: string, defaultValue: number, options: { description?: string } = {}): number {
+    this._registerItem(key, "NUMBER", defaultValue, options.description);
+    const values = this._currentValues();
+    if (!(key in values)) return defaultValue;
+    const value = values[key];
+    if (typeof value === "number") return value;
+    console.warn(
+      `[smplkit] config ${JSON.stringify(this._key)} item ${JSON.stringify(key)}: ` +
+        `expected NUMBER (float), got ${typeof value}; returning default`,
+    );
+    return defaultValue;
+  }
+
+  /** Read a STRING item, registering the declaration on first call. */
+  getString(key: string, defaultValue: string, options: { description?: string } = {}): string {
+    this._registerItem(key, "STRING", defaultValue, options.description);
+    const values = this._currentValues();
+    if (!(key in values)) return defaultValue;
+    const value = values[key];
+    if (typeof value === "string") return value;
+    console.warn(
+      `[smplkit] config ${JSON.stringify(this._key)} item ${JSON.stringify(key)}: ` +
+        `expected STRING, got ${typeof value}; returning default`,
+    );
+    return defaultValue;
+  }
+
+  /** Read a JSON item, registering the declaration on first call. */
+  getJson<V = unknown>(key: string, defaultValue: V, options: { description?: string } = {}): V {
+    this._registerItem(key, "JSON", defaultValue, options.description);
+    const values = this._currentValues();
+    if (!(key in values)) return defaultValue;
+    return values[key] as V;
   }
 
   /**
