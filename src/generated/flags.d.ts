@@ -763,7 +763,7 @@ export interface components {
         UsageAttributes: {
             /**
              * Limit Key
-             * @description Identifier of the metered limit, e.g. `flags.items`.
+             * @description Identifier of the metered limit, e.g. `flags.managed_flags`.
              */
             limit_key: string;
             /**
@@ -784,7 +784,7 @@ export interface components {
          *       "data": [
          *         {
          *           "attributes": {
-         *             "limit_key": "flags.items",
+         *             "limit_key": "flags.managed_flags",
          *             "period": "current",
          *             "value": 5
          *           },
@@ -804,7 +804,7 @@ export interface components {
          * @description JSON:API resource envelope for a usage counter.
          * @example {
          *       "attributes": {
-         *         "limit_key": "flags.items",
+         *         "limit_key": "flags.managed_flags",
          *         "period": "current",
          *         "value": 5
          *       },
