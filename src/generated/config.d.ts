@@ -68,6 +68,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/configs/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Register Configs
+         * @description Register configs declared by an SDK.
+         *
+         *     For each item in the batch:
+         *     - If no config with that key exists, create one with ``managed=false``
+         *       (auto-discovered) using the declared items, parent, name, and
+         *       description.
+         *     - If a config with that key already exists, leave the config row
+         *       untouched (per ADR-024 §2.9).
+         *     - Either way, upsert a ``config_source`` row for ``(config, service,
+         *       environment)`` and refresh its ``last_seen`` timestamp.
+         *
+         *     Per ADR-022 §2.11 rule 2 this endpoint never enforces
+         *     ``config.managed_configurations`` — discovered configs do not consume
+         *     a managed slot.
+         */
+        post: operations["bulk_register_configs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -164,6 +197,11 @@ export interface components {
                 [key: string]: components["schemas"]["EnvironmentOverride"];
             } | null;
             /**
+             * Managed
+             * @description Whether this config is admin-managed (`true`) or auto-discovered by an SDK and not yet claimed (`false`). Configs created through the console or `POST /api/v1/configs` are always managed. Configs registered via `POST /api/v1/configs/bulk` land unmanaged. Setting this field to `true` on a PUT promotes a discovered config to managed, which consumes a slot of the `config.managed_configurations` entitlement.
+             */
+            managed?: boolean | null;
+            /**
              * Created At
              * @description When the config was created.
              */
@@ -173,6 +211,110 @@ export interface components {
              * @description When the config was last modified.
              */
             readonly updated_at?: string | null;
+        };
+        /**
+         * ConfigBulkItem
+         * @description One config declaration reported by an SDK during bulk registration.
+         *
+         *     Each item declares an entire config from code — the config's key,
+         *     optional parent reference, and the items the calling code uses with
+         *     their declared types, default values, and descriptions.
+         * @example {
+         *       "description": "Plan-limit configuration declared by the billing service.",
+         *       "environment": "production",
+         *       "id": "billing",
+         *       "items": {
+         *         "plan.max_seats": {
+         *           "description": "Maximum seats per organization on this plan.",
+         *           "type": "NUMBER",
+         *           "value": 5
+         *         }
+         *       },
+         *       "name": "Billing",
+         *       "parent": "common",
+         *       "service": "billing-service"
+         *     }
+         */
+        ConfigBulkItem: {
+            /**
+             * Id
+             * @description Config key as declared in code. URL-safe and stable for the lifetime of the config.
+             */
+            id: string;
+            /**
+             * Name
+             * @description Display name. Defaults to a humanized version of the `id` when omitted.
+             */
+            name?: string | null;
+            /**
+             * Description
+             * @description Optional human-readable description of the config.
+             */
+            description?: string | null;
+            /**
+             * Parent
+             * @description Parent config key. Used only when creating a new (discovered) config. Ignored on subsequent observations of an existing config — discovery never modifies parent on a config that already exists.
+             */
+            parent?: string | null;
+            /**
+             * Items
+             * @description Items declared by the SDK with their types, defaults, and descriptions. Used to populate items on a newly-discovered config; ignored on subsequent observations of an existing config.
+             */
+            items?: {
+                [key: string]: components["schemas"]["ConfigItemDefinition"];
+            } | null;
+            /**
+             * Service
+             * @description Service reporting the declaration. Defaults to `unknown`.
+             */
+            service?: string | null;
+            /**
+             * Environment
+             * @description Environment reporting the declaration. Defaults to `unknown`.
+             */
+            environment?: string | null;
+        };
+        /**
+         * ConfigBulkRequest
+         * @description Inputs to the bulk-register-configs action.
+         * @example {
+         *       "configs": [
+         *         {
+         *           "environment": "production",
+         *           "id": "billing",
+         *           "items": {
+         *             "plan.max_seats": {
+         *               "description": "Maximum seats per organization.",
+         *               "type": "NUMBER",
+         *               "value": 5
+         *             }
+         *           },
+         *           "parent": "common",
+         *           "service": "billing-service"
+         *         }
+         *       ]
+         *     }
+         */
+        ConfigBulkRequest: {
+            /**
+             * Configs
+             * @description Configs reported by the SDK in this batch.
+             */
+            configs: components["schemas"]["ConfigBulkItem"][];
+        };
+        /**
+         * ConfigBulkResponse
+         * @description Result of a bulk-register-configs action.
+         * @example {
+         *       "registered": 3
+         *     }
+         */
+        ConfigBulkResponse: {
+            /**
+             * Registered
+             * @description Number of items in the batch that were registered or refreshed (i.e. for which a source row was written or updated).
+             */
+            registered: number;
         };
         /**
          * ConfigItemDefinition
@@ -532,6 +674,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    bulk_register_configs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ConfigBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ConfigBulkResponse"];
+                };
             };
         };
     };
