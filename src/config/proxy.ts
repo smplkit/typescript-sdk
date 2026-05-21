@@ -118,7 +118,13 @@ export class LiveConfigProxy<T = Record<string, unknown>> {
         return (values as any)[prop];
       },
 
-      set(_target, prop, _value): boolean {
+      set(target, prop, value, receiver): boolean {
+        // Internal underscore-prefixed properties are settable (e.g. the
+        // `_model` upgrade when an untyped proxy receives a model on a
+        // later getOrCreate call). Customer-facing keys remain read-only.
+        if (typeof prop === "string" && prop.startsWith("_")) {
+          return Reflect.set(target, prop, value, receiver);
+        }
         throw new Error(
           `LiveConfigProxy is read-only; cannot set ${JSON.stringify(String(prop))}. ` +
             "Mutate config values via client.manage.config.*",
@@ -195,7 +201,12 @@ export class LiveConfigProxy<T = Record<string, unknown>> {
   // ------------------------------------------------------------------
 
   /** @internal */
-  private _registerItem(itemKey: string, itemType: string, defaultValue: unknown, description?: string): void {
+  private _registerItem(
+    itemKey: string,
+    itemType: string,
+    defaultValue: unknown,
+    description?: string,
+  ): void {
     this._client._observeItemDeclaration(this._key, itemKey, itemType, defaultValue, description);
   }
 

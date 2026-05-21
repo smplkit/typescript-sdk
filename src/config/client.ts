@@ -265,8 +265,7 @@ export class ConfigClient {
     } = {},
   ): Promise<LiveConfigProxy<T>> {
     const parent = options.parent;
-    const parentId =
-      parent instanceof LiveConfigProxy ? (parent as any)._key : (parent ?? null);
+    const parentId = parent instanceof LiveConfigProxy ? (parent as any)._key : (parent ?? null);
 
     this._observeConfigDeclaration(id, parentId, options.name ?? null, options.description ?? null);
 
@@ -275,10 +274,7 @@ export class ConfigClient {
   }
 
   /** @internal — return (and cache) the canonical proxy for a config id. */
-  _cachedProxy<T>(
-    id: string,
-    model?: new (data: any) => T,
-  ): LiveConfigProxy<T> {
+  _cachedProxy<T>(id: string, model?: new (data: any) => T): LiveConfigProxy<T> {
     let proxy = this._proxies[id] as LiveConfigProxy<T> | undefined;
     if (!proxy) {
       proxy = new LiveConfigProxy<T>(this, id, model);
@@ -318,7 +314,13 @@ export class ConfigClient {
   ): void {
     const manage = this._resolveManagement?.();
     if (!manage) return;
-    manage.config.registerConfigItem(configId, itemKey, itemType, defaultValue, description ?? null);
+    manage.config.registerConfigItem(
+      configId,
+      itemKey,
+      itemType,
+      defaultValue,
+      description ?? null,
+    );
   }
 
   // ------------------------------------------------------------------
@@ -464,7 +466,10 @@ export class ConfigClient {
       try {
         await manage.config.flush();
       } catch (err) {
-        debug("config", `pre-start discovery flush failed: ${err instanceof Error ? err.message : String(err)}`);
+        debug(
+          "config",
+          `pre-start discovery flush failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
