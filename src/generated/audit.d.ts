@@ -1472,7 +1472,7 @@ export interface components {
         UsageAttributes: {
             /**
              * Limit Key
-             * @description Identifier of the metered limit, e.g. `audit.customer_events_per_month`.
+             * @description Identifier of the metered limit, e.g. `audit.events_per_month`.
              */
             limit_key: string;
             /**
@@ -1490,11 +1490,11 @@ export interface components {
          * UsageResource
          * @example {
          *       "attributes": {
-         *         "limit_key": "audit.customer_events_per_month",
+         *         "limit_key": "audit.events_per_month",
          *         "period": "current",
          *         "value": 42
          *       },
-         *       "id": "audit.customer_events_per_month",
+         *       "id": "audit.events_per_month",
          *       "type": "usage"
          *     }
          */
