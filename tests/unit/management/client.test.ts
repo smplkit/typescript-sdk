@@ -306,13 +306,16 @@ describe("EnvironmentsClient", () => {
       const client = makeClient();
       const env = client.environments.new("staging", { name: "Staging" });
       const errorBody = {
-        errors: [{
-          status: "400",
-          code: "environment_unmanaged",
-          title: "Environment is unmanaged",
-          detail: "Environment 'staging' is unmanaged. Promote it before setting per-environment values.",
-          meta: { environment: "staging" },
-        }],
+        errors: [
+          {
+            status: "400",
+            code: "environment_unmanaged",
+            title: "Environment is unmanaged",
+            detail:
+              "Environment 'staging' is unmanaged. Promote it before setting per-environment values.",
+            meta: { environment: "staging" },
+          },
+        ],
       };
       mockFetch.mockResolvedValueOnce(jsonResponse(errorBody, 400));
       try {
