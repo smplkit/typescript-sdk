@@ -222,7 +222,7 @@ describe("Environment", () => {
     it("should return a human-readable representation", () => {
       const env = makeEnv();
       expect(env.toString()).toBe(
-        "Environment(id=production, name=Production, classification=STANDARD)",
+        "Environment(id=production, name=Production, classification=STANDARD, managed=true)",
       );
     });
   });

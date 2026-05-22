@@ -37,6 +37,14 @@ export class Environment {
   name: string;
   /** Whether this is a STANDARD or AD_HOC environment. */
   classification: EnvironmentClassification;
+  /**
+   * Whether per-environment resource values can be written against this
+   * environment. Unmanaged environments are view-only — existing values
+   * render for comparison but no new values can be set. Managed
+   * environments count toward the account's `platform.managed_environments`
+   * quota.
+   */
+  managed: boolean;
   /** When the environment was created. */
   createdAt: string | null;
   /** When the environment was last updated. */
@@ -56,6 +64,7 @@ export class Environment {
       name: string;
       color?: Color | string | null;
       classification: EnvironmentClassification;
+      managed?: boolean;
       createdAt?: string | null;
       updatedAt?: string | null;
     },
@@ -65,6 +74,7 @@ export class Environment {
     this.name = fields.name;
     this._color = coerceColor(fields.color ?? null);
     this.classification = fields.classification;
+    this.managed = fields.managed ?? true;
     this.createdAt = fields.createdAt ?? null;
     this.updatedAt = fields.updatedAt ?? null;
   }
@@ -106,12 +116,13 @@ export class Environment {
     this.name = other.name;
     this._color = other._color;
     this.classification = other.classification;
+    this.managed = other.managed;
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
   }
 
   toString(): string {
-    return `Environment(id=${this.id}, name=${this.name}, classification=${this.classification})`;
+    return `Environment(id=${this.id}, name=${this.name}, classification=${this.classification}, managed=${this.managed})`;
   }
 }
 

@@ -77,7 +77,7 @@ function createContext(user: any, account: any): Context[] {
 async function main(): Promise<void> {
   // create the client (TypeScript has a single Promise-based client)
   const client = new SmplClient({
-    environment: "staging",
+    environment: "production",
     service: "showcase-service",
   });
   try {
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
 async function updateRules(client: SmplClient): Promise<void> {
   const currentBanner = await client.manage.flags.get("banner-color");
   currentBanner.addRule(
-    new Rule("Red for small companies", { environment: "staging" })
+    new Rule("Red for small companies", { environment: "production" })
       .when("account.employee_count", Op.LT, 50)
       .serve("red"),
   );
