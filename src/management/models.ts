@@ -42,7 +42,7 @@ export class Environment {
    * environment. Unmanaged environments are view-only — existing values
    * render for comparison but no new values can be set. Managed
    * environments count toward the account's `platform.managed_environments`
-   * quota.
+   * quota. `production` is always managed and cannot be demoted.
    */
   managed: boolean;
   /** When the environment was created. */

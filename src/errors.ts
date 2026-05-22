@@ -13,9 +13,17 @@
 /** A single error object from a JSON:API error response. */
 export interface ApiErrorDetail {
   status?: string;
+  /**
+   * Application-specific machine-readable error code (e.g.
+   * ``environment_unmanaged``). Per JSON:API §7 and ADR-014, the server
+   * sets this on every error so callers can branch without string-matching.
+   */
+  code?: string;
   title?: string;
   detail?: string;
   source?: Record<string, unknown>;
+  /** Additional structured context (e.g. ``{environment: "staging"}``). */
+  meta?: Record<string, unknown>;
 }
 
 /** Base exception for all smplkit SDK errors. */
@@ -170,10 +178,14 @@ function parseJsonApiErrors(body: string): ApiErrorDetail[] {
     if (parsed && Array.isArray(parsed.errors)) {
       return parsed.errors.map((e: Record<string, unknown>) => ({
         ...(e.status !== undefined ? { status: String(e.status) } : {}),
+        ...(e.code !== undefined ? { code: String(e.code) } : {}),
         ...(e.title !== undefined ? { title: String(e.title) } : {}),
         ...(e.detail !== undefined ? { detail: String(e.detail) } : {}),
         ...(e.source !== undefined && typeof e.source === "object" && e.source !== null
           ? { source: e.source as Record<string, unknown> }
+          : {}),
+        ...(e.meta !== undefined && typeof e.meta === "object" && e.meta !== null
+          ? { meta: e.meta as Record<string, unknown> }
           : {}),
       }));
     }
