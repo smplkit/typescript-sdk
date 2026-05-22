@@ -92,10 +92,13 @@ function loggerToBody(logger: Logger): {
   if (logger.level !== null) attrs.level = logger.level;
   if (logger.group !== null) attrs.group = logger.group;
   if (logger.managed !== null) attrs.managed = logger.managed;
-  const wire = loggerEnvironmentsToWire(logger._environmentsDirect);
-  if (Object.keys(wire).length > 0) {
-    attrs.environments = wire as typeof attrs.environments;
-  }
+  // Always send `environments` — even when empty — so a clearLevel
+  // that drains the last override actually reaches the server. Omitting
+  // the field is interpreted by the JSON:API put as "no change," which
+  // strands the local clear in client memory only.
+  attrs.environments = loggerEnvironmentsToWire(
+    logger._environmentsDirect,
+  ) as typeof attrs.environments;
   return {
     data: { id: logger.id, type: "logger", attributes: attrs },
   };

@@ -46,20 +46,17 @@ async function main(): Promise<void> {
     console.log(`Created: ${payments.id} (level=${payments.level})`);
     assert.equal(payments.level, LogLevel.WARN);
 
-    // override log level for different environments
+    // override log level for the production environment
     root.setLevel(LogLevel.ERROR, { environment: "production" });
-    root.setLevel(LogLevel.DEBUG, { environment: "staging" });
     await root.save();
     console.log(`Set environment overrides: ${JSON.stringify(root.environments)}`);
     assert.equal(root.environments["production"]?.level, LogLevel.ERROR);
-    assert.equal(root.environments["staging"]?.level, LogLevel.DEBUG);
 
     // clear environment override (inherits from the default level again)
-    root.clearLevel({ environment: "staging" });
+    root.clearLevel({ environment: "production" });
     await root.save();
-    console.log(`Cleared staging override: ${JSON.stringify(root.environments)}`);
-    assert.equal("staging" in root.environments, false);
-    assert.equal(root.environments["production"]?.level, LogLevel.ERROR);
+    console.log(`Cleared production override: ${JSON.stringify(root.environments)}`);
+    assert.equal("production" in root.environments, false);
 
     // fetch a logger by id
     const fetched = await manage.loggers.get("showcase");

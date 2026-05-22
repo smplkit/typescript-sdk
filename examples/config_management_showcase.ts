@@ -37,7 +37,6 @@ async function main(): Promise<void> {
     shared.setNumber("pagination_default_page_size", 25);
     shared.setNumber("max_retries", 5, { environment: "production" });
     shared.setNumber("request_timeout_ms", 10000, { environment: "production" });
-    shared.setNumber("max_retries", 2, { environment: "staging" });
     await shared.save();
     console.log(`Created config: ${shared.id}`);
 

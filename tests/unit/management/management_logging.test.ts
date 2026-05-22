@@ -527,7 +527,7 @@ describe("Logger.save() — upsert via PUT", () => {
     });
   });
 
-  it("omits null level/group/managed and empty environments", async () => {
+  it("omits null level/group/managed; always sends environments (even empty)", async () => {
     const client = makeClient();
     const logger = client.loggers.new("bare", { managed: false });
     logger.managed = null;
@@ -542,7 +542,11 @@ describe("Logger.save() — upsert via PUT", () => {
     expect(body.data.attributes.level).toBeUndefined();
     expect(body.data.attributes.group).toBeUndefined();
     expect(body.data.attributes.managed).toBeUndefined();
-    expect(body.data.attributes.environments).toBeUndefined();
+    // environments is ALWAYS included so a clearLevel() that drains the
+    // last override is carried to the server. Omitting it would be read
+    // by the JSON:API put as "no change," stranding the clear in
+    // client memory only.
+    expect(body.data.attributes.environments).toEqual({});
   });
 
   it("applies response fields after save", async () => {

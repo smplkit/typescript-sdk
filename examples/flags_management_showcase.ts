@@ -70,25 +70,22 @@ async function main(): Promise<void> {
     await themeFlag.save();
     console.log(`Created flag: ${themeFlag.id}`);
 
-    // checkoutFlag (serve true in staging to enterprise US users)
-    checkoutFlag.enableRules({ environment: "staging" });
+    // checkoutFlag (serve true in production to enterprise US users)
+    checkoutFlag.enableRules({ environment: "production" });
     checkoutFlag.addRule(
-      new Rule("Enable for enterprise users in US region", { environment: "staging" })
+      new Rule("Enable for enterprise users in US region", { environment: "production" })
         .when("user.plan", Op.EQ, "enterprise")
         .when("account.region", Op.EQ, "us")
         .serve(true),
     );
 
-    // checkoutFlag (serve true in staging for beta testers)
+    // checkoutFlag (serve true in production for beta testers)
     checkoutFlag.addRule(
-      new Rule("Enable for beta testers", { environment: "staging" })
+      new Rule("Enable for beta testers", { environment: "production" })
         .when("user.beta_tester", Op.EQ, true)
         .serve(true),
     );
 
-    // checkoutFlag (disabled rules; serve false in production)
-    checkoutFlag.disableRules({ environment: "production" });
-    checkoutFlag.setDefault(false, { environment: "production" });
     await checkoutFlag.save();
     console.log(`Updated flag: ${checkoutFlag.id}`);
 
@@ -105,9 +102,9 @@ async function main(): Promise<void> {
     // get a flag
     const fetched = await manage.flags.get("checkout-v2");
     console.log(`\nFetched by id: ${fetched.id}`);
-    const stagingRules = fetched.environments["staging"]?.rules.length ?? 0;
+    const prodRules = fetched.environments["production"]?.rules.length ?? 0;
     const prodEnabled = fetched.environments["production"]?.enabled;
-    console.log(`  staging rules: ${stagingRules}`);
+    console.log(`  production rules: ${prodRules}`);
     console.log(`  production enabled: ${prodEnabled}`);
 
     // update a flag
@@ -123,7 +120,7 @@ async function main(): Promise<void> {
     console.log(`Updated flag: ${bannerFlag.id}`);
 
     // delete all the rules of a flag
-    checkoutFlag.clearRules({ environment: "staging" });
+    checkoutFlag.clearRules({ environment: "production" });
     await checkoutFlag.save();
 
     // revert production's default value back to the flag default

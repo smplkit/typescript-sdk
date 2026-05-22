@@ -98,6 +98,7 @@ function envFromResource(resource: any, client: EnvironmentsClient): Environment
       attrs.classification === "AD_HOC"
         ? EnvironmentClassification.AD_HOC
         : EnvironmentClassification.STANDARD,
+    managed: typeof attrs.managed === "boolean" ? attrs.managed : false,
     createdAt: attrs.created_at ?? null,
     updatedAt: attrs.updated_at ?? null,
   });
@@ -157,6 +158,7 @@ export class EnvironmentsClient {
       name: string;
       color?: Color | string | null;
       classification?: EnvironmentClassification;
+      managed?: boolean;
     },
   ): Environment {
     return new Environment(this, {
@@ -164,6 +166,7 @@ export class EnvironmentsClient {
       name: options.name,
       color: coerceColor(options.color ?? null),
       classification: options.classification ?? EnvironmentClassification.STANDARD,
+      managed: options.managed ?? true,
       createdAt: null,
       updatedAt: null,
     });
@@ -235,6 +238,7 @@ export class EnvironmentsClient {
           name: env.name,
           color: env.color === null ? null : env.color.hex,
           classification: env.classification,
+          managed: env.managed,
         },
       },
     };
@@ -261,6 +265,7 @@ export class EnvironmentsClient {
           name: env.name,
           color: env.color === null ? null : env.color.hex,
           classification: env.classification,
+          managed: env.managed,
         },
       },
     };

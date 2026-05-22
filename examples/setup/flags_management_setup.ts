@@ -2,18 +2,9 @@
 
 import { SmplManagementClient, SmplkitNotFoundError } from "../../src/index.js";
 
-const DEMO_ENVIRONMENTS = ["staging", "production"];
 const DEMO_FLAG_IDS = ["checkout-v2", "banner-color", "max-retries", "ui-theme"];
 
 export async function setupManagementShowcase(manage: SmplManagementClient): Promise<void> {
-  const existing = new Set((await manage.environments.list()).map((env) => env.id));
-  for (const envId of DEMO_ENVIRONMENTS) {
-    if (!existing.has(envId)) {
-      await manage.environments
-        .new(envId, { name: envId.charAt(0).toUpperCase() + envId.slice(1) })
-        .save();
-    }
-  }
   await cleanupManagementShowcase(manage);
 }
 
