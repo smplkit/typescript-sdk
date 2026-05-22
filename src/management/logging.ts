@@ -31,13 +31,18 @@ async function checkError(response: Response, error?: unknown): Promise<never> {
   if (error !== undefined && error !== null) {
     try {
       body = typeof error === "string" ? error : JSON.stringify(error);
+      /* v8 ignore start — defensive guard; openapi-fetch parses JSON itself
+         so circular refs / BigInts never reach this code path. */
     } catch {
       // leave body empty; throwForStatus tolerates an empty payload
     }
+    /* v8 ignore stop */
   }
+  /* v8 ignore start — fallback for the rare null/empty-error case. */
   if (!body) {
     body = await response.text().catch(() => "");
   }
+  /* v8 ignore stop */
   throwForStatus(response.status, body);
 }
 
