@@ -65,8 +65,34 @@ function splitContextId(idOrType: string, key?: string): [string, string] {
   return [idOrType, key];
 }
 
-async function checkError(response: Response): Promise<never> {
-  const body = await response.text().catch(() => "");
+async function checkError(response: Response, error?: unknown): Promise<never> {
+  // ``openapi-fetch`` pre-reads the response body to populate ``result.error``
+  // / ``result.data`` — by the time we get here ``response.text()`` returns
+  // ``""`` because the stream is consumed. Prefer the pre-parsed error payload
+  // when openapi-fetch handed one to us; fall back to a fresh ``.text()`` for
+  // the rare case where openapi-fetch didn't parse it (non-JSON body, network
+  // shape change, etc.). Without this, customers see ``HTTP 400`` with empty
+  // body instead of the JSON:API error code / detail the server actually
+  // returned (e.g. ``environment_unmanaged``).
+  let body = "";
+  if (error !== undefined && error !== null) {
+    try {
+      body = typeof error === "string" ? error : JSON.stringify(error);
+      /* v8 ignore start — JSON.stringify only throws on circular refs / BigInts,
+         which openapi-fetch's JSON parser would have already rejected before
+         we reach this code path. Kept as a belt-and-braces guard. */
+    } catch {
+      // leave body empty; throwForStatus tolerates an empty payload
+    }
+    /* v8 ignore stop */
+  }
+  /* v8 ignore start — fallback path for the rare case where openapi-fetch
+     produces undefined/null error (e.g. genuinely empty response body or a
+     transport-layer surprise). The happy paths above cover JSON and text. */
+  if (!body) {
+    body = await response.text().catch(() => "");
+  }
+  /* v8 ignore stop */
   throwForStatus(response.status, body);
 }
 
@@ -189,7 +215,7 @@ export class EnvironmentsClient {
       const result = await this._http.GET("/api/v1/environments", {
         params: { query: query as unknown as Record<string, never> },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -204,7 +230,7 @@ export class EnvironmentsClient {
       const result = await this._http.GET("/api/v1/environments/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -220,7 +246,7 @@ export class EnvironmentsClient {
         params: { path: { id } },
       });
       if (!result.response.ok && result.response.status !== 204) {
-        await checkError(result.response);
+        await checkError(result.response, result.error);
         /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
       }
     } catch (err) {
@@ -245,7 +271,7 @@ export class EnvironmentsClient {
     let data: any;
     try {
       const result = await this._http.POST("/api/v1/environments", { body });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -275,7 +301,7 @@ export class EnvironmentsClient {
         params: { path: { id: env.id } },
         body,
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -329,7 +355,7 @@ export class ContextTypesClient {
       const result = await this._http.GET("/api/v1/context_types", {
         params: { query: query as unknown as Record<string, never> },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -344,7 +370,7 @@ export class ContextTypesClient {
       const result = await this._http.GET("/api/v1/context_types/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -360,7 +386,7 @@ export class ContextTypesClient {
         params: { path: { id } },
       });
       if (!result.response.ok && result.response.status !== 204) {
-        await checkError(result.response);
+        await checkError(result.response, result.error);
         /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
       }
     } catch (err) {
@@ -383,7 +409,7 @@ export class ContextTypesClient {
     let data: any;
     try {
       const result = await this._http.POST("/api/v1/context_types", { body });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -411,7 +437,7 @@ export class ContextTypesClient {
         params: { path: { id: ct.id } },
         body,
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -514,7 +540,7 @@ export class ContextsClient {
           })),
         },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -545,7 +571,7 @@ export class ContextsClient {
       const result = await this._http.GET("/api/v1/contexts", {
         params: { query: query as unknown as Record<string, never> },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -563,7 +589,7 @@ export class ContextsClient {
       const result = await this._http.GET("/api/v1/contexts/{id}", {
         params: { path: { id: composite } },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -582,7 +608,7 @@ export class ContextsClient {
         params: { path: { id: composite } },
       });
       if (!result.response.ok && result.response.status !== 204) {
-        await checkError(result.response);
+        await checkError(result.response, result.error);
         /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
       }
     } catch (err) {
@@ -615,7 +641,7 @@ export class ContextsClient {
         params: { path: { id: ctx.id } },
         body,
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);

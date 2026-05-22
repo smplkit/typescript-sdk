@@ -55,6 +55,7 @@ const SAMPLE_ENV = {
     name: "Production",
     color: "#ff0000",
     classification: "STANDARD",
+    managed: true,
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-04-01T10:00:00Z",
   },
@@ -67,6 +68,7 @@ const SAMPLE_AD_HOC_ENV = {
     name: "Preview 123",
     color: null,
     classification: "AD_HOC",
+    managed: false,
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-04-01T10:00:00Z",
   },
@@ -294,6 +296,51 @@ describe("EnvironmentsClient", () => {
       const env = client.environments.new("staging", { name: "Staging" });
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(env.save()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("preserves the JSON:API error body on 400 (regression for empty-body bug)", async () => {
+      // openapi-fetch pre-reads the response body, so the wrapper's
+      // ``checkError`` must use ``result.error`` to surface the
+      // structured error to the caller. Without that, the customer
+      // sees ``HTTP 400`` with empty body and no JSON:API codes.
+      const client = makeClient();
+      const env = client.environments.new("staging", { name: "Staging" });
+      const errorBody = {
+        errors: [
+          {
+            status: "400",
+            code: "environment_unmanaged",
+            title: "Environment is unmanaged",
+            detail:
+              "Environment 'staging' is unmanaged. Promote it before setting per-environment values.",
+            meta: { environment: "staging" },
+          },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse(errorBody, 400));
+      try {
+        await env.save();
+        throw new Error("expected save() to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SmplValidationError);
+        const se = err as SmplValidationError;
+        expect(se.statusCode).toBe(400);
+        expect(se.errors).toHaveLength(1);
+        expect(se.errors[0].code).toBe("environment_unmanaged");
+        expect(se.errors[0].detail).toContain("Promote it");
+        expect(se.errors[0].meta).toEqual({ environment: "staging" });
+      }
+    });
+
+    it("falls back gracefully when the 400 response is not JSON", async () => {
+      // Defensive fallback: when openapi-fetch can't pre-parse (the
+      // response wasn't JSON, e.g. an upstream proxy emitted an HTML
+      // 502/400), ``checkError`` still emits a SmplValidationError so
+      // the wrapper never silently swallows the failure.
+      const client = makeClient();
+      const env = client.environments.new("staging", { name: "Staging" });
+      mockFetch.mockResolvedValueOnce(textResponse("<html>bad</html>", 400));
+      await expect(env.save()).rejects.toThrow(SmplValidationError);
     });
 
     it("should send JSON:API body", async () => {

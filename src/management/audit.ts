@@ -34,8 +34,27 @@ type GenHttpConfiguration = components["schemas"]["HttpConfiguration"];
 type GenForwarderResponse = components["schemas"]["ForwarderResponse"];
 
 /** @internal */
-async function checkError(response: Response): Promise<never> {
-  const body = await response.text().catch(() => "");
+async function checkError(response: Response, error?: unknown): Promise<never> {
+  // ``openapi-fetch`` pre-reads the response body to populate ``result.error``
+  // / ``result.data`` — by the time we get here ``response.text()`` returns
+  // ``""`` because the stream is consumed. Prefer the pre-parsed error payload
+  // when openapi-fetch handed one to us; fall back to a fresh ``.text()``.
+  let body = "";
+  if (error !== undefined && error !== null) {
+    try {
+      body = typeof error === "string" ? error : JSON.stringify(error);
+      /* v8 ignore start — defensive guard; openapi-fetch parses JSON itself
+         so circular refs / BigInts never reach this code path. */
+    } catch {
+      // leave body empty; throwForStatus tolerates an empty payload
+    }
+    /* v8 ignore stop */
+  }
+  /* v8 ignore start — fallback for the rare null/empty-error case. */
+  if (!body) {
+    body = await response.text().catch(() => "");
+  }
+  /* v8 ignore stop */
   throwForStatus(response.status, body);
 }
 
@@ -226,7 +245,7 @@ export class ForwardersClient implements ForwarderModelClient {
       const result = await this._http.GET("/api/v1/forwarders", {
         params: { query: query as unknown as Record<string, never> },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
       wrapFetchError(err);
@@ -250,7 +269,7 @@ export class ForwardersClient implements ForwarderModelClient {
       const result = await this._http.GET("/api/v1/forwarders/{forwarder_id}", {
         params: { path: { forwarder_id: forwarderId } },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
       wrapFetchError(err);
@@ -265,7 +284,7 @@ export class ForwardersClient implements ForwarderModelClient {
       const result = await this._http.DELETE("/api/v1/forwarders/{forwarder_id}", {
         params: { path: { forwarder_id: forwarderId } },
       });
-      if (result.response.status !== 204) await checkError(result.response);
+      if (result.response.status !== 204) await checkError(result.response, result.error);
     } catch (err) {
       wrapFetchError(err);
     }
@@ -281,7 +300,7 @@ export class ForwardersClient implements ForwarderModelClient {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.POST("/api/v1/forwarders", { body });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
       wrapFetchError(err);
@@ -309,7 +328,7 @@ export class ForwardersClient implements ForwarderModelClient {
         params: { path: { forwarder_id: forwarder.id } },
         body,
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
       wrapFetchError(err);

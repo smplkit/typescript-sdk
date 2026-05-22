@@ -39,8 +39,27 @@ function wrapFetchError(err: unknown): never {
 }
 
 /** @internal */
-async function checkError(response: Response): Promise<never> {
-  const body = await response.text().catch(() => "");
+async function checkError(response: Response, error?: unknown): Promise<never> {
+  // ``openapi-fetch`` pre-reads the response body to populate ``result.error``
+  // / ``result.data`` — by the time we get here ``response.text()`` returns
+  // ``""`` because the stream is consumed. Prefer the pre-parsed error payload
+  // when openapi-fetch handed one to us; fall back to a fresh ``.text()``.
+  let body = "";
+  if (error !== undefined && error !== null) {
+    try {
+      body = typeof error === "string" ? error : JSON.stringify(error);
+      /* v8 ignore start — defensive guard; openapi-fetch parses JSON itself
+         so circular refs / BigInts never reach this code path. */
+    } catch {
+      // leave body empty; throwForStatus tolerates an empty payload
+    }
+    /* v8 ignore stop */
+  }
+  /* v8 ignore start — fallback for the rare null/empty-error case. */
+  if (!body) {
+    body = await response.text().catch(() => "");
+  }
+  /* v8 ignore stop */
   throwForStatus(response.status, body);
 }
 
@@ -282,7 +301,7 @@ export class ManagementConfigClient {
       const result = await this._http.GET("/api/v1/configs", {
         params: { query: query as unknown as Record<string, never> },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -298,7 +317,7 @@ export class ManagementConfigClient {
       const result = await this._http.GET("/api/v1/configs/{id}", {
         params: { path: { id } },
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -321,7 +340,7 @@ export class ManagementConfigClient {
         params: { path: { id } },
       });
       if (!result.response.ok && result.response.status !== 204) {
-        await checkError(result.response);
+        await checkError(result.response, result.error);
         /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
       }
     } catch (err) {
@@ -340,7 +359,7 @@ export class ManagementConfigClient {
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/configs", { body });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
@@ -359,7 +378,7 @@ export class ManagementConfigClient {
         params: { path: { id: config.id } },
         body,
       });
-      if (!result.response.ok) await checkError(result.response);
+      if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data;
     } catch (err) {
       wrapFetchError(err);
