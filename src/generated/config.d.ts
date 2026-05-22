@@ -16,9 +16,10 @@ export interface paths {
          * @description List configs for this account.
          *
          *     Default sort is `key` ascending. Pass `filter[parent]=<parent_key>`
-         *     to return only the direct children of a specific config, or
+         *     to return only the direct children of a specific config,
          *     `filter[search]=<term>` to filter by a case-insensitive substring
-         *     against `key` or `name`.
+         *     against `key` or `name`, or `filter[managed]=true|false` to restrict
+         *     to managed or discovered configs respectively.
          */
         get: operations["list_configs"];
         put?: never;
@@ -559,6 +560,8 @@ export interface operations {
                 "filter[parent]"?: string | null;
                 /** @description Case-insensitive substring match against the config `key` and `name`. A config is returned if either field contains the search term. */
                 "filter[search]"?: string | null;
+                /** @description Restrict the result to managed (`true`) or discovered (`false`) configs. Omit to return both. Configs created via the console or `POST /api/v1/configs` are managed; configs registered via `POST /api/v1/configs/bulk` start out discovered. */
+                "filter[managed]"?: boolean | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
