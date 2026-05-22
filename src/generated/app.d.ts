@@ -273,7 +273,7 @@ export interface paths {
         };
         /**
          * List Environments
-         * @description List all environments for the authenticated account. `filter[search]` does a case-insensitive substring match against the environment `key` and `name`. `filter[classification]` narrows the result to one classification (`STANDARD` or `AD_HOC`).
+         * @description List all environments for the authenticated account. `filter[search]` does a case-insensitive substring match against the environment `key` and `name`. `filter[classification]` narrows the result to one classification (`STANDARD` or `AD_HOC`). `filter[managed]` narrows by managed state (`true` or `false`).
          */
         get: operations["list_environments"];
         put?: never;
@@ -1965,6 +1965,7 @@ export interface components {
          *       "classification": "STANDARD",
          *       "color": "#2ecc71",
          *       "created_at": "2026-03-20T11:02:16.616Z",
+         *       "managed": true,
          *       "name": "Production",
          *       "updated_at": "2026-03-20T11:02:16.616Z"
          *     }
@@ -1982,11 +1983,17 @@ export interface components {
             color?: string | null;
             /**
              * Classification
-             * @description `STANDARD` for environments the customer explicitly manages; `AD_HOC` for environments auto-created from SDK traffic. Case-insensitive on input.
-             * @default AD_HOC
+             * @description `STANDARD` for environments deliberately created (and shown by default in the environment grid); `AD_HOC` for auto-discovered environments seen in SDK traffic (hidden from the default view). Case-insensitive on input. Independent of the `managed` flag.
+             * @default STANDARD
              * @enum {string}
              */
             classification: "STANDARD" | "AD_HOC";
+            /**
+             * Managed
+             * @description When `true`, per-environment resource values can be set against this environment and it counts toward the account's managed-environments quota. When `false`, the environment is view-only: existing values are displayed for comparison but no new values can be written. Promotion and demotion flip this boolean via `PUT /api/v1/environments/{id}`; promotion is subject to the quota.
+             * @default false
+             */
+            managed: boolean;
             /**
              * Created At
              * Format: date-time
@@ -2026,6 +2033,7 @@ export interface components {
          *         "classification": "STANDARD",
          *         "color": "#2ecc71",
          *         "created_at": "2026-03-20T11:02:16.616Z",
+         *         "managed": true,
          *         "name": "Production",
          *         "updated_at": "2026-03-20T11:02:16.616Z"
          *       },
@@ -3507,7 +3515,7 @@ export interface components {
         SubscriptionResponseAttributes: {
             /**
              * Status
-             * @description Lifecycle state of the subscription. `ACTIVE` while billing is current; `PAST_DUE` after a failed charge; `CANCELED` once the subscription has ended; `null` when the subscription has no billing object (fully comped at 100% discount).
+             * @description Lifecycle state of the subscription. `ACTIVE` while billing is current; `PAST_DUE` after a failed charge; `CANCELED` once the subscription has ended; `null` when the subscription is fully discounted (`discount_override_pct` of 100) and has no billing-provider object.
              */
             status?: string | null;
             /**
@@ -3551,7 +3559,7 @@ export interface components {
             /**
              * Payment Method
              * Format: uuid
-             * @description Identifier of the default payment method used to bill this subscription. `null` when the subscription has no associated payment method (e.g. fully comped).
+             * @description Identifier of the default payment method used to bill this subscription. `null` when the subscription has no associated payment method (e.g. fully discounted via `discount_override_pct` of 100).
              */
             payment_method?: string | null;
             /**
@@ -4716,6 +4724,8 @@ export interface operations {
                 "filter[search]"?: string | null;
                 /** @description Narrow the result to environments with the given classification. One of `STANDARD` or `AD_HOC`. */
                 "filter[classification]"?: string | null;
+                /** @description Narrow the result to managed (`true`) or unmanaged (`false`) environments. Omit to return both. */
+                "filter[managed]"?: boolean | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
