@@ -2008,6 +2008,41 @@ export interface components {
             readonly updated_at?: string | null;
         };
         /**
+         * EnvironmentCreateRequest
+         * @description JSON:API request envelope for creating an environment.
+         *
+         *     Distinct from :class:`EnvironmentRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not (the id lives in
+         *     the URL path).
+         */
+        EnvironmentCreateRequest: {
+            data: components["schemas"]["EnvironmentCreateResource"];
+        };
+        /**
+         * EnvironmentCreateResource
+         * @description JSON:API resource envelope for creating an environment (id required).
+         * @example {
+         *       "attributes": {
+         *         "name": "Production"
+         *       },
+         *       "id": "production",
+         *       "type": "environment"
+         *     }
+         */
+        EnvironmentCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "environment";
+            attributes: components["schemas"]["Environment"];
+        };
+        /**
          * EnvironmentListResponse
          * @description JSON:API collection response for environments.
          */
@@ -2018,7 +2053,7 @@ export interface components {
         };
         /**
          * EnvironmentRequest
-         * @description JSON:API request envelope for creating or updating an environment.
+         * @description JSON:API request envelope for updating an environment.
          */
         EnvironmentRequest: {
             data: components["schemas"]["EnvironmentResource"];
@@ -3116,6 +3151,40 @@ export interface components {
             readonly updated_at?: string | null;
         };
         /**
+         * ServiceCreateRequest
+         * @description JSON:API request envelope for creating a service.
+         *
+         *     Distinct from :class:`ServiceRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        ServiceCreateRequest: {
+            data: components["schemas"]["ServiceCreateResource"];
+        };
+        /**
+         * ServiceCreateResource
+         * @description JSON:API resource envelope for creating a service (id required).
+         * @example {
+         *       "attributes": {
+         *         "name": "User Service"
+         *       },
+         *       "id": "user_service",
+         *       "type": "service"
+         *     }
+         */
+        ServiceCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "service";
+            attributes: components["schemas"]["Service"];
+        };
+        /**
          * ServiceListResponse
          * @description JSON:API collection response for services.
          */
@@ -3126,7 +3195,7 @@ export interface components {
         };
         /**
          * ServiceRequest
-         * @description JSON:API request envelope for creating or updating a service.
+         * @description JSON:API request envelope for updating a service.
          */
         ServiceRequest: {
             data: components["schemas"]["ServiceResource"];
@@ -3135,7 +3204,7 @@ export interface components {
          * ServiceResource
          * @description JSON:API resource envelope for a service.
          *
-         *     `id` must not be specified for create requests (the server assigns it).
+         *     The caller supplies ``id`` (the service's key) on create.
          * @example {
          *       "attributes": {
          *         "created_at": "2026-03-20T11:02:16.616Z",
@@ -4797,7 +4866,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["EnvironmentRequest"];
+                "application/vnd.api+json": components["schemas"]["EnvironmentCreateRequest"];
             };
         };
         responses: {
@@ -6198,7 +6267,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ServiceRequest"];
+                "application/vnd.api+json": components["schemas"]["ServiceCreateRequest"];
             };
         };
         responses: {
