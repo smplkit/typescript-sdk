@@ -118,22 +118,52 @@ function environmentsToWire(envs: Record<string, FlagEnvironment>): Record<strin
   return out;
 }
 
-/** @internal */
-function flagToBody(flag: Flag): { data: { id: string | null; type: "flag"; attributes: any } } {
+/** @internal Shared attribute payload for create + update. */
+function flagAttrs(flag: Flag): components["schemas"]["Flag"] {
+  return {
+    name: flag.name,
+    description: flag.description ?? "",
+    type: flag.type,
+    default: flag.default,
+    values: flag.values?.map((v) => ({ name: v.name, value: v.value })),
+    ...(Object.keys(flag.environments).length > 0
+      ? { environments: environmentsToWire(flag._envsRaw()) }
+      : {}),
+  } as components["schemas"]["Flag"];
+}
+
+/**
+ * Build the JSON:API request body for `POST /api/v1/flags` (create).
+ *
+ * The create envelope requires `data.id` to be a non-null string — the
+ * flag key is caller-supplied. Update has its own builder because the
+ * update envelope keeps `id` optional/nullable.
+ * @internal
+ */
+function flagToCreateBody(flag: Flag): components["schemas"]["FlagCreateRequest"] {
+  /* v8 ignore start — defensive guard: `Flag.id` is always set by the
+     `mgmt.flags.new*(id, ...)` factories, the only public paths that
+     reach `_createFlag`. Spec narrowing requires a non-null `data.id`. */
+  if (flag.id === null) {
+    throw new SmplkitValidationError("Cannot create a Flag without an id");
+  }
+  /* v8 ignore stop */
   return {
     data: {
       id: flag.id,
       type: "flag",
-      attributes: {
-        name: flag.name,
-        description: flag.description ?? "",
-        type: flag.type,
-        default: flag.default,
-        values: flag.values?.map((v) => ({ name: v.name, value: v.value })),
-        ...(Object.keys(flag.environments).length > 0
-          ? { environments: environmentsToWire(flag._envsRaw()) }
-          : {}),
-      },
+      attributes: flagAttrs(flag),
+    },
+  };
+}
+
+/** @internal Build the JSON:API request body for `PUT /api/v1/flags/{id}` (update). */
+function flagToUpdateBody(flag: Flag): components["schemas"]["FlagRequest"] {
+  return {
+    data: {
+      id: flag.id ?? null,
+      type: "flag",
+      attributes: flagAttrs(flag),
     },
   };
 }
@@ -427,7 +457,7 @@ export class ManagementFlagsClient {
 
   /** @internal — called by `Flag.save()` for new resources. */
   async _createFlag(flag: Flag): Promise<Flag> {
-    const body = flagToBody(flag);
+    const body = flagToCreateBody(flag);
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/flags", { body });
@@ -443,7 +473,7 @@ export class ManagementFlagsClient {
   /** @internal — called by `Flag.save()` for existing resources. */
   async _updateFlag(flag: Flag): Promise<Flag> {
     if (flag.id === null) throw new Error("Cannot update a Flag with no id");
-    const body = flagToBody(flag);
+    const body = flagToUpdateBody(flag);
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
       const result = await this._http.PUT("/api/v1/flags/{id}", {
