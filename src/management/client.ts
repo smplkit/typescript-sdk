@@ -24,6 +24,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
+import type { components } from "../generated/app.d.ts";
 import {
   SmplkitError,
   SmplkitNotFoundError,
@@ -256,10 +257,17 @@ export class EnvironmentsClient {
 
   /** @internal */
   async _create(env: Environment): Promise<Environment> {
-    const body = {
+    /* v8 ignore start — defensive guard: `Environment.id` is always set by
+       `mgmt.environments.new(id, ...)`, the only public path that reaches
+       `_create`. The spec narrows `data.id` to a non-null string on create. */
+    if (env.id === null) {
+      throw new SmplkitValidationError("Cannot create an Environment without an id");
+    }
+    /* v8 ignore stop */
+    const body: components["schemas"]["EnvironmentCreateRequest"] = {
       data: {
         id: env.id,
-        type: "environment" as const,
+        type: "environment",
         attributes: {
           name: env.name,
           color: env.color === null ? null : env.color.hex,
