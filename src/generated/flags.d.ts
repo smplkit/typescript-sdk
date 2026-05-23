@@ -374,6 +374,43 @@ export interface components {
             registered: number;
         };
         /**
+         * FlagCreateRequest
+         * @description JSON:API request envelope for creating a flag.
+         *
+         *     Distinct from :class:`FlagRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        FlagCreateRequest: {
+            data: components["schemas"]["FlagCreateResource"];
+        };
+        /**
+         * FlagCreateResource
+         * @description JSON:API resource envelope for creating a flag (id required).
+         * @example {
+         *       "attributes": {
+         *         "default": false,
+         *         "description": "Enable the redesigned checkout flow.",
+         *         "name": "Checkout V2",
+         *         "type": "BOOLEAN"
+         *       },
+         *       "id": "checkout-v2",
+         *       "type": "flag"
+         *     }
+         */
+        FlagCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "flag";
+            attributes: components["schemas"]["Flag"];
+        };
+        /**
          * FlagEnvironment
          * @description Per-environment evaluation configuration for a flag.
          */
@@ -406,7 +443,7 @@ export interface components {
         };
         /**
          * FlagRequest
-         * @description JSON:API request envelope for creating or updating a flag.
+         * @description JSON:API request envelope for updating a flag.
          */
         FlagRequest: {
             data: components["schemas"]["FlagResource"];
@@ -877,7 +914,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["FlagRequest"];
+                "application/vnd.api+json": components["schemas"]["FlagCreateRequest"];
             };
         };
         responses: {
