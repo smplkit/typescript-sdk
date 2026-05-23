@@ -31,7 +31,8 @@ import {
 type AuditHttp = ReturnType<typeof createClient<paths>>;
 type GenForwarder = components["schemas"]["Forwarder"];
 type GenHttpConfiguration = components["schemas"]["HttpConfiguration"];
-type GenForwarderResponse = components["schemas"]["ForwarderResponse"];
+type GenForwarderCreateRequest = components["schemas"]["ForwarderCreateRequest"];
+type GenForwarderRequest = components["schemas"]["ForwarderRequest"];
 
 /** @internal */
 async function checkError(response: Response, error?: unknown): Promise<never> {
@@ -177,6 +178,11 @@ export class ForwardersClient implements ForwarderModelClient {
    * Construct an unsaved {@link Forwarder}. Call {@link Forwarder.save}
    * to persist.
    *
+   * @param key                    Caller-supplied stable identifier for the
+   *                               forwarder. Becomes the resource's `id`
+   *                               and is the unique key used by the audit
+   *                               service to address it on subsequent
+   *                               GET / PUT / DELETE calls.
    * @param fields.name            Display name. Free-form.
    * @param fields.forwarderType   Destination type — see {@link ForwarderType}.
    * @param fields.configuration   Destination HTTP request configuration.
@@ -199,17 +205,21 @@ export class ForwardersClient implements ForwarderModelClient {
    *                               expression. Must be supplied together
    *                               with `transformType` (both or neither).
    */
-  new(fields: {
-    name: string;
-    forwarderType: ForwarderType;
-    configuration: HttpConfiguration;
-    enabled?: boolean;
-    description?: string | null;
-    filter?: Record<string, unknown> | null;
-    transformType?: TransformType | null;
-    transform?: unknown;
-  }): Forwarder {
+  new(
+    key: string,
+    fields: {
+      name: string;
+      forwarderType: ForwarderType;
+      configuration: HttpConfiguration;
+      enabled?: boolean;
+      description?: string | null;
+      filter?: Record<string, unknown> | null;
+      transformType?: TransformType | null;
+      transform?: unknown;
+    },
+  ): Forwarder {
     return new Forwarder(this, {
+      id: key,
       name: fields.name,
       forwarderType: fields.forwarderType,
       configuration: fields.configuration,
@@ -292,10 +302,21 @@ export class ForwardersClient implements ForwarderModelClient {
 
   /**
    * @internal Called by `Forwarder.save()` on unsaved instances.
+   *
+   * The audit service requires a caller-supplied `data.id` on create —
+   * the forwarder's stable key, propagated from
+   * `mgmt.audit.forwarders.new(key, ...)`.
    */
   async _createForwarder(forwarder: Forwarder): Promise<Forwarder> {
-    const body: GenForwarderResponse = {
-      data: { id: "", type: "forwarder", attributes: _forwarderAttrs(forwarder) },
+    if (forwarder.id === null) {
+      throw new Error("cannot create a Forwarder without an id (pass key to forwarders.new)");
+    }
+    const body: GenForwarderCreateRequest = {
+      data: {
+        id: forwarder.id,
+        type: "forwarder",
+        attributes: _forwarderAttrs(forwarder),
+      },
     };
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
@@ -319,7 +340,7 @@ export class ForwardersClient implements ForwarderModelClient {
     if (forwarder.id === null) {
       throw new Error("cannot update a Forwarder with no id");
     }
-    const body: GenForwarderResponse = {
+    const body: GenForwarderRequest = {
       data: { id: forwarder.id, type: "forwarder", attributes: _forwarderAttrs(forwarder) },
     };
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
