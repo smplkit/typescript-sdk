@@ -63,25 +63,49 @@ async function checkError(response: Response, error?: unknown): Promise<never> {
   throwForStatus(response.status, body);
 }
 
-/** Build the JSON:API request body for create/update. @internal */
-function buildBody(config: Config): {
-  data: {
-    id: string | null;
-    type: "config";
-    attributes: components["schemas"]["Config"];
-  };
-} {
+/** Shared attribute builder for create + update. @internal */
+function buildAttrs(config: Config): components["schemas"]["Config"] {
   const attrs: components["schemas"]["Config"] = { name: config.name };
   if (config.description !== null) attrs.description = config.description;
   if (config.parent !== null) attrs.parent = config.parent;
   // Items: send the full typed dict as-is (already wire-shaped).
   attrs.items = config._itemsRawDirect as typeof attrs.items;
   attrs.environments = environmentsToWire(config._environmentsDirect) as typeof attrs.environments;
+  return attrs;
+}
+
+/**
+ * Build the JSON:API request body for `POST /api/v1/configs` (create).
+ *
+ * The create envelope requires `data.id` to be a non-null string — the
+ * config key is caller-supplied. Update has its own builder because the
+ * update envelope keeps `id` optional/nullable.
+ * @internal
+ */
+function buildCreateBody(config: Config): components["schemas"]["ConfigCreateRequest"] {
+  /* v8 ignore start — defensive guard: `Config.id` is always set by the
+     `mgmt.config.new(id, ...)` factory, the only public path that reaches
+     `_createConfig`. Spec narrowing requires a non-null `data.id`. */
+  if (config.id === null) {
+    throw new SmplkitValidationError("Cannot create a Config without an id");
+  }
+  /* v8 ignore stop */
+  return {
+    data: {
+      id: config.id,
+      type: "config",
+      attributes: buildAttrs(config),
+    },
+  };
+}
+
+/** Build the JSON:API request body for `PUT /api/v1/configs/{id}` (update). @internal */
+function buildUpdateBody(config: Config): components["schemas"]["ConfigRequest"] {
   return {
     data: {
       id: config.id ?? null,
       type: "config",
-      attributes: attrs,
+      attributes: buildAttrs(config),
     },
   };
 }
@@ -355,7 +379,7 @@ export class ManagementConfigClient {
 
   /** @internal — called by `Config.save()` for new resources. */
   async _createConfig(config: Config): Promise<Config> {
-    const body = buildBody(config);
+    const body = buildCreateBody(config);
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/configs", { body });
@@ -371,7 +395,7 @@ export class ManagementConfigClient {
   /** @internal — called by `Config.save()` for existing resources. */
   async _updateConfig(config: Config): Promise<Config> {
     if (config.id === null) throw new Error("Cannot update a Config with no id");
-    const body = buildBody(config);
+    const body = buildUpdateBody(config);
     let data: components["schemas"]["ConfigResponse"] | undefined;
     try {
       const result = await this._http.PUT("/api/v1/configs/{id}", {
