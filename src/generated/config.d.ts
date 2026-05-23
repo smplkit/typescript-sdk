@@ -318,6 +318,58 @@ export interface components {
             registered: number;
         };
         /**
+         * ConfigCreateRequest
+         * @description JSON:API request envelope for creating a config.
+         *
+         *     Distinct from :class:`ConfigRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        ConfigCreateRequest: {
+            data: components["schemas"]["ConfigCreateResource"];
+        };
+        /**
+         * ConfigCreateResource
+         * @description JSON:API resource envelope for creating a config (id required).
+         * @example {
+         *       "attributes": {
+         *         "description": "Settings for the user service.",
+         *         "environments": {
+         *           "prod": {
+         *             "values": {
+         *               "host": {
+         *                 "value": "db-prod.internal"
+         *               }
+         *             }
+         *           }
+         *         },
+         *         "items": {
+         *           "host": {
+         *             "description": "Database host.",
+         *             "type": "STRING",
+         *             "value": "db.internal"
+         *           }
+         *         },
+         *         "name": "User Service",
+         *         "parent": "common"
+         *       },
+         *       "id": "user-service",
+         *       "type": "config"
+         *     }
+         */
+        ConfigCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "config";
+            attributes: components["schemas"]["Config"];
+        };
+        /**
          * ConfigItemDefinition
          * @description Type-declared item within a config.
          *
@@ -363,7 +415,7 @@ export interface components {
         };
         /**
          * ConfigRequest
-         * @description JSON:API request envelope for creating or updating a config.
+         * @description JSON:API request envelope for updating a config.
          */
         ConfigRequest: {
             data: components["schemas"]["ConfigResource"];
@@ -597,7 +649,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ConfigRequest"];
+                "application/vnd.api+json": components["schemas"]["ConfigCreateRequest"];
             };
         };
         responses: {
