@@ -1,10 +1,4 @@
-/** Setup and simulation helpers for `config_runtime_showcase.ts`.
- *
- * The runtime showcase declares its own configs via `client.config.bind()`,
- * so this helper only handles cleanup and the live admin-override
- * simulation that stands in for an operator editing values in the smplkit
- * console.
- */
+/** Setup and simulation helpers for `config_runtime_showcase.ts`. */
 
 import { SmplManagementClient, SmplkitNotFoundError } from "../../src/index.js";
 

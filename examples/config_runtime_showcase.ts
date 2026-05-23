@@ -1,16 +1,6 @@
 /**
  * Demonstrates the smplkit runtime SDK for Smpl Config.
  *
- * Headline pattern: declare configurations as TypeScript object literals,
- * `bind()` them to a config id, then use the returned objects directly —
- * property access stays in sync with the server via the SDK's in-memory
- * cache and WebSocket push.
- *
- * Also demonstrates three lower-friction patterns:
- *   - `bind` with an untyped plain object
- *   - `get(id)` for dict-like lookup of an entire config
- *   - `get(id, key, default)` for one-shot value reads with fallback
- *
  * Prerequisites:
  *   - `npm install @smplkit/sdk`
  *   - A valid smplkit API key, provided via one of:
@@ -40,16 +30,11 @@ async function main(): Promise<void> {
   try {
     await cleanupRuntimeShowcase(client.manage);
 
-    // bind a typed object literal (TypeScript infers the shape)
+    // bind object literals
     const common = await client.config.bind("showcase-common", {
       app_name: "Acme SaaS",
       support_email: "support@acme.dev",
     });
-
-    // bind a child config — omitted keys inherit from common at the server
-    // level. (Only keys present in the literal are reachable as TypeScript
-    // properties on the returned object; to read inherited fields locally,
-    // use client.config.get("showcase-billing").)
     const billing = await client.config.bind(
       "showcase-billing",
       {
@@ -97,8 +82,8 @@ async function main(): Promise<void> {
     assert.equal(db.primary.host, "db.acme.example");
     assert.equal(db.pool_size, 10);
 
-    // or get a config by ID (raises if not found; pass a default if you
-    // want a fallback)
+    // or get a config by ID (raises NotFoundError if not found; pass a
+    // default if you want a fallback)
     const commonView = await client.config.get("showcase-common");
     console.log("showcase-common (via get):");
     for (const [k, v] of commonView.items()) {
