@@ -149,6 +149,10 @@ export interface paths {
         /**
          * Create Forwarder
          * @description Create a forwarder for this account.
+         *
+         *     The caller supplies the forwarder's key as `data.id`. Keys are
+         *     unique within an account and immutable for the lifetime of the
+         *     forwarder.
          */
         post: operations["create_forwarder"];
         delete?: never;
@@ -183,7 +187,7 @@ export interface paths {
          * @description Delete a forwarder.
          *
          *     Past delivery log entries are retained. A new forwarder may be
-         *     created later under the same name.
+         *     created later under the same id.
          */
         delete: operations["delete_forwarder"];
         options?: never;
@@ -800,6 +804,69 @@ export interface components {
             readonly version?: number | null;
         };
         /**
+         * ForwarderCreateRequest
+         * @description JSON:API request envelope for creating a forwarder.
+         *
+         *     Distinct from :class:`ForwarderRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        ForwarderCreateRequest: {
+            data: components["schemas"]["ForwarderCreateResource"];
+        };
+        /**
+         * ForwarderCreateResource
+         * @description JSON:API resource envelope for creating a forwarder (id required).
+         * @example {
+         *       "attributes": {
+         *         "configuration": {
+         *           "headers": [
+         *             {
+         *               "name": "Content-Type",
+         *               "value": "application/json"
+         *             },
+         *             {
+         *               "name": "DD-API-KEY",
+         *               "value": "dd-api-key-plaintext"
+         *             }
+         *           ],
+         *           "method": "POST",
+         *           "success_status": "2xx",
+         *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
+         *         },
+         *         "description": "Forwards user.* events to the prod Datadog tenant.",
+         *         "enabled": true,
+         *         "filter": {
+         *           "==": [
+         *             {
+         *               "var": "event_type"
+         *             },
+         *             "user.created"
+         *           ]
+         *         },
+         *         "forwarder_type": "datadog",
+         *         "name": "Datadog production",
+         *         "transform": "{ \"message\": event_type & ' on ' & resource_type }",
+         *         "transform_type": "JSONATA"
+         *       },
+         *       "id": "datadog-prod",
+         *       "type": "forwarder"
+         *     }
+         */
+        ForwarderCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @default forwarder
+             * @constant
+             */
+            type: "forwarder";
+            attributes: components["schemas"]["Forwarder"];
+        };
+        /**
          * ForwarderDelivery
          * @description A log entry for one attempt to deliver an event to a forwarder.
          */
@@ -946,7 +1013,7 @@ export interface components {
         };
         /**
          * ForwarderRequest
-         * @description JSON:API request envelope for creating or updating a forwarder.
+         * @description JSON:API request envelope for updating a forwarder.
          */
         ForwarderRequest: {
             data: components["schemas"]["ForwarderResource"];
@@ -955,7 +1022,7 @@ export interface components {
          * ForwarderResource
          * @description JSON:API resource envelope for a forwarder.
          *
-         *     `id` must not be specified for create requests (the server assigns it).
+         *     The caller supplies `id` (the forwarder's key) on create.
          * @example {
          *       "attributes": {
          *         "configuration": {
@@ -991,7 +1058,7 @@ export interface components {
          *         "updated_at": "2026-05-07T12:00:00Z",
          *         "version": 1
          *       },
-         *       "id": "11111111-2222-3333-4444-555555555555",
+         *       "id": "datadog-prod",
          *       "type": "forwarder"
          *     }
          */
@@ -1708,7 +1775,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["ForwarderRequest"];
+                "application/vnd.api+json": components["schemas"]["ForwarderCreateRequest"];
             };
         };
         responses: {
