@@ -18,7 +18,7 @@ import {
 } from "../../../src/audit/types.js";
 import { SmplNotFoundError, SmplError, SmplConnectionError } from "../../../src/errors.js";
 
-const FWD_ID = "11111111-2222-3333-4444-555555555555";
+const FWD_ID = "datadog-prod";
 
 const mockFetch = vi.fn();
 
@@ -81,11 +81,12 @@ function _newForwarder(
     transform: unknown;
     transformType: TransformType;
   }> = {},
+  key: string = FWD_ID,
 ) {
   const mgmt = makeClient();
   return {
     mgmt,
-    forwarder: mgmt.audit.forwarders.new({
+    forwarder: mgmt.audit.forwarders.new(key, {
       name: "Datadog production",
       forwarderType: ForwarderType.DATADOG,
       configuration: new HttpConfiguration({
@@ -145,10 +146,13 @@ test("ManagementAuditClient exposes forwarders namespace", () => {
 // ---------------------------------------------------------------------------
 
 describe("mgmt.audit.forwarders.new", () => {
-  test("returns an unsaved Forwarder bound to the client", () => {
+  test("returns an unsaved Forwarder bound to the client with caller-supplied id", () => {
     const { forwarder } = _newForwarder();
     expect(forwarder).toBeInstanceOf(Forwarder);
-    expect(forwarder.id).toBeNull();
+    // The caller-supplied key populates Forwarder.id immediately — the
+    // POST envelope requires it. The server-assigned `createdAt` is still
+    // null for an unsaved instance.
+    expect(forwarder.id).toBe(FWD_ID);
     expect(forwarder.createdAt).toBeNull();
     // active-record link is set so .save() / .delete() round-trip back.
     expect(forwarder._client).not.toBeNull();
@@ -298,6 +302,30 @@ describe("Forwarder.save() — create", () => {
     });
     await expect(detached.save()).rejects.toThrow(/no client|cannot save/i);
   });
+
+  test("_createForwarder rejects a Forwarder with no id", async () => {
+    // The caller-supplied key is required on create; the public
+    // `forwarders.new(key, ...)` factory always sets it, but the
+    // wrapper still guards the wire envelope so the error is local.
+    const mgmt = makeClient();
+    const detached = new Forwarder(mgmt.audit.forwarders, {
+      name: "x",
+      forwarderType: ForwarderType.HTTP,
+      configuration: new HttpConfiguration({ url: "https://x.example" }),
+    });
+    // detached.id is null because no key was passed.
+    await expect(mgmt.audit.forwarders._createForwarder(detached)).rejects.toThrow(/no id|key/i);
+  });
+
+  test("sends caller-supplied key as data.id on create", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.id).toBe(FWD_ID);
+    expect(body.data.type).toBe("forwarder");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -355,6 +383,7 @@ describe("Forwarder.save() — update", () => {
     // _updateForwarder is exposed for the active-record path; it should
     // refuse without an id even though save() normally guarantees one.
     const { mgmt, forwarder } = _newForwarder();
+    forwarder.id = null; // wipe the caller-supplied key
     forwarder.createdAt = "2026-05-07T12:00:00+00:00"; // pretend it was saved
     await expect(mgmt.audit.forwarders._updateForwarder(forwarder)).rejects.toThrow(/no id/i);
   });
@@ -489,6 +518,7 @@ describe("Forwarder.delete() and mgmt.audit.forwarders.delete()", () => {
 
   test("Forwarder.delete() throws when id is null", async () => {
     const { forwarder } = _newForwarder();
+    forwarder.id = null; // wipe the caller-supplied key
     await expect(forwarder.delete()).rejects.toThrow(/no client or id|cannot delete/i);
   });
 
