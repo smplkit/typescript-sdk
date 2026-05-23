@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     const forwarderName = `showcase-${randomUUID().slice(0, 6)}`;
 
     // create a new forwarder
-    const forwarder = manage.audit.forwarders.new({
+    const forwarder = manage.audit.forwarders.new(forwarderName, {
       name: forwarderName,
       forwarderType: ForwarderType.HTTP,
       configuration: new HttpConfiguration({
