@@ -112,8 +112,9 @@ export interface paths {
          * Create Log Group
          * @description Create a log group.
          *
-         *     The caller may supply a key in `data.id`; if omitted, the server
-         *     generates one from `name`.
+         *     The caller supplies the log group's key as `data.id`. The id is
+         *     required, must be unique within the account across loggers and
+         *     groups, and is immutable for the lifetime of the group.
          */
         post: operations["create_log_group"];
         delete?: never;
@@ -327,6 +328,46 @@ export interface components {
             readonly updated_at?: string | null;
         };
         /**
+         * LogGroupCreateRequest
+         * @description JSON:API request envelope for creating a log group.
+         *
+         *     Distinct from :class:`LogGroupRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        LogGroupCreateRequest: {
+            data: components["schemas"]["LogGroupCreateResource"];
+        };
+        /**
+         * LogGroupCreateResource
+         * @description JSON:API resource envelope for creating a log group (id required).
+         * @example {
+         *       "attributes": {
+         *         "environments": {
+         *           "prod": {
+         *             "level": "ERROR"
+         *           }
+         *         },
+         *         "level": "WARN",
+         *         "name": "Payment pipeline"
+         *       },
+         *       "id": "payment-pipeline",
+         *       "type": "log_group"
+         *     }
+         */
+        LogGroupCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "log_group";
+            attributes: components["schemas"]["LogGroup"];
+        };
+        /**
          * LogGroupListResponse
          * @description JSON:API collection response for log groups.
          */
@@ -337,7 +378,7 @@ export interface components {
         };
         /**
          * LogGroupRequest
-         * @description JSON:API request envelope for creating or updating a log group.
+         * @description JSON:API request envelope for updating a log group.
          */
         LogGroupRequest: {
             data: components["schemas"]["LogGroupResource"];
@@ -1235,7 +1276,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/vnd.api+json": components["schemas"]["LogGroupRequest"];
+                "application/vnd.api+json": components["schemas"]["LogGroupCreateRequest"];
             };
         };
         responses: {
