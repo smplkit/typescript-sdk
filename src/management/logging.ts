@@ -123,10 +123,8 @@ function loggerToBody(logger: Logger): {
   };
 }
 
-/** @internal */
-function groupToBody(group: LogGroup): {
-  data: { id: string | null; type: "log_group"; attributes: components["schemas"]["LogGroup"] };
-} {
+/** @internal Shared attribute payload for create + update. */
+function groupAttrs(group: LogGroup): components["schemas"]["LogGroup"] {
   const attrs: components["schemas"]["LogGroup"] = {
     name: group.name,
   };
@@ -136,8 +134,34 @@ function groupToBody(group: LogGroup): {
   if (Object.keys(wire).length > 0) {
     attrs.environments = wire as typeof attrs.environments;
   }
+  return attrs;
+}
+
+/**
+ * Build the JSON:API request body for `POST /api/v1/log_groups` (create).
+ *
+ * The create envelope requires `data.id` to be a non-null string — the
+ * log-group key is caller-supplied. Update has its own builder because
+ * the update envelope keeps `id` optional/nullable.
+ * @internal
+ */
+function groupToCreateBody(group: LogGroup): components["schemas"]["LogGroupCreateRequest"] {
+  /* v8 ignore start — defensive guard: `LogGroup.id` is always set by the
+     `mgmt.logging.groups.new(id, ...)` factory, the only public path that
+     reaches `_createGroup`. Spec narrowing requires a non-null `data.id`. */
+  if (group.id === null) {
+    throw new SmplkitValidationError("Cannot create a LogGroup without an id");
+  }
+  /* v8 ignore stop */
   return {
-    data: { id: group.id, type: "log_group", attributes: attrs },
+    data: { id: group.id, type: "log_group", attributes: groupAttrs(group) },
+  };
+}
+
+/** @internal Build the JSON:API request body for `PUT /api/v1/log_groups/{id}` (update). */
+function groupToUpdateBody(group: LogGroup): components["schemas"]["LogGroupRequest"] {
+  return {
+    data: { id: group.id ?? null, type: "log_group", attributes: groupAttrs(group) },
   };
 }
 
@@ -402,7 +426,7 @@ export class LogGroupsClient {
    * so create and update have to dispatch to different endpoints.
    */
   async _createGroup(group: LogGroup): Promise<LogGroup> {
-    const body = groupToBody(group);
+    const body = groupToCreateBody(group);
     let data: components["schemas"]["LogGroupResponse"] | undefined;
     try {
       const result = await this._http.POST("/api/v1/log_groups", { body });
@@ -418,7 +442,7 @@ export class LogGroupsClient {
   /** @internal — called by `LogGroup.save()` for existing groups. */
   async _updateGroup(group: LogGroup): Promise<LogGroup> {
     if (group.id === null) throw new Error("Cannot update a LogGroup with no id");
-    const body = groupToBody(group);
+    const body = groupToUpdateBody(group);
     let data: components["schemas"]["LogGroupResponse"] | undefined;
     try {
       const result = await this._http.PUT("/api/v1/log_groups/{id}", {
