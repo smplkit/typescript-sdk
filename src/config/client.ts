@@ -1,5 +1,19 @@
 /**
- * ConfigClient — runtime client for Smpl Config (live values, change listeners).
+ * ConfigClient — runtime client for Smpl Config.
+ *
+ * Two ways to read config values:
+ *
+ * - {@link ConfigClient.bind} — declarative, schema-first. Pass an object
+ *   literal (or class instance) with the in-code defaults; the SDK
+ *   registers the schema and values, then mutates the *same* object in
+ *   place when the server pushes updates. Reads are plain property
+ *   access on a real object — no proxy indirection.
+ * - {@link ConfigClient.get} — lookup. With one argument returns a
+ *   {@link LiveConfigProxy} (dict-like view). With two arguments returns
+ *   a single value (raises on missing). With three arguments returns the
+ *   value or the supplied default and auto-registers the key for
+ *   code-first console observability.
+ *
  * Management/CRUD lives on `mgmt.config.*`.
  */
 
@@ -7,7 +21,7 @@
 
 import createClient from "openapi-fetch";
 import type { components } from "../generated/config.d.ts";
-import { SmplNotFoundError, SmplError, SmplTimeoutError } from "../errors.js";
+import { SmplkitNotFoundError, SmplkitError, SmplkitTimeoutError } from "../errors.js";
 import { resolveChain } from "./resolve.js";
 import { Config } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
@@ -55,6 +69,10 @@ interface ChangeListener {
 }
 
 const BASE_URL = "https://config.smplkit.com";
+
+/** Sentinel that distinguishes "default not supplied" from "default is undefined"
+ *  in the three-arg {@link ConfigClient.get} form. @internal */
+const MISSING: unique symbol = Symbol("smplkit.config.get.MISSING");
 
 type ConfigResource = components["schemas"]["ConfigResource"];
 
@@ -126,11 +144,87 @@ function resourceToConfig(resource: ConfigResource): Config {
 }
 
 /**
+ * Map a runtime value (bind value or get default) to a Config item type.
+ *
+ * Used to infer the type that lands in the discovery payload. `boolean` is
+ * checked before `number` because `typeof true === "boolean"` already
+ * disambiguates them — we follow the same ordering as the Python SDK for
+ * symmetry.
+ * @internal
+ */
+function valueToItemType(value: unknown): string {
+  if (typeof value === "boolean") return "BOOLEAN";
+  if (typeof value === "number") return "NUMBER";
+  if (typeof value === "string") return "STRING";
+  return "STRING";
+}
+
+/**
+ * Plain "object literal" predicate — a record whose prototype is either
+ * `Object.prototype` or `null`. Distinguishes the dict-bind path (plain
+ * objects) from the class-instance-bind path (anything else). For class
+ * instances, every property is treated as an explicit override; nested
+ * recursion only descends into plain sub-objects so we don't accidentally
+ * dot-flatten random class-instance attributes.
+ * @internal
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Walk a bound object and yield `[key, type, value]` triples flattened to
+ * dot-notation. Nested plain objects are descended into; class instances
+ * and arrays are treated as opaque leaves so users don't accidentally
+ * unpack a complex object's internals into config keys.
+ * @internal
+ */
+function iterObjectItems(
+  obj: Record<string, unknown>,
+  prefix: string = "",
+): Array<[string, string, unknown]> {
+  const out: Array<[string, string, unknown]> = [];
+  for (const [key, value] of Object.entries(obj)) {
+    const flatKey = `${prefix}${key}`;
+    if (isPlainObject(value)) {
+      out.push(...iterObjectItems(value, `${flatKey}.`));
+      continue;
+    }
+    out.push([flatKey, valueToItemType(value), value]);
+  }
+  return out;
+}
+
+/**
+ * Apply a server-pushed value to a bound target in place.
+ *
+ * Walks the dotted key path to the leaf's parent, then assigns the value
+ * via property assignment (works for both plain objects and class
+ * instances; both are reference types in JS). Bails silently if any
+ * intermediate is missing or non-object.
+ * @internal
+ */
+function applyChangeToTarget(target: object, dottedKey: string, value: unknown): void {
+  const parts = dottedKey.split(".");
+  let current: any = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (current === null || typeof current !== "object" || !(part in current)) return;
+    current = current[part];
+  }
+  if (current === null || typeof current !== "object") return;
+  current[parts[parts.length - 1]] = value;
+}
+
+/**
  * Runtime client for the smplkit Config service.
  *
- * Obtained via `SmplClient.config`. Provides live config values, change
- * listeners, and lazy initialization. Management/CRUD lives on
- * `SmplClient.manage.config` (or use a standalone {@link SmplManagementClient}).
+ * Obtained via `SmplClient.config`. Provides {@link bind} (the declarative
+ * path), {@link get} (lookup), change listeners, and lazy initialization.
+ * Management/CRUD lives on `SmplClient.manage.config` (or use a standalone
+ * {@link SmplManagementClient}).
  */
 export class ConfigClient {
   /** @internal */
@@ -162,10 +256,11 @@ export class ConfigClient {
    * without a full re-list. Mirrors Python's `_raw_config_cache`. */
   private _configStore: Record<string, Config> = {};
   /** Cache of LiveConfigProxy instances by config id — ensures repeat
-   * `get_or_create(id)` (or `get(id)` after discovery) returns the same
-   * handle so callers can reference it as a parent via direct ref.
-   * Mirrors Python's `_proxies`. */
-  private _proxies: Record<string, LiveConfigProxy<any>> = {};
+   * `get(id)` calls return the same handle. */
+  private _proxies: Record<string, LiveConfigProxy> = {};
+  /** Bound targets (plain objects or class instances) keyed by config
+   * id. WebSocket dispatch mutates these in place when values change. */
+  private _bindings: Map<string, object> = new Map();
   private _initialized = false;
   private _listeners: ChangeListener[] = [];
 
@@ -194,7 +289,7 @@ export class ConfigClient {
           return await fetch(new Request(request, { signal: controller.signal }));
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") {
-            throw new SmplTimeoutError(`Request timed out after ${ms}ms`);
+            throw new SmplkitTimeoutError(`Request timed out after ${ms}ms`);
           }
           throw err;
         } finally {
@@ -205,83 +300,181 @@ export class ConfigClient {
   }
 
   // ------------------------------------------------------------------
-  // Runtime: resolve and subscribe
+  // Public API: bind, get
   // ------------------------------------------------------------------
 
   /**
-   * Return a live, dict-like view of the resolved values for *id*.
+   * Bind an object to a config id; return the same object back, live.
    *
-   * Without `model`, returns a {@link LiveConfigProxy} that behaves like a
-   * `Record<string, unknown>` (`proxy["key"]`, iteration, `proxy.items()`,
-   * `Object.keys(proxy)`) and updates automatically as the server pushes
-   * changes.
+   * Declarative, code-first API. The object's keys are the schema; its
+   * values are the in-code defaults. On first boot:
    *
-   * With `model`, the return value type-checks as `model` — attribute
-   * access (`cfg.database.host`) walks a model rebuilt from the current
-   * values on each read, so the customer sees the model's type signature
-   * in their IDE while still tracking live data.
+   * 1. Every leaf (recursively, through nested plain objects) is
+   *    registered with the server as a config item, with its value as
+   *    the in-code default and a type inferred from `typeof value`.
+   * 2. After the SDK's cache is populated, any server-side overrides for
+   *    this config are applied to the bound object in place.
    *
-   * Mirrors Python's `client.config.get(id)` / `client.config.get(id, ModelCls)`.
-   * There is no `subscribe()` — it was unified into `get()`.
+   * On every WebSocket-delivered change thereafter the bound object is
+   * mutated in place — readers of `obj.foo` and `obj["foo"]` always see
+   * the current resolved value. The returned object is the same one you
+   * passed in (referential identity preserved).
+   *
+   * Idempotent. Repeated calls with the same id return the originally-
+   * bound object; the new `config` argument is ignored.
+   *
+   * **Plain object literals vs. class instances.** Plain object literals
+   * (e.g., `{ a: 1, b: { c: 2 } }`) are the recommended input shape —
+   * their keys are the explicit override set, and omitted keys inherit
+   * from `parent`. Class instances are also accepted, but every
+   * enumerable property is registered as an explicit override (there is
+   * no JS equivalent of Python's `model_fields_set`); to get omit-to-
+   * inherit semantics, use a plain object literal.
+   *
+   * @param id - The config id to register under.
+   * @param config - A plain object literal (recommended) or class
+   *   instance carrying the in-code defaults.
+   * @param options - Optional `parent`: another object previously
+   *   returned from a {@link bind} call. Activates parent-chain
+   *   inheritance for keys the caller omitted.
+   * @returns The same `config` object, registered and live.
+   * @throws TypeError if `config` is not an object.
+   * @throws Error if `parent` was not previously bound via {@link bind}.
    */
-  async get<T = Record<string, unknown>>(
+  async bind<T extends object>(
     id: string,
-    model?: new (data: any) => T,
-  ): Promise<LiveConfigProxy<T>> {
+    config: T,
+    options: { parent?: object | null } = {},
+  ): Promise<T> {
+    if (config === null || typeof config !== "object") {
+      throw new TypeError(`bind() requires an object; got ${typeof config}`);
+    }
+
+    const existing = this._bindings.get(id);
+    if (existing !== undefined) {
+      return existing as T;
+    }
+
+    let parentId: string | null = null;
+    if (options.parent !== undefined && options.parent !== null) {
+      parentId = this._configIdFor(options.parent);
+      if (parentId === null) {
+        throw new Error(
+          "bind(): parent must be an object previously returned from client.config.bind(). " +
+            "Bind the parent first.",
+        );
+      }
+    }
+
+    // Derive a console display name from the class (for class instances)
+    // or leave null (plain object literals have no class to introspect).
+    const ctor = (config as any).constructor;
+    const className =
+      typeof ctor === "function" && ctor !== Object && typeof ctor.name === "string" && ctor.name
+        ? (ctor.name as string)
+        : null;
+
+    this._observeConfigDeclaration(id, parentId, className, null);
+
+    for (const [itemKey, itemType, value] of iterObjectItems(config as Record<string, unknown>)) {
+      this._observeItemDeclaration(id, itemKey, itemType, value, undefined);
+    }
+
+    // Register the binding BEFORE _ensureInitialized so WS dispatch (which
+    // can fire during the initial fetch) finds it.
+    this._bindings.set(id, config);
+
     await this._ensureInitialized();
-    if (!(id in this._configCache)) {
-      throw new SmplNotFoundError(`Config with id '${id}' not found in cache`);
-    }
-    const metrics = this._parent?._metrics;
-    if (metrics) {
-      metrics.record("config.resolutions", 1, "resolutions", { config: id });
-    }
-    return this._cachedProxy<T>(id, model);
+    this._syncTargetFromCache(config, id);
+    return config;
   }
 
   /**
-   * Declare a configuration from code; return a live, dict-like view.
+   * Read a config (full) or a single value within a config.
    *
-   * Idempotent. Repeated calls with the same `id` return the same
-   * {@link LiveConfigProxy} instance. The first call queues a discovery
-   * payload (the config and any items declared via typed getters on the
-   * returned handle) for upload to `POST /api/v1/configs/bulk` on next
-   * flush. If the config already exists server-side, `managed=true`
-   * configs are left untouched; `managed=false` configs receive the
-   * SDK's items via source-row upsert per ADR-024 §2.9.
+   * Three forms dispatched by argument count:
    *
-   * Unlike {@link get}, this method does NOT raise `NotFoundError` when
-   * the id is absent from the cache — discovery handles that case.
+   * - `get(id)` — returns a {@link LiveConfigProxy}, a live dict-like
+   *   view. Throws {@link SmplkitNotFoundError} if the config is missing.
+   *   No registration.
+   * - `get(id, key)` — returns the resolved value of `key` within `id`.
+   *   Throws {@link SmplkitNotFoundError} if either the config or the key
+   *   is missing. No registration.
+   * - `get(id, key, defaultValue)` — returns the resolved value, falling
+   *   back to `defaultValue` if either is missing. Never throws. Also
+   *   **registers** the config (if new) and the key (with `defaultValue`
+   *   as its default value) for code-first console observability.
    *
-   * Mirrors Python's `client.config.get_or_create(id, ...)`.
+   * For typed access via a Pydantic-style declarative API, use
+   * {@link bind} instead.
    */
-  async getOrCreate<T = Record<string, unknown>>(
-    id: string,
-    options: {
-      parent?: string | LiveConfigProxy<any> | null;
-      name?: string;
-      description?: string;
-      model?: new (data: any) => T;
-    } = {},
-  ): Promise<LiveConfigProxy<T>> {
-    const parent = options.parent;
-    const parentId = parent instanceof LiveConfigProxy ? (parent as any)._key : (parent ?? null);
-
-    this._observeConfigDeclaration(id, parentId, options.name ?? null, options.description ?? null);
-
+  async get(id: string): Promise<LiveConfigProxy>;
+  async get(id: string, key: string): Promise<unknown>;
+  async get<V>(id: string, key: string, defaultValue: V): Promise<V | unknown>;
+  async get(id: string, key?: string, defaultValue: unknown = MISSING): Promise<unknown> {
     await this._ensureInitialized();
-    return this._cachedProxy<T>(id, options.model);
+
+    if (key === undefined) {
+      // Form 1: full config.
+      if (!(id in this._configCache)) {
+        throw new SmplkitNotFoundError(`Config with id '${id}' not found in cache`);
+      }
+      const metrics = this._parent?._metrics;
+      if (metrics) {
+        metrics.record("config.resolutions", 1, "resolutions", { config: id });
+      }
+      return this._cachedProxy(id);
+    }
+
+    // Forms 2 and 3: single-value lookup.
+    const hasDefault = defaultValue !== MISSING;
+    if (hasDefault) {
+      // Register the config + key so the reference shows up in the
+      // console even when no schema was declared via bind(). The buffer
+      // is idempotent at the (configId, itemKey) level.
+      this._observeConfigDeclaration(id, null, null, null);
+      this._observeItemDeclaration(id, key, valueToItemType(defaultValue), defaultValue, undefined);
+    }
+
+    if (!(id in this._configCache)) {
+      if (hasDefault) return defaultValue;
+      throw new SmplkitNotFoundError(`Config with id '${id}' not found in cache`);
+    }
+    const values = this._configCache[id];
+    if (!(key in values)) {
+      if (hasDefault) return defaultValue;
+      throw new SmplkitNotFoundError(`Config item '${key}' not found in config '${id}'`);
+    }
+    return values[key];
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: binding helpers
+  // ------------------------------------------------------------------
+
+  /** @internal — return the config_id this object was bound under, or null. */
+  private _configIdFor(target: object): string | null {
+    for (const [cid, bound] of this._bindings) {
+      if (bound === target) return cid;
+    }
+    return null;
+  }
+
+  /** @internal — apply current cached values to a freshly-bound target. */
+  private _syncTargetFromCache(target: object, configId: string): void {
+    const cache = this._configCache[configId];
+    if (!cache) return;
+    for (const [dottedKey, value] of Object.entries(cache)) {
+      applyChangeToTarget(target, dottedKey, value);
+    }
   }
 
   /** @internal — return (and cache) the canonical proxy for a config id. */
-  _cachedProxy<T>(id: string, model?: new (data: any) => T): LiveConfigProxy<T> {
-    let proxy = this._proxies[id] as LiveConfigProxy<T> | undefined;
+  _cachedProxy(id: string): LiveConfigProxy {
+    let proxy = this._proxies[id];
     if (!proxy) {
-      proxy = new LiveConfigProxy<T>(this, id, model);
-      this._proxies[id] = proxy as LiveConfigProxy<any>;
-    } else if (model !== undefined && (proxy as any)._model === undefined) {
-      // First model-typed access — upgrade the proxy in place.
-      (proxy as any)._model = model;
+      proxy = new LiveConfigProxy(this, id);
+      this._proxies[id] = proxy;
     }
     return proxy;
   }
@@ -340,21 +533,18 @@ export class ConfigClient {
     callback?: (event: ConfigChangeEvent) => void,
   ): void {
     if (typeof callbackOrConfigId === "function") {
-      // Global listener: onChange(callback)
       this._listeners.push({
         callback: callbackOrConfigId,
         configId: null,
         itemKey: null,
       });
     } else if (typeof callbackOrItemKey === "function") {
-      // Config-scoped: onChange(configId, callback)
       this._listeners.push({
         callback: callbackOrItemKey,
         configId: callbackOrConfigId,
         itemKey: null,
       });
     } else if (typeof callbackOrItemKey === "string" && callback) {
-      // Item-scoped: onChange(configId, itemKey, callback)
       this._listeners.push({
         callback,
         configId: callbackOrConfigId,
@@ -373,11 +563,11 @@ export class ConfigClient {
    */
   async refresh(): Promise<void> {
     if (!this._initialized) {
-      throw new SmplError("Config not initialized. Call get() first.");
+      throw new SmplkitError("Config not initialized. Call get() or bind() first.");
     }
     const environment = this._parent?._environment;
     if (!environment) {
-      throw new SmplError("No environment set.");
+      throw new SmplkitError("No environment set.");
     }
     const configs = await this._listConfigs();
     const newCache: Record<string, Record<string, unknown>> = {};
@@ -398,10 +588,6 @@ export class ConfigClient {
    * (set via `_resolveManagement`) so runtime + management share one HTTP
    * client; falls back to a direct GET when running without `SmplClient`
    * bootstrap (e.g. unit tests that construct `ConfigClient` directly).
-   *
-   * Pages through the server until a short page (less than the requested
-   * size) is returned — accounts with more than 1000 configs would
-   * otherwise silently lose everything past page one.
    */
   private async _listConfigs(): Promise<Config[]> {
     const PAGE_SIZE = 1000;
@@ -425,7 +611,7 @@ export class ConfigClient {
           },
         });
         if (!result.response.ok) {
-          throw new SmplError(`Failed to list configs: ${result.response.status}`);
+          throw new SmplkitError(`Failed to list configs: ${result.response.status}`);
         }
         const data = result.data;
         rows = data ? data.data.map((r) => resourceToConfig(r)) : [];
@@ -445,7 +631,8 @@ export class ConfigClient {
    * Eagerly initialize the config subclient — fetch all configs, resolve
    * environment-scoped values into the local cache, and subscribe to the
    * shared WebSocket for live updates. Idempotent. Called automatically
-   * on first `client.config.get(...)` if not invoked manually.
+   * on first `client.config.get(...)` / `client.config.bind(...)` if not
+   * invoked manually.
    */
   async start(): Promise<void> {
     return this._ensureInitialized();
@@ -456,7 +643,7 @@ export class ConfigClient {
     if (this._initialized) return;
     const environment = this._parent?._environment;
     if (!environment) {
-      throw new SmplError("No environment set. Ensure SmplClient is configured.");
+      throw new SmplkitError("No environment set. Ensure SmplClient is configured.");
     }
 
     // Per ADR-037 §2.14: flush any buffered discovery declarations BEFORE
@@ -523,11 +710,6 @@ export class ConfigClient {
     debug("websocket", `config_changed event received: ${JSON.stringify(data)}`);
     const configKey = data.id as string | undefined;
     if (!configKey) return;
-    // The change can cascade: any config that has `configKey` in its
-    // parent chain has a stale resolved cache. Refetch JUST the changed
-    // config (single GET — fast), update the local raw store, then
-    // rebuild every config's resolved cache from the store. Mirrors
-    // Python's _handle_config_changed -> _rebuild_resolved_cache.
     const environment = this._parent?._environment;
     if (!environment) return;
     void this._fetchSingleConfig(configKey)
@@ -581,7 +763,6 @@ export class ConfigClient {
     debug("websocket", `config_deleted event received: ${JSON.stringify(data)}`);
     const configKey = data.id as string | undefined;
     if (!configKey) return;
-    // Remove from cache — no HTTP fetch
     if (configKey in this._configCache) {
       const oldCache = { ...this._configCache };
       delete this._configCache[configKey];
@@ -591,7 +772,6 @@ export class ConfigClient {
 
   private _handleConfigsChanged = (_data: Record<string, any>): void => {
     debug("websocket", `configs_changed event received`);
-    // Full list fetch, rebuild resolution, fire listeners
     void this.refresh().catch(() => {
       // ignore refresh errors from WebSocket events
     });
@@ -612,10 +792,16 @@ export class ConfigClient {
       const oldItems = oldCache[cfgKey] ?? {};
       const newItems = newCache[cfgKey] ?? {};
       const allItemKeys = new Set([...Object.keys(oldItems), ...Object.keys(newItems)]);
+      const target = this._bindings.get(cfgKey);
       for (const iKey of allItemKeys) {
         const oldVal = iKey in oldItems ? oldItems[iKey] : null;
         const newVal = iKey in newItems ? newItems[iKey] : null;
         if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+          // Apply to bound target first so listeners reading the object
+          // see the new value.
+          if (target !== undefined) {
+            applyChangeToTarget(target, iKey, newVal);
+          }
           const metrics = this._parent?._metrics;
           if (metrics) {
             metrics.record("config.changes", 1, "changes", { config: cfgKey });

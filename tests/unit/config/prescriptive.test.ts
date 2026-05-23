@@ -134,38 +134,6 @@ describe("get", () => {
     expect((result as Record<string, unknown>).timeout).toEqual(2000);
   });
 
-  it("should pass cached values into the model on each access", async () => {
-    const client = makeClient();
-
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "app",
-            items: { retries: 3, timeout: 1000 },
-          }),
-        ],
-      }),
-    );
-
-    class AppConfig {
-      retries: unknown;
-      timeout: unknown;
-      constructor(data: Record<string, unknown>) {
-        this.retries = data.retries;
-        this.timeout = data.timeout;
-      }
-    }
-
-    const result = await client.get("app", AppConfig);
-
-    // The proxy is not directly an AppConfig — it constructs one per access
-    // and proxies attribute access through it. Because the cache stores
-    // wire-shape values, the model fields receive `{value: raw}`.
-    expect((result as unknown as AppConfig).retries).toEqual(3);
-    expect((result as unknown as AppConfig).timeout).toEqual(1000);
-  });
-
   it("should throw SmplNotFoundError for unknown key", async () => {
     const client = makeClient();
 
@@ -369,127 +337,6 @@ describe("get returns a live proxy", () => {
 
     // Proxy should return undefined for properties (empty object fallback)
     expect((proxy as Record<string, unknown>).retries).toBeUndefined();
-  });
-
-  it("should delegate to model when model class is provided", async () => {
-    const client = makeClient();
-
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "app",
-            items: { retries: 3, timeout: 1000 },
-          }),
-        ],
-      }),
-    );
-
-    class AppConfig {
-      retries: unknown;
-      timeout: unknown;
-      constructor(data: Record<string, unknown>) {
-        this.retries = data.retries;
-        this.timeout = data.timeout;
-      }
-
-      get raw(): unknown {
-        return this.retries;
-      }
-    }
-
-    const proxy = await client.get("app", AppConfig);
-
-    expect((proxy as unknown as AppConfig).retries).toEqual(3);
-    expect((proxy as unknown as AppConfig).timeout).toEqual(1000);
-    // Method/getter access also goes through the model rebuild.
-    expect((proxy as unknown as AppConfig).raw).toEqual(3);
-  });
-
-  it("typed-model access unflattens dotted keys before passing to the model constructor", async () => {
-    const client = makeClient();
-
-    // Resolved cache holds dotted keys like "database.host". The proxy
-    // must unflatten these into nested {database: {host: ...}} before
-    // constructing the typed model — otherwise `cfg.database.host`
-    // is undefined.
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "user-svc",
-            items: { "database.host": "h", "database.port": 5432, "cache.ttl": 60 },
-          }),
-        ],
-      }),
-    );
-
-    class Db {
-      host: unknown;
-      port: unknown;
-      constructor(data: Record<string, unknown>) {
-        this.host = data?.host;
-        this.port = data?.port;
-      }
-    }
-    class Cache {
-      ttl: unknown;
-      constructor(data: Record<string, unknown>) {
-        this.ttl = data?.ttl;
-      }
-    }
-    class UserSvc {
-      database: Db;
-      cache: Cache;
-      constructor(data: Record<string, unknown>) {
-        this.database = new Db((data?.database as Record<string, unknown>) ?? {});
-        this.cache = new Cache((data?.cache as Record<string, unknown>) ?? {});
-      }
-    }
-
-    const proxy = await client.get("user-svc", UserSvc);
-    expect((proxy as unknown as UserSvc).database.host).toBe("h");
-    expect((proxy as unknown as UserSvc).database.port).toBe(5432);
-    expect((proxy as unknown as UserSvc).cache.ttl).toBe(60);
-  });
-
-  it("typed-model unflatten overwrites a non-object intermediate key", async () => {
-    // Cover the conflict branch in _unflattenDotNotation: if `db` is set
-    // first as a string (literal "db" key) and then `db.host` arrives,
-    // the literal value gets replaced by an object so the nested write
-    // can proceed. Tests the `current[part] !== "object"` branch.
-    const client = makeClient();
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: [
-          configResource({
-            id: "conflict-svc",
-            // Order matters for the conflict path: literal "db" first,
-            // then the dotted "db.host" which forces "db" to become {}.
-            items: { db: "literal-string", "db.host": "h" },
-          }),
-        ],
-      }),
-    );
-
-    class Db {
-      host: unknown;
-      constructor(data: Record<string, unknown>) {
-        this.host = data?.host;
-      }
-    }
-    class Svc {
-      db: Db;
-      constructor(data: Record<string, unknown>) {
-        this.db = new Db((data?.db as Record<string, unknown>) ?? {});
-      }
-    }
-
-    const proxy = await client.get("conflict-svc", Svc);
-    // The dotted key wins because it forces an object; the literal value
-    // is dropped on the unflatten side. (Customers shouldn't mix the two
-    // shapes, but the proxy must not throw if they do.)
-    expect((proxy as unknown as Svc).db.host).toBe("h");
   });
 });
 
@@ -981,7 +828,9 @@ describe("refresh", () => {
     rawClient["_initialized"] = false;
 
     await expect(client.refresh()).rejects.toThrow(SmplError);
-    await expect(client.refresh()).rejects.toThrow("Config not initialized. Call get() first.");
+    await expect(client.refresh()).rejects.toThrow(
+      "Config not initialized. Call get() or bind() first.",
+    );
   });
 
   it("should throw SmplError when no environment is set", async () => {
