@@ -430,7 +430,7 @@ describe("Config", () => {
         description: "New desc",
         parent: "parent-id",
         items: { b: 2 },
-        environments: { prod: { values: { x: 1 } } },
+        environments: { prod: { x: 1 } },
         createdAt: "2024-02-01T00:00:00Z",
         updatedAt: "2024-02-02T00:00:00Z",
       });
@@ -605,33 +605,32 @@ describe("Config", () => {
         id: "child-id",
         parent: "parent-id",
         items: { retries: 3 },
-        environments: { prod: { values: { retries: 5 } } },
+        environments: { prod: { retries: 5 } },
       });
 
       const parent = makeConfig(client, {
         id: "parent-id",
         parent: null,
         items: { timeout: 30 },
-        environments: { prod: { values: { timeout: 60 } } },
+        environments: { prod: { timeout: 60 } },
       });
 
       (client._fetchConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce(parent);
 
       const chain = await config._buildChain();
 
-      // chain entries return UNWRAPPED env values {env: {values: {key: rawValue}}}
-      // so the resolver can deepMerge them. The wire wrapping only
-      // happens at the serialization boundary in mgmt save.
-      expect(chain[0].environments).toEqual({ prod: { values: { retries: 5 } } });
-      expect(chain[1].environments).toEqual({ prod: { values: { timeout: 60 } } });
+      // chain entries return env values in their flat in-memory shape
+      // {env: {key: rawValue}} per ADR-024 §2.4, ready for the resolver
+      // to deepMerge directly.
+      expect(chain[0].environments).toEqual({ prod: { retries: 5 } });
+      expect(chain[1].environments).toEqual({ prod: { timeout: 60 } });
     });
 
     // Regression: an earlier version of _buildChain returned the wrapped
-    // wire envelope {value, type, description} for items and the wrapped
-    // form {value: raw} for env values, which propagated into the resolver
-    // and meant customer reads got back {value, type, description} instead
-    // of the actual value. Lock the unwrapped contract here so that bug
-    // can't return.
+    // wire envelope {value, type, description} for items, which propagated
+    // into the resolver and meant customer reads got back the envelope
+    // instead of the actual value. Lock the unwrapped contract here so
+    // that bug can't return.
     it("returns fully unwrapped raw values (no {value, type, description} envelopes)", async () => {
       const client = makeMockClient();
       const config = makeConfig(client, {
@@ -639,7 +638,7 @@ describe("Config", () => {
         parent: null,
         items: { host: "localhost", port: 5432, enabled: true },
         environments: {
-          prod: { values: { host: "prod-host", port: 6543 } },
+          prod: { host: "prod-host", port: 6543 },
         },
       });
 
@@ -650,9 +649,7 @@ describe("Config", () => {
         expect(typeof raw).not.toBe("object");
       }
       // Each env value should be the raw value, not {value: raw, ...}.
-      const envValues = (
-        chain[0].environments as Record<string, { values: Record<string, unknown> }>
-      ).prod.values;
+      const envValues = (chain[0].environments as Record<string, Record<string, unknown>>).prod;
       for (const [, raw] of Object.entries(envValues)) {
         expect(typeof raw).not.toBe("object");
       }

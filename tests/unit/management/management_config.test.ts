@@ -63,7 +63,7 @@ const SAMPLE_CONFIG = {
       currency: { value: "USD", type: "STRING" },
     },
     environments: {
-      production: { values: { timeout: { value: 60, type: "NUMBER" } } },
+      production: { timeout: 60 },
     },
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-04-02T10:00:00Z",
@@ -393,7 +393,7 @@ describe("Config.save() — create (createdAt === null)", () => {
       currency: { value: "USD", type: ItemType.STRING },
     });
     expect(body.data.attributes.environments).toEqual({
-      production: { values: { timeout: { value: 30, type: ItemType.NUMBER } } },
+      production: { timeout: 30 },
     });
   });
 

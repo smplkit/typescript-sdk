@@ -104,12 +104,7 @@ function convertEnvironments(
     if (envData instanceof ConfigEnvironment) {
       out[envId] = envData;
     } else if (envData && typeof envData === "object" && !Array.isArray(envData)) {
-      const data = envData as Record<string, unknown>;
-      const rawValues =
-        "values" in data
-          ? (data.values as Record<string, unknown> | null)
-          : (data as Record<string, unknown>);
-      out[envId] = new ConfigEnvironment(rawValues ?? {});
+      out[envId] = new ConfigEnvironment(envData as Record<string, unknown>);
     } else {
       out[envId] = new ConfigEnvironment();
     }
@@ -118,32 +113,25 @@ function convertEnvironments(
 }
 
 /** @internal Convert a typed environments dict to the wire-shaped dict the
- *  serializer (mgmt save path) expects: `{env: {values: {key: {value, ...}}}}`.
- *  NOT for the resolver — the resolver wants unwrapped values; use
- *  {@link environmentsForResolver} there. */
+ *  serializer (mgmt save path) expects: `{env: {key: rawValue}}` per
+ *  ADR-024 §2.4. */
 export function environmentsToWire(
   environments: Record<string, ConfigEnvironment>,
-): Record<string, { values: Record<string, Record<string, unknown>> }> {
-  const out: Record<string, { values: Record<string, Record<string, unknown>> }> = {};
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
   for (const [envId, env] of Object.entries(environments)) {
-    out[envId] = { values: env._valuesRaw };
+    out[envId] = env.values;
   }
   return out;
 }
 
-/** @internal Convert a typed environments dict to the unwrapped shape the
- *  resolver expects: `{env: {values: {key: rawValue}}}`. The resolver
- *  deepMerges these into the resolved cache, so values must be raw —
- *  passing the wire envelope `{value, type, description}` would propagate
- *  the wrapper into customer reads. */
+/** @internal Convert a typed environments dict to the shape the resolver
+ *  expects: `{env: {key: rawValue}}`. Identical to {@link environmentsToWire}
+ *  now that the wire shape itself is flat. */
 export function environmentsForResolver(
   environments: Record<string, ConfigEnvironment>,
-): Record<string, { values: Record<string, unknown> }> {
-  const out: Record<string, { values: Record<string, unknown> }> = {};
-  for (const [envId, env] of Object.entries(environments)) {
-    out[envId] = { values: env.values };
-  }
-  return out;
+): Record<string, Record<string, unknown>> {
+  return environmentsToWire(environments);
 }
 
 /**
@@ -394,7 +382,7 @@ export class Config {
     Array<{
       id: string | null;
       items: Record<string, unknown>;
-      environments: Record<string, { values: Record<string, unknown> }>;
+      environments: Record<string, Record<string, unknown>>;
     }>
   > {
     // resolveChain expects unwrapped values (raw values, not the

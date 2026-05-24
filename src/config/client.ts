@@ -92,28 +92,22 @@ function extractItemValues(
 }
 
 /**
- * Extract raw values from environment overrides.
- * Wire format: `{ env: { values: { key: { value: raw } } } }`
- * SDK format:  `{ env: { values: { key: raw } } }`
+ * Extract environment overrides from the wire shape.
+ *
+ * Per ADR-024 §2.4 the wire shape is now flat — `{env: {key: raw}}` —
+ * so this is a defensive shallow copy of the input.
  * @internal
  */
 function extractEnvironments(
-  environments:
-    | Record<string, { values?: Record<string, { value: unknown }> | null }>
-    | null
-    | undefined,
-): Record<string, unknown> {
+  environments: Record<string, Record<string, unknown>> | null | undefined,
+): Record<string, Record<string, unknown>> {
   if (!environments) return {};
-  const result: Record<string, unknown> = {};
+  const result: Record<string, Record<string, unknown>> = {};
   for (const [envName, envEntry] of Object.entries(environments)) {
-    if (envEntry && typeof envEntry === "object" && envEntry.values) {
-      const unwrapped: Record<string, unknown> = {};
-      for (const [key, item] of Object.entries(envEntry.values)) {
-        unwrapped[key] = item && typeof item === "object" && "value" in item ? item.value : item;
-      }
-      result[envName] = { values: unwrapped };
+    if (envEntry && typeof envEntry === "object" && !Array.isArray(envEntry)) {
+      result[envName] = { ...envEntry };
     } else {
-      result[envName] = envEntry;
+      result[envName] = {};
     }
   }
   return result;
@@ -133,10 +127,7 @@ function resourceToConfig(resource: ConfigResource): Config {
     parent: attrs.parent ?? null,
     items: extractItemValues(attrs.items as Record<string, { value: unknown }> | null | undefined),
     environments: extractEnvironments(
-      attrs.environments as
-        | Record<string, { values?: Record<string, { value: unknown }> | null }>
-        | null
-        | undefined,
+      attrs.environments as Record<string, Record<string, unknown>> | null | undefined,
     ),
     createdAt: attrs.created_at ?? null,
     updatedAt: attrs.updated_at ?? null,

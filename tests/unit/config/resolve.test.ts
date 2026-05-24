@@ -90,7 +90,7 @@ describe("resolveChain", () => {
         id: "a",
         items: { x: 1, y: 2 },
         environments: {
-          production: { values: { y: 20, z: 30 } },
+          production: { y: 20, z: 30 },
         },
       },
     ];
@@ -103,8 +103,8 @@ describe("resolveChain", () => {
         id: "a",
         items: { x: 1 },
         environments: {
-          production: { values: { x: 10 } },
-          staging: { values: { x: 99 } },
+          production: { x: 10 },
+          staging: { x: 99 },
         },
       },
     ];
@@ -146,12 +146,12 @@ describe("resolveChain", () => {
       {
         id: "child",
         items: { retries: 3 },
-        environments: { prod: { values: { retries: 5 } } },
+        environments: { prod: { retries: 5 } },
       },
       {
         id: "parent",
         items: { timeout: 30, retries: 1 },
-        environments: { prod: { values: { timeout: 60 } } },
+        environments: { prod: { timeout: 60 } },
       },
     ];
     const result = resolveChain(chain, "prod");
@@ -163,7 +163,7 @@ describe("resolveChain", () => {
       {
         id: "a",
         items: { x: 1 },
-        environments: { staging: { values: { x: 10 } } },
+        environments: { staging: { x: 10 } },
       },
     ];
     // 'production' not in environments — should use base items only
@@ -192,7 +192,7 @@ describe("resolveChain", () => {
     expect(resolveChain(chain, "production")).toEqual({ x: 1 });
   });
 
-  it("should handle environment entry with no values sub-key", () => {
+  it("should treat extra keys in an environment entry as overrides", () => {
     const chain: ChainConfig[] = [
       {
         id: "a",
@@ -200,7 +200,9 @@ describe("resolveChain", () => {
         environments: { production: { other: "stuff" } },
       },
     ];
-    expect(resolveChain(chain, "production")).toEqual({ x: 1 });
+    // Per ADR-024 §2.4 each env entry IS the flat override map.
+    // A key absent from `items` is simply added to the resolved view.
+    expect(resolveChain(chain, "production")).toEqual({ x: 1, other: "stuff" });
   });
 
   it("should handle null items in chain config", () => {

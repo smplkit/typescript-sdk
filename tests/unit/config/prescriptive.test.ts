@@ -29,12 +29,14 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 /**
- * Build a JSON:API config resource in wire format (items wrapped as {value: raw}).
+ * Build a JSON:API config resource in wire format. Items are wrapped as
+ * {value: raw}; per-env overrides are flat `{env: {key: raw}}` per
+ * ADR-024 §2.4.
  */
 function configResource(opts: {
   id: string;
   items: Record<string, unknown>;
-  environments?: Record<string, { values: Record<string, unknown> }>;
+  environments?: Record<string, Record<string, unknown>>;
   parent?: string | null;
 }) {
   return {
@@ -45,18 +47,7 @@ function configResource(opts: {
       description: null,
       parent: opts.parent ?? null,
       items: Object.fromEntries(Object.entries(opts.items).map(([k, v]) => [k, { value: v }])),
-      environments: opts.environments
-        ? Object.fromEntries(
-            Object.entries(opts.environments).map(([env, entry]) => [
-              env,
-              {
-                values: Object.fromEntries(
-                  Object.entries(entry.values).map(([k, v]) => [k, { value: v }]),
-                ),
-              },
-            ]),
-          )
-        : {},
+      environments: opts.environments ?? {},
       created_at: "2024-01-15T10:30:00Z",
       updated_at: "2024-01-16T14:00:00Z",
     },
@@ -87,7 +78,7 @@ describe("get", () => {
             id: "app",
             items: { retries: 3, timeout: 1000 },
             environments: {
-              staging: { values: { timeout: 2000 } },
+              staging: { timeout: 2000 },
             },
           }),
         ],
@@ -119,7 +110,7 @@ describe("get", () => {
             id: "base-service",
             items: { retries: 3, timeout: 1000 },
             environments: {
-              staging: { values: { timeout: 2000 } },
+              staging: { timeout: 2000 },
             },
           }),
         ],
@@ -1211,7 +1202,7 @@ describe("Config WebSocket event behaviors", () => {
           configResource({
             id: "app",
             items: { timeout: 30 },
-            environments: { staging: { values: { timeout: 45 } } },
+            environments: { staging: { timeout: 45 } },
           }),
         ],
       }),
@@ -1224,7 +1215,7 @@ describe("Config WebSocket event behaviors", () => {
         data: configResource({
           id: "app",
           items: { timeout: 30 },
-          environments: { staging: { values: { timeout: 90 } } },
+          environments: { staging: { timeout: 90 } },
         }),
       }),
     );
@@ -1254,7 +1245,7 @@ describe("Config WebSocket event behaviors", () => {
           configResource({
             id: "parent",
             items: { retries: 3 },
-            environments: { staging: { values: { retries: 5 } } },
+            environments: { staging: { retries: 5 } },
           }),
           configResource({
             id: "child",
@@ -1276,7 +1267,7 @@ describe("Config WebSocket event behaviors", () => {
         data: configResource({
           id: "parent",
           items: { retries: 3 },
-          environments: { staging: { values: { retries: 7 } } },
+          environments: { staging: { retries: 7 } },
         }),
       }),
     );

@@ -58,14 +58,14 @@ export function resolveChain(chain: ChainConfig[], environment: string): Record<
     const config = chain[i];
     const baseValues: Record<string, unknown> = config.items ?? {};
 
-    // Environments are stored as { env_name: { values: { key: val } } }
+    // Environments are stored as { env_name: { key: val } } per ADR-024 §2.4.
     const envEntry = (config.environments ?? {})[environment];
     const envValues: Record<string, unknown> =
       envEntry !== null &&
       envEntry !== undefined &&
       typeof envEntry === "object" &&
       !Array.isArray(envEntry)
-        ? (((envEntry as Record<string, unknown>).values ?? {}) as Record<string, unknown>)
+        ? (envEntry as Record<string, unknown>)
         : {};
 
     // Merge environment overrides on top of base values (env wins)
