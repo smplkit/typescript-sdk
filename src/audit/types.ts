@@ -286,6 +286,19 @@ export class HttpConfiguration {
    * (`"2xx"`, `"4xx"`). Defaults to `"2xx"`.
    */
   successStatus: string;
+  /**
+   * Whether to verify the destination's TLS certificate chain. Defaults
+   * to `true`; flip to `false` only for short-lived testing against a
+   * destination that serves an untrusted certificate. Prefer pinning the
+   * CA via {@link caCert} for long-lived self-signed setups.
+   */
+  tlsVerify: boolean;
+  /**
+   * Optional PEM-encoded certificate (or bundle) trusted in addition to
+   * the system CA store. Ignored when {@link tlsVerify} is `false`.
+   * `null` (the default) means "use system CAs only".
+   */
+  caCert: string | null;
 
   constructor(
     fields: {
@@ -293,12 +306,16 @@ export class HttpConfiguration {
       url?: string;
       headers?: HttpHeader[];
       successStatus?: string;
+      tlsVerify?: boolean;
+      caCert?: string | null;
     } = {},
   ) {
     this.method = fields.method ?? HttpMethod.POST;
     this.url = fields.url ?? "";
     this.headers = fields.headers ?? [];
     this.successStatus = fields.successStatus ?? "2xx";
+    this.tlsVerify = fields.tlsVerify ?? true;
+    this.caCert = fields.caCert ?? null;
   }
 }
 
