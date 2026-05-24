@@ -86,12 +86,17 @@ function _paginationFromBody(body: {
 }
 
 function _configurationToWire(config: HttpConfiguration): GenHttpConfiguration {
-  return {
+  const wire: GenHttpConfiguration = {
     method: config.method as GenHttpConfiguration["method"],
     url: config.url,
     headers: config.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
     success_status: config.successStatus,
+    tls_verify: config.tlsVerify,
   };
+  // ca_cert is optional on the wire; only include it when set so we
+  // don't send a noisy "ca_cert: null" on every save.
+  if (config.caCert !== null) wire.ca_cert = config.caCert;
+  return wire;
 }
 
 function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpConfiguration {
@@ -105,6 +110,11 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
     url: String(r.url ?? ""),
     headers,
     successStatus: String(r.success_status ?? "2xx"),
+    // Default to true on read so forwarders persisted before the field
+    // landed keep their prior secure default; the audit service does
+    // the same on its side.
+    tlsVerify: r.tls_verify === undefined || r.tls_verify === null ? true : Boolean(r.tls_verify),
+    caCert: (r.ca_cert as string | null | undefined) ?? null,
   });
 }
 

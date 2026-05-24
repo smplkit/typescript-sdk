@@ -172,6 +172,19 @@ describe("mgmt.audit.forwarders.new", () => {
     expect(c.method).toBe(HttpMethod.POST);
     expect(c.successStatus).toBe("2xx");
     expect(c.headers).toEqual([]);
+    // tls_verify defaults to true (secure-by-default); ca_cert is null.
+    expect(c.tlsVerify).toBe(true);
+    expect(c.caCert).toBeNull();
+  });
+
+  test("HttpConfiguration accepts tlsVerify=false + caCert", () => {
+    const c = new HttpConfiguration({
+      url: "https://x.example/in",
+      tlsVerify: false,
+      caCert: "-----BEGIN CERTIFICATE-----\nfoo\n-----END CERTIFICATE-----",
+    });
+    expect(c.tlsVerify).toBe(false);
+    expect(c.caCert).toContain("BEGIN CERTIFICATE");
   });
 });
 
@@ -195,6 +208,49 @@ describe("Forwarder.save() — create", () => {
     const firstArg = mockFetch.mock.calls[0]![0] as Request | string;
     const method = firstArg instanceof Request ? firstArg.method : "POST";
     expect(method).toBe("POST");
+  });
+
+  test("forwards tls_verify and omits ca_cert when null", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    // tls_verify defaults to true and is always sent so the server
+    // doesn't have to infer; ca_cert defaults to null and is omitted
+    // so we don't broadcast a noisy null on every save.
+    expect(body.data.attributes.configuration.tls_verify).toBe(true);
+    expect("ca_cert" in body.data.attributes.configuration).toBe(false);
+  });
+
+  test("forwards tls_verify=false and ca_cert when explicitly set", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder({
+      configuration: new HttpConfiguration({
+        url: "https://siem.example.com/in",
+        tlsVerify: false,
+        caCert: "-----BEGIN CERTIFICATE-----\nfoo\n-----END CERTIFICATE-----",
+      }),
+    });
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.configuration.tls_verify).toBe(false);
+    expect(body.data.attributes.configuration.ca_cert).toContain("BEGIN CERTIFICATE");
+  });
+
+  test("reads tls_verify=true and ca_cert=null when the server omits them", async () => {
+    // Pre-existing forwarders persisted before the field landed come
+    // back without tls_verify / ca_cert on the wire; the wrapper must
+    // default to the secure shape so they look identical to fresh ones.
+    const resource = _forwarderResource();
+    delete (resource.attributes.configuration as Record<string, unknown>).tls_verify;
+    delete (resource.attributes.configuration as Record<string, unknown>).ca_cert;
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: resource }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    expect(forwarder.configuration.tlsVerify).toBe(true);
+    expect(forwarder.configuration.caCert).toBeNull();
   });
 
   test("forwards transform_type and transform exactly as supplied", async () => {
