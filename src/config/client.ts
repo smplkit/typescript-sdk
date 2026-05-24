@@ -94,8 +94,8 @@ function extractItemValues(
 /**
  * Extract environment overrides from the wire shape.
  *
- * Per ADR-024 §2.4 the wire shape is now flat — `{env: {key: raw}}` —
- * so this is a defensive shallow copy of the input.
+ * Per ADR-024 §2.4 the wire shape is flat — `{env: {key: raw}}` — so
+ * this is a shallow copy of the input.
  * @internal
  */
 function extractEnvironments(
@@ -104,11 +104,7 @@ function extractEnvironments(
   if (!environments) return {};
   const result: Record<string, Record<string, unknown>> = {};
   for (const [envName, envEntry] of Object.entries(environments)) {
-    if (envEntry && typeof envEntry === "object" && !Array.isArray(envEntry)) {
-      result[envName] = { ...envEntry };
-    } else {
-      result[envName] = {};
-    }
+    result[envName] = { ...(envEntry ?? {}) };
   }
   return result;
 }
