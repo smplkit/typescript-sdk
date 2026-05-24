@@ -25,6 +25,13 @@ export interface AccountSettingsModelClient {
   _save(data: Record<string, any>): Promise<AccountSettings>;
 }
 
+/** @internal */
+export interface ServiceModelClient {
+  _create(svc: Service): Promise<Service>;
+  _update(svc: Service): Promise<Service>;
+  delete(id: string): Promise<void>;
+}
+
 /**
  * An environment resource managed by the smplkit platform.
  *
@@ -273,5 +280,76 @@ export class AccountSettings {
 
   toString(): string {
     return `AccountSettings(${JSON.stringify(this._data)})`;
+  }
+}
+
+/**
+ * A service resource managed by the smplkit platform — a backend
+ * application or microservice in the customer's stack.
+ *
+ * Mutate fields, then call {@link save} to create or update.
+ */
+export class Service {
+  /** Unique slug identifier (e.g. `"user_service"`). */
+  id: string | null;
+  /** Human-readable display name. */
+  name: string;
+  /** When the service was created. */
+  createdAt: string | null;
+  /** When the service was last updated. */
+  updatedAt: string | null;
+
+  /** @internal */
+  readonly _client: ServiceModelClient | null;
+
+  /** @internal */
+  constructor(
+    client: ServiceModelClient | null,
+    fields: {
+      id: string | null;
+      name: string;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    },
+  ) {
+    this._client = client;
+    this.id = fields.id;
+    this.name = fields.name;
+    this.createdAt = fields.createdAt ?? null;
+    this.updatedAt = fields.updatedAt ?? null;
+  }
+
+  /** Persist this service to the server (creates if new, updates if existing). */
+  async save(): Promise<void> {
+    if (this._client === null) {
+      throw new Error("Service was constructed without a client; cannot save");
+    }
+    if (this.createdAt === null) {
+      const saved = await this._client._create(this);
+      this._apply(saved);
+    } else {
+      const saved = await this._client._update(this);
+      this._apply(saved);
+    }
+  }
+
+  /** Delete this service from the server. */
+  async delete(): Promise<void> {
+    if (this._client === null || this.id === null) {
+      throw new Error("Service was constructed without a client or id; cannot delete");
+    }
+    await this._client.delete(this.id);
+  }
+
+  /** @internal */
+  _apply(other: Service): void {
+    this.id = other.id;
+    this.name = other.name;
+    this.createdAt = other.createdAt;
+    this.updatedAt = other.updatedAt;
+  }
+
+  toString(): string {
+    return `Service(id=${this.id}, name=${this.name})`;
   }
 }

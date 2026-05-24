@@ -16,6 +16,7 @@ import {
   ContextsClient,
   EnvironmentsClient,
   ManagementAuditClient,
+  ServicesClient,
   SmplManagementClient,
 } from "../../../src/index.js";
 import { ContextRegistrationBuffer } from "../../../src/management/client.js";
@@ -50,11 +51,12 @@ describe("SmplManagementClient", () => {
     expect(fetchSpy).toEqual([]);
   });
 
-  it("exposes nine flat namespaces", () => {
+  it("exposes ten flat namespaces", () => {
     const mgmt = new SmplManagementClient();
     expect(mgmt.contexts).toBeInstanceOf(ContextsClient);
     expect(mgmt.contextTypes).toBeInstanceOf(ContextTypesClient);
     expect(mgmt.environments).toBeInstanceOf(EnvironmentsClient);
+    expect(mgmt.services).toBeInstanceOf(ServicesClient);
     expect(mgmt.accountSettings).toBeInstanceOf(AccountSettingsClient);
     expect(mgmt.config).toBeDefined();
     expect(mgmt.flags).toBeDefined();

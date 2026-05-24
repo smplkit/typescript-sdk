@@ -62,6 +62,7 @@ export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 // Management
 export {
   EnvironmentsClient,
+  ServicesClient,
   ContextTypesClient,
   ContextsClient,
   AccountSettingsClient,
@@ -70,7 +71,7 @@ export {
   ManagementAuditClient,
   ForwardersClient as AuditForwardersClient,
 } from "./management/audit.js";
-export { Environment, ContextType, AccountSettings } from "./management/models.js";
+export { Environment, ContextType, AccountSettings, Service } from "./management/models.js";
 export { EnvironmentClassification, Color } from "./management/types.js";
 
 // Shared WebSocket

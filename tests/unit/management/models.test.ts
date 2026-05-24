@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
-import { Environment, ContextType, AccountSettings } from "../../../src/management/models.js";
+import {
+  Environment,
+  ContextType,
+  AccountSettings,
+  Service,
+} from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
 import { Context } from "../../../src/flags/types.js";
 import type {
   EnvironmentsClient,
   ContextTypesClient,
   AccountSettingsClient,
+  ServicesClient,
 } from "../../../src/management/client.js";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +38,14 @@ function mockSettingsClient(): AccountSettingsClient {
   return {
     _save: vi.fn(),
   } as unknown as AccountSettingsClient;
+}
+
+function mockSvcClient(): ServicesClient {
+  return {
+    _create: vi.fn(),
+    _update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ServicesClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +644,169 @@ describe("AccountSettings", () => {
     it("should return JSON representation", () => {
       const settings = makeSettings({ environment_order: ["production"] });
       expect(settings.toString()).toBe('AccountSettings({"environment_order":["production"]})');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+describe("Service", () => {
+  function makeSvc(overrides: Partial<ConstructorParameters<typeof Service>[1]> = {}): Service {
+    return new Service(mockSvcClient(), {
+      id: "user_service",
+      name: "User Service",
+      createdAt: "2026-04-01T10:00:00Z",
+      updatedAt: "2026-04-01T10:00:00Z",
+      ...overrides,
+    });
+  }
+
+  describe("constructor", () => {
+    it("should set all fields", () => {
+      const svc = makeSvc();
+      expect(svc.id).toBe("user_service");
+      expect(svc.name).toBe("User Service");
+      expect(svc.createdAt).toBe("2026-04-01T10:00:00Z");
+      expect(svc.updatedAt).toBe("2026-04-01T10:00:00Z");
+    });
+
+    it("should store a reference to the client", () => {
+      const client = mockSvcClient();
+      const svc = new Service(client, {
+        id: "billing",
+        name: "Billing",
+        createdAt: null,
+        updatedAt: null,
+      });
+      expect(svc._client).toBe(client);
+    });
+
+    it("should accept null for optional fields", () => {
+      const svc = makeSvc({ id: null, createdAt: null, updatedAt: null });
+      expect(svc.id).toBeNull();
+      expect(svc.createdAt).toBeNull();
+      expect(svc.updatedAt).toBeNull();
+    });
+  });
+
+  describe("save() — create path (createdAt === null)", () => {
+    it("should call _create and apply result", async () => {
+      const client = mockSvcClient();
+      const svc = new Service(client, {
+        id: "user_service",
+        name: "User Service",
+        createdAt: null,
+        updatedAt: null,
+      });
+      const saved = new Service(client, {
+        id: "user_service",
+        name: "User Service",
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:00Z",
+      });
+      (client._create as ReturnType<typeof vi.fn>).mockResolvedValue(saved);
+
+      await svc.save();
+
+      expect(client._create).toHaveBeenCalledWith(svc);
+      expect(svc.createdAt).toBe("2026-04-01T00:00:00Z");
+    });
+  });
+
+  describe("save() — update path (createdAt set)", () => {
+    it("should call _update and apply result", async () => {
+      const client = mockSvcClient();
+      const svc = new Service(client, {
+        id: "user_service",
+        name: "User Service",
+        createdAt: "2026-04-01T10:00:00Z",
+        updatedAt: "2026-04-01T10:00:00Z",
+      });
+      const updated = new Service(client, {
+        id: "user_service",
+        name: "User Service Updated",
+        createdAt: "2026-04-01T10:00:00Z",
+        updatedAt: "2026-04-02T10:00:00Z",
+      });
+      (client._update as ReturnType<typeof vi.fn>).mockResolvedValue(updated);
+
+      await svc.save();
+
+      expect(client._update).toHaveBeenCalledWith(svc);
+      expect(svc.name).toBe("User Service Updated");
+    });
+  });
+
+  describe("save() — no client", () => {
+    it("should throw when client is null", async () => {
+      const svc = new Service(null, {
+        id: "x",
+        name: "X",
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(svc.save()).rejects.toThrow("cannot save");
+    });
+  });
+
+  describe("delete()", () => {
+    it("should call client.delete() with id when both present", async () => {
+      const client = mockSvcClient();
+      const svc = new Service(client, {
+        id: "user_service",
+        name: "User Service",
+        createdAt: "2026-04-01T10:00:00Z",
+        updatedAt: "2026-04-01T10:00:00Z",
+      });
+      await svc.delete();
+      expect(client.delete).toHaveBeenCalledWith("user_service");
+    });
+
+    it("should throw when client is null", async () => {
+      const svc = new Service(null, {
+        id: "x",
+        name: "X",
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(svc.delete()).rejects.toThrow("cannot delete");
+    });
+
+    it("should throw when id is null", async () => {
+      const client = mockSvcClient();
+      const svc = new Service(client, {
+        id: null,
+        name: "X",
+        createdAt: null,
+        updatedAt: null,
+      });
+      await expect(svc.delete()).rejects.toThrow("cannot delete");
+    });
+  });
+
+  describe("_apply()", () => {
+    it("should copy all fields from another Service", () => {
+      const svc = makeSvc({ id: "old" });
+      const other = makeSvc({
+        id: "new-svc",
+        name: "New Name",
+        createdAt: "2026-05-01T00:00:00Z",
+        updatedAt: "2026-05-01T00:00:00Z",
+      });
+      svc._apply(other);
+      expect(svc.id).toBe("new-svc");
+      expect(svc.name).toBe("New Name");
+      expect(svc.createdAt).toBe("2026-05-01T00:00:00Z");
+      expect(svc.updatedAt).toBe("2026-05-01T00:00:00Z");
+    });
+  });
+
+  describe("toString()", () => {
+    it("should return a human-readable representation", () => {
+      const svc = makeSvc();
+      expect(svc.toString()).toBe("Service(id=user_service, name=User Service)");
     });
   });
 });

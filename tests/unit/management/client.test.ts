@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SmplManagementClient } from "../../../src/management/client.js";
-import { Environment, ContextType, AccountSettings } from "../../../src/management/models.js";
+import {
+  Environment,
+  ContextType,
+  AccountSettings,
+  Service,
+} from "../../../src/management/models.js";
 import { EnvironmentClassification } from "../../../src/management/types.js";
 import { Context } from "../../../src/flags/types.js";
 import {
@@ -69,6 +74,26 @@ const SAMPLE_AD_HOC_ENV = {
     color: null,
     classification: "AD_HOC",
     managed: false,
+    created_at: "2026-04-01T10:00:00Z",
+    updated_at: "2026-04-01T10:00:00Z",
+  },
+};
+
+const SAMPLE_SERVICE = {
+  id: "user_service",
+  type: "service",
+  attributes: {
+    name: "User Service",
+    created_at: "2026-04-01T10:00:00Z",
+    updated_at: "2026-04-01T10:00:00Z",
+  },
+};
+
+const SAMPLE_BILLING_SERVICE = {
+  id: "billing",
+  type: "service",
+  attributes: {
+    name: "Billing",
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-04-01T10:00:00Z",
   },
@@ -392,6 +417,241 @@ describe("EnvironmentsClient", () => {
 
       mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       await expect(env.save()).rejects.toThrow(SmplConnectionError);
+    });
+  });
+});
+
+// ===========================================================================
+// ServicesClient
+// ===========================================================================
+
+describe("ServicesClient", () => {
+  // -----------------------------------------------------------------------
+  // new()
+  // -----------------------------------------------------------------------
+
+  describe("new()", () => {
+    it("should return a Service with createdAt: null", () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+      expect(svc).toBeInstanceOf(Service);
+      expect(svc.id).toBe("user_service");
+      expect(svc.name).toBe("User Service");
+      expect(svc.createdAt).toBeNull();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // list()
+  // -----------------------------------------------------------------------
+
+  describe("list()", () => {
+    it("should return list of Services", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: [SAMPLE_SERVICE, SAMPLE_BILLING_SERVICE] }),
+      );
+
+      const svcs = await client.services.list();
+
+      expect(svcs).toHaveLength(2);
+      expect(svcs[0]).toBeInstanceOf(Service);
+      expect(svcs[0].id).toBe("user_service");
+      expect(svcs[0].name).toBe("User Service");
+      expect(svcs[1].id).toBe("billing");
+    });
+
+    it("should return empty array for empty list", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+      const svcs = await client.services.list();
+      expect(svcs).toEqual([]);
+    });
+
+    it("should throw SmplConnectionError on network failure", async () => {
+      const client = makeClient();
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await expect(client.services.list()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("passes pageNumber and pageSize through as query params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.services.list({ pageNumber: 2, pageSize: 50 });
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+      expect(req.url).toMatch(/page(\[|%5B)size(\]|%5D)=50/);
+    });
+
+    it("omits pagination query params when not supplied", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.services.list();
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.url).not.toMatch(/page(\[|%5B)number(\]|%5D)/);
+      expect(req.url).not.toMatch(/page(\[|%5B)size(\]|%5D)/);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // get()
+  // -----------------------------------------------------------------------
+
+  describe("get()", () => {
+    it("should return a Service by id", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+
+      const svc = await client.services.get("user_service");
+
+      expect(svc).toBeInstanceOf(Service);
+      expect(svc.id).toBe("user_service");
+      expect(svc.name).toBe("User Service");
+    });
+
+    it("should throw SmplNotFoundError on 404", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
+      await expect(client.services.get("missing")).rejects.toThrow(SmplNotFoundError);
+    });
+
+    it("should throw SmplConnectionError on network failure", async () => {
+      const client = makeClient();
+      mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
+      await expect(client.services.get("user_service")).rejects.toThrow(SmplConnectionError);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // delete()
+  // -----------------------------------------------------------------------
+
+  describe("delete()", () => {
+    it("should resolve on 200", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+      await expect(client.services.delete("user_service")).resolves.toBeUndefined();
+    });
+
+    it("should resolve on 204", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await expect(client.services.delete("user_service")).resolves.toBeUndefined();
+    });
+
+    it("should throw SmplNotFoundError on 404", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("Not found", 404));
+      await expect(client.services.delete("missing")).rejects.toThrow(SmplNotFoundError);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Service.save() via _create / _update
+  // -----------------------------------------------------------------------
+
+  describe("Service.save() — create (createdAt === null)", () => {
+    it("should POST to /api/v1/services", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      await svc.save();
+
+      const req: Request = mockFetch.mock.calls[0][0];
+      expect(req.method).toBe("POST");
+      expect(req.url).toContain("/api/v1/services");
+    });
+
+    it("should send JSON:API body with id and name", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      await svc.save();
+
+      const req: Request = mockFetch.mock.calls[0][0];
+      const body = JSON.parse(await req.text());
+      expect(body.data.type).toBe("service");
+      expect(body.data.id).toBe("user_service");
+      expect(body.data.attributes.name).toBe("User Service");
+    });
+
+    it("should apply response fields after creation", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      await svc.save();
+
+      expect(svc.id).toBe("user_service");
+      expect(svc.createdAt).toBe("2026-04-01T10:00:00Z");
+    });
+
+    it("should throw SmplConnectionError on network failure during create", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await expect(svc.save()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("preserves the JSON:API error body on 409 (duplicate)", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+      const errorBody = {
+        errors: [
+          {
+            status: "409",
+            code: "service_conflict",
+            title: "Conflict",
+            detail: "Service 'user_service' already exists.",
+          },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse(errorBody, 409));
+      await expect(svc.save()).rejects.toThrow();
+    });
+
+    it("falls back gracefully when create response is missing data", async () => {
+      const client = makeClient();
+      const svc = client.services.new("user_service", { name: "User Service" });
+      mockFetch.mockResolvedValueOnce(jsonResponse({}));
+      await expect(svc.save()).rejects.toThrow(SmplValidationError);
+    });
+  });
+
+  describe("Service.save() — update (createdAt set)", () => {
+    it("should PUT to /api/v1/services/{id}", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      const svc = await client.services.get("user_service");
+      svc.name = "User Service Updated";
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      await svc.save();
+
+      const req: Request = mockFetch.mock.calls[1][0];
+      expect(req.method).toBe("PUT");
+      expect(req.url).toContain("/api/v1/services/user_service");
+    });
+
+    it("should throw SmplConnectionError on network failure during update", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      const svc = await client.services.get("user_service");
+
+      mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await expect(svc.save()).rejects.toThrow(SmplConnectionError);
+    });
+
+    it("falls back gracefully when update response is missing data", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: SAMPLE_SERVICE }));
+      const svc = await client.services.get("user_service");
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({}));
+      await expect(svc.save()).rejects.toThrow(SmplValidationError);
     });
   });
 });
@@ -995,9 +1255,10 @@ describe("AccountSettingsClient", () => {
 // ===========================================================================
 
 describe("SmplManagementClient", () => {
-  it("should expose environments, contexts, contextTypes, accountSettings", () => {
+  it("should expose environments, services, contexts, contextTypes, accountSettings", () => {
     const client = makeClient();
     expect(client.environments).toBeDefined();
+    expect(client.services).toBeDefined();
     expect(client.contexts).toBeDefined();
     expect(client.contextTypes).toBeDefined();
     expect(client.accountSettings).toBeDefined();

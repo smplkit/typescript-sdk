@@ -9,10 +9,11 @@
  *
  * Right for setup scripts, CI, admin tooling, and one-off CRUD.
  *
- * Nine flat namespaces:
+ * Ten flat namespaces:
  *   - mgmt.contexts
  *   - mgmt.contextTypes
  *   - mgmt.environments
+ *   - mgmt.services
  *   - mgmt.accountSettings
  *   - mgmt.config           (singular — matches runtime client.config)
  *   - mgmt.flags
@@ -33,7 +34,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { Color, EnvironmentClassification, coerceColor } from "./types.js";
-import { Environment, ContextType, AccountSettings } from "./models.js";
+import { Environment, ContextType, AccountSettings, Service } from "./models.js";
 import { Context } from "../flags/types.js";
 import { ManagementConfigClient } from "./config.js";
 import { ManagementFlagsClient } from "./flags.js";
@@ -126,6 +127,16 @@ function envFromResource(resource: any, client: EnvironmentsClient): Environment
         ? EnvironmentClassification.AD_HOC
         : EnvironmentClassification.STANDARD,
     managed: typeof attrs.managed === "boolean" ? attrs.managed : false,
+    createdAt: attrs.created_at ?? null,
+    updatedAt: attrs.updated_at ?? null,
+  });
+}
+
+function svcFromResource(resource: any, client: ServicesClient): Service {
+  const attrs = resource.attributes ?? {};
+  return new Service(client, {
+    id: resource.id ?? null,
+    name: attrs.name ?? "",
     createdAt: attrs.created_at ?? null,
     updatedAt: attrs.updated_at ?? null,
   });
@@ -316,6 +327,141 @@ export class EnvironmentsClient {
     }
     if (!data?.data) throw new SmplkitValidationError(`Failed to update environment ${env.id}`);
     return envFromResource(data.data, this);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ServicesClient
+// ---------------------------------------------------------------------------
+
+/** `mgmt.services.*` — CRUD for services. */
+export class ServicesClient {
+  /** @internal */
+  constructor(private readonly _http: AppHttp) {}
+
+  /**
+   * Construct an unsaved {@link Service}. Call `.save()` to persist.
+   */
+  new(id: string, options: { name: string }): Service {
+    return new Service(this, {
+      id,
+      name: options.name,
+      createdAt: null,
+      updatedAt: null,
+    });
+  }
+
+  /**
+   * List services.
+   *
+   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
+   * Omit both to fetch the first page; pass them through to walk further
+   * pages. The wrapper does not loop on the customer's behalf — the
+   * customer chooses how to paginate.
+   */
+  async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Service[]> {
+    const query: Record<string, number> = {};
+    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+    let data: any;
+    try {
+      const result = await this._http.GET("/api/v1/services", {
+        params: { query: query as unknown as Record<string, never> },
+      });
+      if (!result.response.ok) await checkError(result.response, result.error);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    const items: any[] = data?.data ?? [];
+    return items.map((r) => svcFromResource(r, this));
+  }
+
+  async get(id: string): Promise<Service> {
+    let data: any;
+    try {
+      const result = await this._http.GET("/api/v1/services/{id}", {
+        params: { path: { id } },
+      });
+      if (!result.response.ok) await checkError(result.response, result.error);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data?.data)
+      throw new SmplkitNotFoundError(`Service with id ${JSON.stringify(id)} not found`);
+    return svcFromResource(data.data, this);
+  }
+
+  async delete(id: string): Promise<void> {
+    try {
+      const result = await this._http.DELETE("/api/v1/services/{id}", {
+        params: { path: { id } },
+      });
+      if (!result.response.ok && result.response.status !== 204) {
+        await checkError(result.response, result.error);
+        /* v8 ignore next — checkError is `Promise<never>` so the closing brace is unreachable */
+      }
+    } catch (err) {
+      wrapFetchError(err);
+    }
+  }
+
+  /** @internal */
+  async _create(svc: Service): Promise<Service> {
+    /* v8 ignore start — defensive guard: `Service.id` is always set by
+       `mgmt.services.new(id, ...)`, the only public path that reaches
+       `_create`. The spec narrows `data.id` to a non-null string on create. */
+    if (svc.id === null) {
+      throw new SmplkitValidationError("Cannot create a Service without an id");
+    }
+    /* v8 ignore stop */
+    const body: components["schemas"]["ServiceCreateRequest"] = {
+      data: {
+        id: svc.id,
+        type: "service",
+        attributes: {
+          name: svc.name,
+        },
+      },
+    };
+    let data: any;
+    try {
+      const result = await this._http.POST("/api/v1/services", { body });
+      if (!result.response.ok) await checkError(result.response, result.error);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data?.data) throw new SmplkitValidationError("Failed to create service");
+    return svcFromResource(data.data, this);
+  }
+
+  /** @internal */
+  async _update(svc: Service): Promise<Service> {
+    if (!svc.id) throw new Error("Cannot update a Service with no id");
+    const body = {
+      data: {
+        id: svc.id,
+        type: "service" as const,
+        attributes: {
+          name: svc.name,
+        },
+      },
+    };
+    let data: any;
+    try {
+      const result = await this._http.PUT("/api/v1/services/{id}", {
+        params: { path: { id: svc.id } },
+        body,
+      });
+      if (!result.response.ok) await checkError(result.response, result.error);
+      data = result.data;
+    } catch (err) {
+      wrapFetchError(err);
+    }
+    if (!data?.data) throw new SmplkitValidationError(`Failed to update service ${svc.id}`);
+    return svcFromResource(data.data, this);
   }
 }
 
@@ -767,6 +913,8 @@ export class SmplManagementClient {
   readonly contextTypes: ContextTypesClient;
   /** Environment CRUD. */
   readonly environments: EnvironmentsClient;
+  /** Service CRUD. */
+  readonly services: ServicesClient;
   /** Account-level settings. */
   readonly accountSettings: AccountSettingsClient;
   /** Config CRUD (singular — matches runtime `client.config`). */
@@ -796,6 +944,7 @@ export class SmplManagementClient {
     this.contexts = this._contextsRef;
     this.contextTypes = this._contextTypesRef;
     this.environments = this._environmentsRef;
+    this.services = this._servicesRef;
     this.accountSettings = this._accountSettingsRef;
     this.config = this._configRef;
     this.flags = this._flagsRef;
@@ -814,6 +963,7 @@ export class SmplManagementClient {
   private _contextsRef!: ContextsClient;
   private _contextTypesRef!: ContextTypesClient;
   private _environmentsRef!: EnvironmentsClient;
+  private _servicesRef!: ServicesClient;
   private _accountSettingsRef!: AccountSettingsClient;
   private _configRef!: ManagementConfigClient;
   private _flagsRef!: ManagementFlagsClient;
@@ -868,6 +1018,7 @@ export class SmplManagementClient {
     this._sharedContextBuffer = new ContextRegistrationBuffer();
 
     this._environmentsRef = new EnvironmentsClient(this._appHttpRef);
+    this._servicesRef = new ServicesClient(this._appHttpRef);
     this._contextTypesRef = new ContextTypesClient(this._appHttpRef);
     this._contextsRef = new ContextsClient(this._appHttpRef, this._sharedContextBuffer);
     this._accountSettingsRef = new AccountSettingsClient(appBaseUrl, cfg.apiKey);
