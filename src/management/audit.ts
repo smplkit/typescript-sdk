@@ -91,6 +91,8 @@ function _configurationToWire(config: HttpConfiguration): GenHttpConfiguration {
     url: config.url,
     headers: config.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
     success_status: config.successStatus,
+    tls_verify: config.tlsVerify,
+    ca_cert: config.caCert,
   };
 }
 
@@ -105,6 +107,8 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
     url: String(r.url ?? ""),
     headers,
     successStatus: String(r.success_status ?? "2xx"),
+    tlsVerify: r.tls_verify === undefined ? true : Boolean(r.tls_verify),
+    caCert: r.ca_cert == null ? null : String(r.ca_cert),
   });
 }
 
