@@ -140,14 +140,8 @@ export interface components {
          *       "description": "Database connection settings.",
          *       "environments": {
          *         "prod": {
-         *           "values": {
-         *             "host": {
-         *               "value": "db-prod.internal"
-         *             },
-         *             "pool_size": {
-         *               "value": 20
-         *             }
-         *           }
+         *           "host": "db-prod.internal",
+         *           "pool_size": 20
          *         }
          *       },
          *       "items": {
@@ -192,10 +186,12 @@ export interface components {
             } | null;
             /**
              * Environments
-             * @description Map of environment keys to per-environment override sets. An environment override applies when this config is resolved against that environment.
+             * @description Map of environment keys to per-environment overrides. Each environment maps to a flat object of item key to override value (e.g. `{"production": {"database.host": "db-prod.internal"}}`). Only the keys being overridden need to be present. Override values must conform to the item's declared `type`; `type` and `description` are always resolved from the defining configuration and are never redeclared on an override.
              */
             environments?: {
-                [key: string]: components["schemas"]["EnvironmentOverride"];
+                [key: string]: {
+                    [key: string]: unknown;
+                };
             } | null;
             /**
              * Managed
@@ -335,11 +331,7 @@ export interface components {
          *         "description": "Settings for the user service.",
          *         "environments": {
          *           "prod": {
-         *             "values": {
-         *               "host": {
-         *                 "value": "db-prod.internal"
-         *               }
-         *             }
+         *             "host": "db-prod.internal"
          *           }
          *         },
          *         "items": {
@@ -394,17 +386,6 @@ export interface components {
             description?: string | null;
         };
         /**
-         * ConfigItemOverride
-         * @description Per-environment override of a single item value.
-         */
-        ConfigItemOverride: {
-            /**
-             * Value
-             * @description Override value for this environment. Must conform to the type declared for the item in the inheritance chain.
-             */
-            value?: unknown;
-        };
-        /**
          * ConfigListResponse
          * @description JSON:API collection response for configs.
          */
@@ -432,11 +413,7 @@ export interface components {
          *         "description": "Database connection settings.",
          *         "environments": {
          *           "prod": {
-         *             "values": {
-         *               "host": {
-         *                 "value": "db-prod.internal"
-         *               }
-         *             }
+         *             "host": "db-prod.internal"
          *           }
          *         },
          *         "items": {
@@ -470,19 +447,6 @@ export interface components {
          */
         ConfigResponse: {
             data: components["schemas"]["ConfigResource"];
-        };
-        /**
-         * EnvironmentOverride
-         * @description Per-environment override set for a config.
-         */
-        EnvironmentOverride: {
-            /**
-             * Values
-             * @description Map of item keys to override values that apply when this environment is resolved. Each key must already be declared (with a type) on this config or one of its ancestors.
-             */
-            values?: {
-                [key: string]: components["schemas"]["ConfigItemOverride"];
-            } | null;
         };
         /**
          * ListMeta
