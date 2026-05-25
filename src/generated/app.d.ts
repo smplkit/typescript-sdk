@@ -1150,6 +1150,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/current/sso_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get SSO Connection
+         * @description Return the SSO connection for the current account, including computed Service Provider metadata. Returns `404` when no connection has been configured.
+         */
+        get: operations["get_sso_connection"];
+        /**
+         * Create or Replace SSO Connection
+         * @description Create-or-replace the account's SSO connection. The OIDC `client_secret` is write-only; supply it on first creation, omit on subsequent updates to retain the stored value.
+         */
+        put: operations["put_sso_connection"];
+        post?: never;
+        /**
+         * Delete SSO Connection
+         * @description Soft-delete the account's SSO connection. Domains are preserved.
+         */
+        delete: operations["delete_sso_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/current/sso_domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List SSO Domains
+         * @description List the domains claimed by the current account, including each row's verification status.
+         */
+        get: operations["list_sso_domains"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/current/sso_domains/{domain}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Claim SSO Domain
+         * @description Claim a domain for SSO routing. Idempotent — re-claiming a domain already held by the account is a no-op success. The response includes the DNS TXT token to publish.
+         */
+        put: operations["claim_sso_domain"];
+        post?: never;
+        /**
+         * Release SSO Domain
+         * @description Release a previously-claimed SSO domain.
+         */
+        delete: operations["release_sso_domain"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/current/sso_domains/{domain}/actions/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify SSO Domain
+         * @description Run the DNS TXT check for a claimed domain. Returns the updated resource on success. Returns `409` if a different account has already verified this domain. Returns `422` when the DNS TXT record has not yet been published or does not match the expected token.
+         */
+        post: operations["verify_sso_domain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3120,6 +3212,278 @@ export interface components {
              * @enum {string|null}
              */
             entry_point?: "LOGIN" | "GET_STARTED" | "LIVE_DEMO" | "UNKNOWN" | null;
+        };
+        /**
+         * SSOConnection
+         * @description An account's Single Sign-On connection to a customer-controlled
+         *     identity provider. Configuring a connection lets the account federate
+         *     authentication to its own SAML or OIDC IdP; with `enforced` enabled,
+         *     password and social sign-in are disabled for users on the account's
+         *     verified domains.
+         *
+         *     Each account has at most one SSO connection. The Service Provider
+         *     metadata fields (`sp_entity_id`, `acs_url`, `slo_url`) are computed
+         *     on every read from the connection identifier and never stored.
+         * @example {
+         *       "acs_url": "https://app.smplkit.com/api/v1/auth/sso/acs",
+         *       "created_at": "2026-05-25T11:02:16.616Z",
+         *       "default_role": "MEMBER",
+         *       "enforced": true,
+         *       "group_role_mappings": {
+         *         "smplkit-admins": "ADMIN"
+         *       },
+         *       "oidc_client_id": "smplkit-acme",
+         *       "oidc_issuer": "https://login.acme.com",
+         *       "protocol": "oidc",
+         *       "slo_url": "https://app.smplkit.com/api/v1/auth/sso/slo",
+         *       "sp_entity_id": "https://app.smplkit.com/sso/sp",
+         *       "updated_at": "2026-05-25T11:02:16.616Z"
+         *     }
+         */
+        SSOConnection: {
+            /**
+             * Protocol
+             * @description Federation protocol. `oidc` for OpenID Connect; `saml` for SAML 2.0. Determines which set of IdP fields below are required.
+             * @enum {string}
+             */
+            protocol: "saml" | "oidc";
+            /**
+             * Oidc Issuer
+             * @description OIDC issuer URL — the base from which `.well-known/openid-configuration` is discovered. Required when `protocol` is `oidc`; ignored when `protocol` is `saml`.
+             */
+            oidc_issuer?: string | null;
+            /**
+             * Oidc Client Id
+             * @description OIDC client identifier issued by the IdP for smplkit. Required when `protocol` is `oidc`; ignored otherwise.
+             */
+            oidc_client_id?: string | null;
+            /**
+             * Oidc Client Secret
+             * @description OIDC client secret. Write-only — supplied on PUT, never returned by the API. Stored envelope-encrypted at rest. Required on first creation of an OIDC connection; on subsequent PUTs, omit to retain the existing value.
+             */
+            oidc_client_secret?: string | null;
+            /**
+             * Saml Idp Entity Id
+             * @description SAML IdP EntityID (typically a URI). Required when `protocol` is `saml`; ignored otherwise.
+             */
+            saml_idp_entity_id?: string | null;
+            /**
+             * Saml Idp Sso Url
+             * @description SAML IdP single sign-on URL (HTTP-Redirect or HTTP-POST endpoint). Required when `protocol` is `saml`.
+             */
+            saml_idp_sso_url?: string | null;
+            /**
+             * Saml Idp Slo Url
+             * @description SAML IdP single logout URL. Optional — when present, smplkit will issue LogoutRequests on user sign-out.
+             */
+            saml_idp_slo_url?: string | null;
+            /**
+             * Saml Idp X509 Cert
+             * @description SAML IdP X.509 signing certificate (PEM-encoded). Required when `protocol` is `saml`.
+             */
+            saml_idp_x509_cert?: string | null;
+            /**
+             * Default Role
+             * @description Role granted to a user provisioned just-in-time on their first SSO login when no group mapping applies. `OWNER` values are downgraded to `ADMIN` for JIT — owner promotion remains an explicit account action.
+             * @default MEMBER
+             * @enum {string}
+             */
+            default_role: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+            /**
+             * Group Role Mappings
+             * @description Mapping of IdP group claim values to smplkit roles. The first key matching the user's group claims (in declaration order) decides the JIT role; if none match, `default_role` applies. Example: `{"smplkit-admins": "ADMIN"}`.
+             */
+            group_role_mappings?: {
+                [key: string]: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+            };
+            /**
+             * Enforced
+             * @description When `true`, password and social sign-in are rejected for users whose email domain matches one of the account's verified domains. The account owner is exempt (break-glass).
+             * @default false
+             */
+            enforced: boolean;
+            /**
+             * Sp Entity Id
+             * @description Service Provider EntityID to register with the IdP. Computed from the connection — paste this value into the IdP's smplkit configuration.
+             */
+            readonly sp_entity_id?: string | null;
+            /**
+             * Acs Url
+             * @description Assertion Consumer Service URL (SAML) or redirect URI (OIDC) to register with the IdP. Computed.
+             */
+            readonly acs_url?: string | null;
+            /**
+             * Slo Url
+             * @description Single Logout URL to register with the IdP. Computed; smplkit accepts logout requests here for the SAML case.
+             */
+            readonly slo_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the connection was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the connection was last modified.
+             */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * SSOConnectionRequest
+         * @description JSON:API request envelope for creating or replacing the SSO connection.
+         */
+        SSOConnectionRequest: {
+            data: components["schemas"]["SSOConnectionResource"];
+        };
+        /**
+         * SSOConnectionResource
+         * @description JSON:API resource envelope for an SSO connection.
+         *
+         *     `id` is the server-assigned UUID of the singleton connection row on
+         *     the account; clients never specify it (the URL is
+         *     `/accounts/current/sso_connection` with no id segment).
+         * @example {
+         *       "attributes": {
+         *         "acs_url": "https://app.smplkit.com/api/v1/auth/sso/acs",
+         *         "created_at": "2026-05-25T11:02:16.616Z",
+         *         "default_role": "MEMBER",
+         *         "enforced": true,
+         *         "group_role_mappings": {
+         *           "smplkit-admins": "ADMIN"
+         *         },
+         *         "oidc_client_id": "smplkit-acme",
+         *         "oidc_issuer": "https://login.acme.com",
+         *         "protocol": "oidc",
+         *         "slo_url": "https://app.smplkit.com/api/v1/auth/sso/slo",
+         *         "sp_entity_id": "https://app.smplkit.com/sso/sp",
+         *         "updated_at": "2026-05-25T11:02:16.616Z"
+         *       },
+         *       "id": "c0ffee01-1234-5678-9abc-def012345678",
+         *       "type": "sso_connection"
+         *     }
+         */
+        SSOConnectionResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "sso_connection";
+            attributes: components["schemas"]["SSOConnection"];
+        };
+        /**
+         * SSOConnectionResponse
+         * @description JSON:API single-resource response envelope for the SSO connection.
+         */
+        SSOConnectionResponse: {
+            data: components["schemas"]["SSOConnectionResource"];
+        };
+        /**
+         * SSODomain
+         * @description An email domain claimed by an account for SSO routing. A domain is
+         *     not active until it has been verified by publishing a DNS TXT record
+         *     containing the `dns_txt_token`. Once verified, sign-in attempts on
+         *     that domain route to this account's SSO connection.
+         *
+         *     Verified-domain ownership is global across accounts — two accounts
+         *     cannot both hold the same verified domain.
+         * @example {
+         *       "created_at": "2026-05-25T11:00:00.000Z",
+         *       "dns_txt_token": "smplkit-domain-verification=8c91e7d2a3b4f6e0",
+         *       "status": "verified",
+         *       "updated_at": "2026-05-25T11:02:16.616Z",
+         *       "verified_at": "2026-05-25T11:02:16.616Z"
+         *     }
+         */
+        SSODomain: {
+            /**
+             * Dns Txt Token
+             * @description Token to publish on the domain's DNS as a TXT record to prove ownership. The full record value is `smplkit-domain-verification=<token>`.
+             */
+            readonly dns_txt_token?: string | null;
+            /**
+             * Verified At
+             * Format: date-time
+             * @description When the domain was verified. Null until verification succeeds.
+             */
+            readonly verified_at?: string | null;
+            /**
+             * Status
+             * @description Verification status. `pending` means a claim has been registered but DNS TXT verification has not yet succeeded. `verified` means the domain is in use for SSO routing.
+             * @enum {string|null}
+             */
+            readonly status?: "pending" | "verified" | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the claim was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the claim was last modified.
+             */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * SSODomainListResponse
+         * @description JSON:API collection response for SSO domains on an account.
+         */
+        SSODomainListResponse: {
+            /** Data */
+            data: components["schemas"]["SSODomainResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * SSODomainRequest
+         * @description JSON:API request envelope for claiming a domain.
+         *
+         *     The attributes block is intentionally optional/empty — all writeable
+         *     data on a domain is the domain string itself (in the URL) and the
+         *     server-generated verification token. Claim is idempotent: re-claim
+         *     of a domain the account already holds is a no-op success.
+         */
+        SSODomainRequest: {
+            data: components["schemas"]["SSODomainResource"];
+        };
+        /**
+         * SSODomainResource
+         * @description JSON:API resource envelope for an SSO domain.
+         *
+         *     The resource `id` is the domain string itself per ADR-035 (e.g.
+         *     `"acme.com"`). The domain is normalised to lower-case on write.
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-05-25T11:00:00.000Z",
+         *         "dns_txt_token": "smplkit-domain-verification=8c91e7d2a3b4f6e0",
+         *         "status": "verified",
+         *         "updated_at": "2026-05-25T11:02:16.616Z",
+         *         "verified_at": "2026-05-25T11:02:16.616Z"
+         *       },
+         *       "id": "acme.com",
+         *       "type": "sso_domain"
+         *     }
+         */
+        SSODomainResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "sso_domain";
+            attributes: components["schemas"]["SSODomain"];
+        };
+        /**
+         * SSODomainResponse
+         * @description JSON:API single-resource response envelope for an SSO domain.
+         */
+        SSODomainResponse: {
+            data: components["schemas"]["SSODomainResource"];
         };
         /**
          * Service
@@ -8398,6 +8762,408 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["SetupIntentResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_sso_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SSOConnectionResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_sso_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["SSOConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SSOConnectionResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_sso_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_sso_domains: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SSODomainListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    claim_sso_domain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["SSODomainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SSODomainResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    release_sso_domain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    verify_sso_domain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["SSODomainResponse"];
                 };
             };
             /** @description Validation error or malformed request */
