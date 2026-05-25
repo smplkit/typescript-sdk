@@ -1374,7 +1374,7 @@ export interface components {
          *         "discount_override_pct": 100,
          *         "items": [
          *           {
-         *             "plan": "PRO",
+         *             "plan": "pro",
          *             "product": "audit"
          *           }
          *         ]
@@ -3279,12 +3279,12 @@ export interface components {
             product: string;
             /**
              * From Plan
-             * @description Current plan for this product, or `FREE` if it is being added.
+             * @description Current plan for this product, or `free` if it is being added.
              */
             from_plan: string;
             /**
              * To Plan
-             * @description Plan the product will be on after the change. `FREE` indicates the enrollment will be dropped.
+             * @description Plan the product will be on after the change. `free` indicates the enrollment will be dropped.
              */
             to_plan: string;
             /**
@@ -3326,7 +3326,7 @@ export interface components {
             product: string;
             /**
              * Plan
-             * @description Target plan for this product. Must be a paid plan such as `STANDARD` or `PRO`; the free plan is implicit when a product is not listed.
+             * @description Target plan for this product. Must be a paid plan such as `standard` or `pro`; the free plan is implicit when a product is not listed.
              */
             plan: string;
         };
@@ -3348,7 +3348,7 @@ export interface components {
             product: string;
             /**
              * Plan
-             * @description Current plan for this product (e.g. `STANDARD`, `PRO`).
+             * @description Current plan for this product (e.g. `standard`, `pro`).
              */
             plan: string;
             /**
@@ -3358,7 +3358,7 @@ export interface components {
             price_monthly_cents: number;
             /**
              * Pending Plan Change
-             * @description When a plan change is scheduled for the end of the current billing period, this is the plan that will take effect. Otherwise `null`. The value `FREE` indicates the enrollment will be dropped.
+             * @description When a plan change is scheduled for the end of the current billing period, this is the plan that will take effect. Otherwise `null`. The value `free` indicates the enrollment will be dropped.
              */
             pending_plan_change?: string | null;
             /**
@@ -3424,11 +3424,11 @@ export interface components {
          *         "changes": [
          *           {
          *             "effect": "IMMEDIATE",
-         *             "from_plan": "FREE",
+         *             "from_plan": "free",
          *             "monthly_cents": 9900,
          *             "product": "audit",
          *             "prorated_charge_today_cents": 4521,
-         *             "to_plan": "PRO"
+         *             "to_plan": "pro"
          *           }
          *         ],
          *         "next_invoice_total_cents": 12580,
@@ -3497,11 +3497,11 @@ export interface components {
          *       "attributes": {
          *         "items": [
          *           {
-         *             "plan": "PRO",
+         *             "plan": "pro",
          *             "product": "audit"
          *           },
          *           {
-         *             "plan": "PRO",
+         *             "plan": "pro",
          *             "product": "config"
          *           }
          *         ],
@@ -3537,7 +3537,7 @@ export interface components {
          *         "items": [
          *           {
          *             "id": "i1j2k3l4-5678-90ab-cdef-1234567890ab",
-         *             "plan": "PRO",
+         *             "plan": "pro",
          *             "price_monthly_cents": 9900,
          *             "product": "audit"
          *           }
