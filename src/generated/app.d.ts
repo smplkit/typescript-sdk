@@ -688,6 +688,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Groups
+         * @description List Environment Access Groups for the authenticated account. `filter[search]` does a case-insensitive substring match against the group `key` and `name`.
+         */
+        get: operations["list_groups"];
+        put?: never;
+        /**
+         * Create Group
+         * @description Create an Environment Access Group. The caller provides the group id (a snake-case key, unique within the account) in the request body. The id is immutable thereafter. Returns `409` if a group with that id already exists, or `422` if `managed_environments` is not exactly `['*']` or a subset of the account's standard environment keys.
+         */
+        post: operations["create_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Group
+         * @description Return a group by id.
+         */
+        get: operations["get_group"];
+        /**
+         * Update Group
+         * @description Update a group's name, description, and managed environments. Whole-resource semantics — submit every writable attribute. For the reserved `default` group, `managed_environments` may be changed (this is the lever that narrows the account-wide baseline), but renaming or other identity changes are rejected with `409`. Invalid `managed_environments` is `422`.
+         */
+        put: operations["update_group"];
+        post?: never;
+        /**
+         * Delete Group
+         * @description Delete a group by id. Returns `409` for the reserved `default` group, which every account requires. Deleting a group also cascades to its memberships.
+         */
+        delete: operations["delete_group"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group_memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Group Memberships
+         * @description List group memberships in the authenticated account. Pass `filter[group]` (a group key) to list members of a single group, or `filter[user]` (a UUID) to list a single user's memberships. The two filters may be combined to look up a specific (user, group) pair.
+         */
+        get: operations["list_group_memberships"];
+        put?: never;
+        /**
+         * Create Group Membership
+         * @description Add a user to a group. The body references the user (UUID) and the group (key) in the resource attributes. Returns `409` if this user is already a member of this group, or `422` if either the user is not a member of the account or the group does not exist.
+         */
+        post: operations["create_group_membership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group_memberships/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Group Membership
+         * @description Return a single membership by id.
+         */
+        get: operations["get_group_membership"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Group Membership
+         * @description Remove a user from a group. Returns `409` when the membership is the user's `default` membership — every user must remain in the `default` group per ADR-055 §4.
+         */
+        delete: operations["delete_group_membership"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/email-registrations": {
         parameters: {
             query?: never;
@@ -2278,6 +2378,241 @@ export interface components {
             errors: components["schemas"]["Error"][];
         };
         /**
+         * Group
+         * @description An Environment Access Group: a named bundle of standard
+         *     environments its members may manage.
+         *
+         *     A user's effective managed-environment set is the union across all
+         *     their groups (or "all" if any of their groups grants ``["*"]``).
+         *     Roles answer *what* a user may do; groups answer *which environments*
+         *     that capability reaches.
+         * @example {
+         *       "created_at": "2026-05-26T11:02:16.616Z",
+         *       "description": "Senior engineers who may change production.",
+         *       "managed_environments": [
+         *         "production"
+         *       ],
+         *       "name": "Production Stewards",
+         *       "system": false,
+         *       "updated_at": "2026-05-26T11:02:16.616Z"
+         *     }
+         */
+        Group: {
+            /**
+             * Name
+             * @description Human-readable name for the group.
+             */
+            name: string;
+            /**
+             * Description
+             * @description Free-text description shown on the group's detail page.
+             */
+            description?: string | null;
+            /**
+             * Managed Environments
+             * @description The set of environments members of this group may manage. Either the exact value `["*"]` to grant every standard environment, or an explicit array of standard environment keys. Ad-hoc environments are never listed here — they are exempt from group governance and remain manageable by every member of the account.
+             */
+            managed_environments?: string[];
+            /**
+             * System
+             * @description True for built-in groups the platform reserves. The `default` group has `system=true`; it cannot be deleted or renamed, though its `managed_environments` may be narrowed.
+             * @default false
+             */
+            readonly system: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the group was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the group was last modified.
+             */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * GroupCreateRequest
+         * @description JSON:API request envelope for creating a group.
+         *
+         *     Distinct from :class:`GroupRequest` because create requires
+         *     caller-supplied ``data.id`` while update does not.
+         */
+        GroupCreateRequest: {
+            data: components["schemas"]["GroupCreateResource"];
+        };
+        /**
+         * GroupCreateResource
+         * @description JSON:API resource envelope for creating a group (id required).
+         * @example {
+         *       "attributes": {
+         *         "description": "Senior engineers who may change production.",
+         *         "managed_environments": [
+         *           "production"
+         *         ],
+         *         "name": "Production Stewards"
+         *       },
+         *       "id": "production_stewards",
+         *       "type": "group"
+         *     }
+         */
+        GroupCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "group";
+            attributes: components["schemas"]["Group"];
+        };
+        /**
+         * GroupListResponse
+         * @description JSON:API collection response for groups.
+         */
+        GroupListResponse: {
+            /** Data */
+            data: components["schemas"]["GroupResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * GroupMembership
+         * @description A single (user, group) link inside an account.
+         *
+         *     Adding a user to a group creates one membership; removing them
+         *     deletes one. Memberships are create-and-delete only — they expose
+         *     no mutable attributes. The unique constraint on (account, user,
+         *     group) makes a duplicate add a 409.
+         * @example {
+         *       "created_at": "2026-05-26T11:02:16.616Z",
+         *       "group": "production_stewards",
+         *       "updated_at": "2026-05-26T11:02:16.616Z",
+         *       "user": "d290f1ee-6c54-4b01-90e6-d701748f0851"
+         *     }
+         */
+        GroupMembership: {
+            /**
+             * User
+             * @description UUID of the user this membership links. Required on create; immutable thereafter.
+             */
+            user: string;
+            /**
+             * Group
+             * @description Key (id) of the group this membership links. Required on create; immutable thereafter.
+             */
+            group: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the membership was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the membership record was last modified.
+             */
+            readonly updated_at?: string | null;
+        };
+        /**
+         * GroupMembershipListResponse
+         * @description JSON:API collection response for memberships.
+         */
+        GroupMembershipListResponse: {
+            /** Data */
+            data: components["schemas"]["GroupMembershipResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * GroupMembershipRequest
+         * @description JSON:API request envelope for creating a group membership.
+         *
+         *     Memberships have no mutable attributes, so this envelope is used
+         *     only on POST. There is no PUT/PATCH on the membership resource.
+         */
+        GroupMembershipRequest: {
+            data: components["schemas"]["GroupMembershipResource"];
+        };
+        /**
+         * GroupMembershipResource
+         * @description JSON:API resource envelope for a group membership.
+         *
+         *     `id` is server-assigned and must not be specified on create.
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-05-26T11:02:16.616Z",
+         *         "group": "production_stewards",
+         *         "updated_at": "2026-05-26T11:02:16.616Z",
+         *         "user": "d290f1ee-6c54-4b01-90e6-d701748f0851"
+         *       },
+         *       "id": "f7c1d2e3-4b5a-6789-0123-456789abcdef",
+         *       "type": "group_membership"
+         *     }
+         */
+        GroupMembershipResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "group_membership";
+            attributes: components["schemas"]["GroupMembership"];
+        };
+        /**
+         * GroupMembershipResponse
+         * @description JSON:API single-resource response envelope for a membership.
+         */
+        GroupMembershipResponse: {
+            data: components["schemas"]["GroupMembershipResource"];
+        };
+        /**
+         * GroupRequest
+         * @description JSON:API request envelope for updating a group.
+         */
+        GroupRequest: {
+            data: components["schemas"]["GroupResource"];
+        };
+        /**
+         * GroupResource
+         * @description JSON:API resource envelope for a group.
+         * @example {
+         *       "attributes": {
+         *         "created_at": "2026-05-26T11:02:16.616Z",
+         *         "description": "Senior engineers who may change production.",
+         *         "managed_environments": [
+         *           "production"
+         *         ],
+         *         "name": "Production Stewards",
+         *         "system": false,
+         *         "updated_at": "2026-05-26T11:02:16.616Z"
+         *       },
+         *       "id": "production_stewards",
+         *       "type": "group"
+         *     }
+         */
+        GroupResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "group";
+            attributes: components["schemas"]["Group"];
+        };
+        /**
+         * GroupResponse
+         * @description JSON:API single-resource response envelope for a group.
+         */
+        GroupResponse: {
+            data: components["schemas"]["GroupResource"];
+        };
+        /**
          * Invitation
          * @description An invitation for a person to join an account.
          *
@@ -2314,6 +2649,11 @@ export interface components {
              * @description UUID of the user who sent the invitation.
              */
             readonly invited_by?: string | null;
+            /**
+             * Groups
+             * @description Environment Access Group ids the invitee will be added to on acceptance, in addition to the always-applied `default` group. Empty array or `null` means default-only.
+             */
+            readonly groups?: string[] | null;
             /**
              * Account Name
              * @description Name of the account the recipient is being invited to join.
@@ -2390,6 +2730,9 @@ export interface components {
          * @description One invitation in a bulk-create request.
          * @example {
          *       "email": "alice@example.com",
+         *       "groups": [
+         *         "production_stewards"
+         *       ],
          *       "role": "MEMBER"
          *     }
          */
@@ -2406,6 +2749,11 @@ export interface components {
              * @default MEMBER
              */
             role: string;
+            /**
+             * Groups
+             * @description Optional list of Environment Access Group ids to add the invitee to on acceptance. Every accepted invitation also yields the reserved `default` membership, regardless of this field. Unknown group ids are rejected at create time with `422`.
+             */
+            groups?: string[] | null;
         };
         /**
          * InvitationListResponse
@@ -7122,6 +7470,552 @@ export interface operations {
                 content: {
                     "application/vnd.api+json": components["schemas"]["InvitationResponse"];
                 };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_groups: {
+        parameters: {
+            query?: {
+                /** @description Case-insensitive substring match against the group `key` and `name`. A group is returned if either field contains the search term. */
+                "filter[search]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `key`, `-key`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "key" | "-key" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["GroupCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["GroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_group_memberships: {
+        parameters: {
+            query?: {
+                /** @description Group key to narrow the result to memberships in that group. */
+                "filter[group]"?: string | null;
+                /** @description User UUID to narrow the result to memberships for that user. */
+                "filter[user]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `created_at`. Allowed values: `created_at`, `-created_at`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupMembershipListResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_group_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["GroupMembershipRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupMembershipResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_group_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["GroupMembershipResponse"];
+                };
+            };
+            /** @description Validation error or malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_group_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation error or malformed request */
             400: {
