@@ -116,6 +116,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Export
+         * @description Mint a short-lived signed URL to stream an events download.
+         *
+         *     The request body specifies `format` (`CSV` or `JSONL`) and any
+         *     subset of the event filters accepted by `GET /api/v1/events`. The
+         *     response returns the signed URL plus its expiry (30 seconds from
+         *     mint). Open the URL in a browser to stream the file to disk; no
+         *     `Authorization` header is required at download time.
+         *
+         *     Filter rules match `GET /api/v1/events`: `filter[resource_id]`
+         *     requires `filter[resource_type]`; `filter[search]` requires either
+         *     `filter[occurred_at]` or `filter[resource_type]` +
+         *     `filter[resource_id]`. Violations are rejected here at mint time.
+         *
+         *     Reads are allowed on lapsed subscriptions per the smplcore
+         *     convention — same gate as the events list.
+         */
+        post: operations["create_export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Export
+         * @description Stream a signed audit-events download — no `Authorization` header required.
+         *
+         *     Authorization is the token itself: it carries the account, the
+         *     chosen format, and the filters, all integrity-protected by HMAC.
+         *     The endpoint verifies the signature and expiry, scopes the events
+         *     query to the token's account, and streams the response.
+         *
+         *     Any failure (bad signature, wrong audience, expired, malformed
+         *     payload) returns `404 Not Found` — the response shape never leaks
+         *     which check failed.
+         *
+         *     The token is stateless and replayable until it expires (≤30s).
+         *     Concurrent or duplicate GETs (browser retries, AV scanners,
+         *     prefetchers) all succeed; there is no single-use behavior.
+         */
+        get: operations["download_export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -826,6 +893,128 @@ export interface components {
              */
             type: string;
             attributes: components["schemas"]["EventTypeAttributes"];
+        };
+        /**
+         * Export
+         * @description A request for a short-lived signed download URL.
+         *
+         *     The customer chooses a `format` and supplies the same filter set
+         *     the events list endpoint accepts. The server mints an HMAC-signed
+         *     URL (valid for 30 seconds) that the browser navigates to for a
+         *     native streaming download — no `Authorization` header required at
+         *     download time.
+         *
+         *     The download honors the **same filter-combination rules** as
+         *     `GET /api/v1/events`:
+         *
+         *     - `filter[resource_id]` must be accompanied by `filter[resource_type]`.
+         *     - `filter[search]` must be accompanied by either `filter[occurred_at]`
+         *       or `filter[resource_type]` + `filter[resource_id]`.
+         *
+         *     A request that violates these rules is rejected at mint time with
+         *     `400 Bad Request`.
+         */
+        Export: {
+            /**
+             * Format
+             * @description Output format for the download. `CSV` writes one row per event with the event payload (`data`) serialized as a JSON-encoded cell. `JSONL` writes one JSON object per line with `data` preserved as a nested object.
+             * @enum {string}
+             */
+            format: "CSV" | "JSONL";
+            /**
+             * Filter[Occurred At]
+             * @description Date range using interval notation, e.g. `[2026-04-01T00:00:00Z,2026-04-15T00:00:00Z)`.
+             */
+            "filter[occurred_at]"?: string | null;
+            /**
+             * Filter[Actor Type]
+             * @description Exact match on the event's `actor_type` field.
+             */
+            "filter[actor_type]"?: string | null;
+            /**
+             * Filter[Actor Id]
+             * @description Exact match on the event's `actor_id` field.
+             */
+            "filter[actor_id]"?: string | null;
+            /**
+             * Filter[Event Type]
+             * @description Exact match on the event's `event_type` field.
+             */
+            "filter[event_type]"?: string | null;
+            /**
+             * Filter[Resource Type]
+             * @description Exact match on the event's `resource_type` field.
+             */
+            "filter[resource_type]"?: string | null;
+            /**
+             * Filter[Resource Id]
+             * @description Exact match on the event's `resource_id` field. Must be accompanied by `filter[resource_type]`.
+             */
+            "filter[resource_id]"?: string | null;
+            /**
+             * Filter[Search]
+             * @description Case-insensitive substring match against `resource_id` or `description`. Must be accompanied by either `filter[occurred_at]` or `filter[resource_type]` + `filter[resource_id]`.
+             */
+            "filter[search]"?: string | null;
+            /**
+             * Filter[Do Not Forward]
+             * @description When set, restrict to events whose `do_not_forward` flag matches the given boolean.
+             */
+            "filter[do_not_forward]"?: boolean | null;
+            /**
+             * Url
+             * @description Absolute, signed download URL. Open in a browser to stream the export to disk. Expires shortly after mint — see `expires_at`.
+             */
+            readonly url?: string | null;
+            /**
+             * Expires At
+             * @description When the signed URL stops being valid (ISO-8601 UTC). Open the URL well before this time — the signed token is stateless, so a single mint cannot be 'refreshed'; mint a new export if the URL has expired.
+             */
+            readonly expires_at?: string | null;
+        };
+        /**
+         * ExportRequest
+         * @description JSON:API request envelope for minting a signed download URL.
+         */
+        ExportRequest: {
+            data: components["schemas"]["ExportResource"];
+        };
+        /**
+         * ExportResource
+         * @description JSON:API resource envelope for an export ticket.
+         *
+         *     `id` must not be specified on create requests — the server assigns
+         *     a fresh UUID per mint response. The UUID identifies this particular
+         *     response envelope only; nothing is persisted behind it (the signed
+         *     token inside `attributes.url` is the actual artifact).
+         * @example {
+         *       "attributes": {
+         *         "expires_at": "2026-05-27T12:00:30Z",
+         *         "filter[occurred_at]": "[2026-05-01T00:00:00Z,2026-06-01T00:00:00Z)",
+         *         "filter[resource_type]": "order",
+         *         "format": "CSV",
+         *         "url": "https://audit.smplkit.com/api/v1/exports/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…"
+         *       },
+         *       "id": "11111111-2222-3333-4444-555555555555",
+         *       "type": "export"
+         *     }
+         */
+        ExportResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @default export
+             */
+            type: string;
+            attributes: components["schemas"]["Export"];
+        };
+        /**
+         * ExportResponse
+         * @description JSON:API single-resource response carrying the signed URL.
+         */
+        ExportResponse: {
+            data: components["schemas"]["ExportResource"];
         };
         /**
          * Forwarder
@@ -1829,6 +2018,51 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EventSearchResponse"];
                 };
+            };
+        };
+    };
+    create_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["ExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ExportResponse"];
+                };
+            };
+        };
+    };
+    download_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque signed download token from `POST /api/v1/exports`. Treat as a single short-lived URL — do not parse or store long-term. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
