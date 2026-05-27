@@ -389,10 +389,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Categories
+         * @description List the distinct `category` values recorded for this account.
+         *
+         *     The resource `id` is the category value itself. Default sort is
+         *     `key` ascending; pass `sort=-key` for descending. Useful for
+         *     populating filter dropdowns in a UI.
+         */
+        get: operations["list_categories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CategoryAttributes */
+        CategoryAttributes: {
+            /**
+             * Category
+             * @description The category value. Same as the JSON:API ``id``.
+             */
+            category: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description First sighting of this category for the account.
+             */
+            created_at: string;
+        };
+        /** CategoryListResponse */
+        CategoryListResponse: {
+            /** Data */
+            data: components["schemas"]["CategoryResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * CategoryResource
+         * @example {
+         *       "attributes": {
+         *         "category": "auth",
+         *         "created_at": "2026-04-12T15:23:01Z"
+         *       },
+         *       "id": "auth",
+         *       "type": "category"
+         *     }
+         */
+        CategoryResource: {
+            /**
+             * Id
+             * @description The category value.
+             */
+            id: string;
+            /**
+             * Type
+             * @default category
+             */
+            type: string;
+            attributes: components["schemas"]["CategoryAttributes"];
+        };
         /**
          * Event
          * @description An audit event — a record that something happened, attributed to
@@ -423,6 +491,13 @@ export interface components {
              * @description Free-text description of the event. Included alongside `resource_id` in the `filter[search]` substring target.
              */
             description?: string | null;
+            /** @description One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`. Omit to record the event at `INFO`. Always present on read. */
+            severity?: components["schemas"]["Severity"] | null;
+            /**
+             * Category
+             * @description Free-form bucket label, e.g. `auth`, `billing`, `config-change`. Stored exactly as supplied. Drives the `filter[category]` filter and the `GET /api/v1/categories` discovery endpoint.
+             */
+            category?: string | null;
             /**
              * Occurred At
              * @description When the event actually happened. Defaults to the server receipt time (`created_at`).
@@ -513,6 +588,7 @@ export interface components {
          *         "actor_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
          *         "actor_label": "alice@example.com",
          *         "actor_type": "USER",
+         *         "category": "auth",
          *         "created_at": "2026-05-06T20:00:00.123Z",
          *         "data": {
          *           "request_id": "req-abc",
@@ -526,7 +602,8 @@ export interface components {
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
          *         "resource_id": "u-1",
-         *         "resource_type": "user"
+         *         "resource_type": "user",
+         *         "severity": "INFO"
          *       },
          *       "id": "11111111-2222-3333-4444-555555555555",
          *       "type": "event"
@@ -614,6 +691,16 @@ export interface components {
              * @description Exact match on the event's `resource_id` field. Must be accompanied by `filter[resource_type]`.
              */
             "filter[resource_id]"?: string | null;
+            /**
+             * Filter[Severity]
+             * @description Exact match on the event's `severity` field. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`.
+             */
+            "filter[severity]"?: string | null;
+            /**
+             * Filter[Category]
+             * @description Exact match on the event's `category` field.
+             */
+            "filter[category]"?: string | null;
             /**
              * Filter[Actor Type]
              * @description Exact match on the event's `actor_type` field.
@@ -1469,6 +1556,12 @@ export interface components {
             failed: number;
         };
         /**
+         * Severity
+         * @description One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`.
+         * @enum {string}
+         */
+        Severity: "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL";
+        /**
          * TestForwarderRequest
          * @description Inputs to the test-forwarder action.
          *
@@ -1626,6 +1719,10 @@ export interface operations {
                 "filter[event_type]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 "filter[resource_id]"?: string | null;
+                /** @description Exact match on the event's `severity` field. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`. */
+                "filter[severity]"?: string | null;
+                /** @description Exact match on the event's `category` field. */
+                "filter[category]"?: string | null;
                 /** @description Case-insensitive substring match against `resource_id` or `description`. Use `filter[resource_id]` for an exact match on `resource_id`. */
                 "filter[search]"?: string | null;
                 /** @description When set, restrict to events whose `do_not_forward` flag matches the given boolean. Forwarder previews typically pass `false` to match live-pipeline semantics (events flagged `do_not_forward=true` are skipped by the forwarder pipeline). */
@@ -2083,6 +2180,35 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["EventTypeListResponse"];
+                };
+            };
+        };
+    };
+    list_categories: {
+        parameters: {
+            query?: {
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
+                sort?: "key" | "-key";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["CategoryListResponse"];
                 };
             };
         };
