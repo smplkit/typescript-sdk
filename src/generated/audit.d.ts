@@ -37,6 +37,11 @@ export interface paths {
          *     paginated.
          *
          *     `page[size]` defaults to 1000 and must not exceed 1000.
+         *
+         *     Pass `format=CSV` or `format=JSONL` to stream a download of the full
+         *     filtered result set instead of a paginated JSON:API response. The
+         *     download honors every supplied filter and ignores `page[size]` and
+         *     `page[after]`.
          */
         get: operations["list_events"];
         put?: never;
@@ -78,7 +83,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/search/events": {
+    "/api/v1/events/search": {
         parameters: {
             query?: never;
             header?: never;
@@ -566,7 +571,7 @@ export interface components {
         };
         /**
          * EventSearchRequest
-         * @description Request body for ``POST /api/v1/search/events``.
+         * @description Request body for ``POST /api/v1/events/search``.
          *
          *     Mirrors every column filter accepted by ``GET /api/v1/events`` with
          *     identical semantics, and adds a top-level ``filter`` field carrying
@@ -1627,6 +1632,8 @@ export interface operations {
                 "filter[do_not_forward]"?: boolean | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description When set, stream a download of the full filtered result set in the chosen format instead of returning a paginated JSON:API response. `page[size]` and `page[after]` are ignored in this mode; every event matching the supplied filters is emitted. `CSV` writes one row per event with the event payload (`data`) serialized as a single JSON-encoded cell. `JSONL` writes one JSON object per line with the event payload nested as a JSON object. Omit this parameter to receive the paginated JSON:API response. */
+                format?: ("CSV" | "JSONL") | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-occurred_at`. Allowed values: `created_at`, `-created_at`, `occurred_at`, `-occurred_at`. */
                 sort?: "created_at" | "-created_at" | "occurred_at" | "-occurred_at";
             };
