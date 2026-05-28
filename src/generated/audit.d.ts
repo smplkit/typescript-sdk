@@ -420,7 +420,8 @@ export interface paths {
          *
          *     The resource `id` is the slug itself. Default sort is `key`
          *     ascending; pass `sort=-key` for descending. Useful for populating
-         *     filter dropdowns in a UI.
+         *     filter dropdowns in a UI. Results are scoped to the resource types
+         *     visible under the account's current plan.
          */
         get: operations["list_resource_types"];
         put?: never;
