@@ -4032,7 +4032,7 @@ export interface components {
             effect: "IMMEDIATE" | "NEXT_PERIOD";
             /**
              * Prorated Charge Today Cents
-             * @description When `effect` is `IMMEDIATE`, the estimated prorated charge for the remainder of the current billing period in cents. Always `0` when `effect` is `NEXT_PERIOD`.
+             * @description Amount in cents that confirming this change would charge at confirmation time for this product. Reflects the discounted, prorated charge for the remainder of the current billing period. May be `0` even when `effect` is `IMMEDIATE` — when the product is being added to an already-active subscription the prorated amount is carried onto the next invoice rather than charged immediately. Always `0` when `effect` is `NEXT_PERIOD`.
              * @default 0
              */
             prorated_charge_today_cents: number;
@@ -4139,7 +4139,7 @@ export interface components {
             changes: components["schemas"]["SubscriptionChangeProjection"][];
             /**
              * Total Charge Today Cents
-             * @description Total amount that would be charged at confirmation time, in cents. The sum of `prorated_charge_today_cents` across `IMMEDIATE` changes.
+             * @description Total amount in cents that would be charged at confirmation time — the sum of `prorated_charge_today_cents` across all changes. `0` when there is no immediate charge (for example when changes apply to an already-active subscription and the prorated amounts are carried onto the next invoice instead).
              */
             total_charge_today_cents: number;
             /**
