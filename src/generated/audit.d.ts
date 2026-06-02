@@ -279,9 +279,9 @@ export interface paths {
          * @description List delivery log entries for a forwarder.
          *
          *     Default sort is `-created_at` (newest first). Filter by `status` (one of
-         *     `SUCCEEDED`, `FAILED`, `FILTERED_OUT`, `SKIPPED_DO_NOT_FORWARD` —
-         *     case-insensitive), by `event_id`, or by a `created_at` range using
-         *     interval notation (e.g. `[2026-01-01T00:00:00Z,*)`).
+         *     `SUCCEEDED`, `FAILED`, `FILTERED_OUT` — case-insensitive), by `event_id`,
+         *     or by a `created_at` range using interval notation
+         *     (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
         put?: never;
@@ -595,7 +595,7 @@ export interface components {
             };
             /**
              * Do Not Forward
-             * @description When `true`, the event is recorded but not delivered to any forwarder. A delivery log entry with status `SKIPPED_DO_NOT_FORWARD` is written for each enabled forwarder so the skip is visible in the delivery log.
+             * @description When `true`, the event is recorded but not delivered to any forwarder, and no delivery log entries are created for it.
              * @default false
              */
             do_not_forward: boolean;
@@ -1172,10 +1172,10 @@ export interface components {
             attempt_number: number;
             /**
              * Status
-             * @description Delivery outcome. `SUCCEEDED` and `FAILED` are the live-delivery outcomes; `FILTERED_OUT` is recorded when the forwarder's filter rejected the event; `SKIPPED_DO_NOT_FORWARD` is recorded when the event was emitted with `do_not_forward=true`.
+             * @description Delivery outcome. `SUCCEEDED` and `FAILED` are the live-delivery outcomes; `FILTERED_OUT` is recorded when the forwarder's filter rejected the event.
              * @enum {string}
              */
-            status: "SUCCEEDED" | "FAILED" | "FILTERED_OUT" | "SKIPPED_DO_NOT_FORWARD";
+            status: "SUCCEEDED" | "FAILED" | "FILTERED_OUT";
             /**
              * Request
              * @description The HTTP request as it was sent to the destination. Header values are redacted.
