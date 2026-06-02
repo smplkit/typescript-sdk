@@ -278,9 +278,9 @@ export interface paths {
          * List Forwarder Deliveries
          * @description List delivery log entries for a forwarder.
          *
-         *     Default sort is `-created_at` (newest first). Filter by `status` (one of
-         *     `SUCCEEDED`, `FAILED`, `FILTERED_OUT` — case-insensitive), by `event_id`,
-         *     or by a `created_at` range using interval notation
+         *     Default sort is `-created_at` (newest first). Filter by `status`
+         *     (`SUCCEEDED` or `FAILED`, case-insensitive), by `event_id`, or by a
+         *     `created_at` range using interval notation
          *     (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
@@ -1172,10 +1172,10 @@ export interface components {
             attempt_number: number;
             /**
              * Status
-             * @description Delivery outcome. `SUCCEEDED` and `FAILED` are the live-delivery outcomes; `FILTERED_OUT` is recorded when the forwarder's filter rejected the event.
+             * @description Delivery outcome. `SUCCEEDED` when the destination accepted the event, `FAILED` when the delivery attempt did not succeed. Events that a forwarder's filter rejected are not recorded as deliveries.
              * @enum {string}
              */
-            status: "SUCCEEDED" | "FAILED" | "FILTERED_OUT";
+            status: "SUCCEEDED" | "FAILED";
             /**
              * Request
              * @description The HTTP request as it was sent to the destination. Header values are redacted.
