@@ -24,7 +24,7 @@ import {
 } from "../src/audit/index.js";
 
 // JSON Logic filter — only forward `invoice.*` event types.
-// Events that don't match are recorded as `filtered_out` deliveries.
+// Events that don't match the filter aren't forwarded (and produce no delivery record).
 // See https://jsonlogic.com for the full operator reference.
 const INVOICE_FILTER = { in: ["invoice.", { var: "event_type" }] };
 
