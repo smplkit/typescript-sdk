@@ -279,7 +279,7 @@ export interface paths {
          * @description List delivery log entries for a forwarder.
          *
          *     Default sort is `-created_at` (newest first). Filter by `status`
-         *     (`SUCCEEDED` or `FAILED`, case-insensitive), by `event_id`, or by a
+         *     (`SUCCEEDED` or `FAILED`, case-insensitive), by `event`, or by a
          *     `created_at` range using interval notation
          *     (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
@@ -1154,17 +1154,17 @@ export interface components {
          */
         ForwarderDelivery: {
             /**
-             * Forwarder Id
+             * Forwarder
              * Format: uuid
              * @description Forwarder the delivery belongs to.
              */
-            forwarder_id: string;
+            forwarder: string;
             /**
-             * Event Id
+             * Event
              * Format: uuid
              * @description Event that was being delivered.
              */
-            event_id: string;
+            event: string;
             /**
              * Attempt Number
              * @description 1 for the initial delivery, incremented for each retry.
@@ -1245,8 +1245,8 @@ export interface components {
          *       "attributes": {
          *         "attempt_number": 1,
          *         "created_at": "2026-05-07T12:00:01.234Z",
-         *         "event_id": "33333333-4444-5555-6666-777777777777",
-         *         "forwarder_id": "11111111-2222-3333-4444-555555555555",
+         *         "event": "33333333-4444-5555-6666-777777777777",
+         *         "forwarder": "11111111-2222-3333-4444-555555555555",
          *         "latency_ms": 187,
          *         "request": {
          *           "body": "{\"event_type\":\"user.created\",\"resource_id\":\"u-1\"}",
@@ -2224,7 +2224,7 @@ export interface operations {
             query?: {
                 "filter[status]"?: string | null;
                 "filter[created_at]"?: string | null;
-                "filter[event_id]"?: string | null;
+                "filter[event]"?: string | null;
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`. */
