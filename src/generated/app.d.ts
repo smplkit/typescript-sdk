@@ -188,7 +188,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Current Account
-         * @description Permanently delete the current account and all associated data.
+         * @description Delete the current account and all associated data. By default the account is soft-deleted and may be restored by contacting support. Set `purge=true` to permanently and irreversibly erase the account and all of its data across every service, with no possibility of recovery.
          */
         delete: operations["delete_account"];
         options?: never;
@@ -5154,7 +5154,10 @@ export interface operations {
     };
     delete_account: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When true, permanently and irreversibly erase the account and all of its data with no possibility of recovery. When false (the default), the account is soft-deleted and may be restored. */
+                purge?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
