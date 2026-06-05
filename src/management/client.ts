@@ -20,6 +20,7 @@
  *   - mgmt.loggers
  *   - mgmt.logGroups
  *   - mgmt.audit            (SIEM forwarder CRUD)
+ *   - mgmt.jobs             (scheduled-job CRUD, runs, usage)
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -40,6 +41,7 @@ import { ManagementConfigClient } from "./config.js";
 import { ManagementFlagsClient } from "./flags.js";
 import { LoggersClient, LogGroupsClient } from "./logging.js";
 import { ManagementAuditClient } from "./audit.js";
+import { ManagementJobsClient } from "./jobs.js";
 import { resolveManagementConfig, serviceUrl } from "../config.js";
 import type { ResolvedManagementConfig } from "../config.js";
 
@@ -48,6 +50,7 @@ type ConfigHttp = ReturnType<typeof createClient<import("../generated/config.d.t
 type FlagsHttp = ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
 type LoggingHttp = ReturnType<typeof createClient<import("../generated/logging.d.ts").paths>>;
 type AuditHttp = ReturnType<typeof createClient<import("../generated/audit.d.ts").paths>>;
+type JobsHttp = ReturnType<typeof createClient<import("../generated/jobs.d.ts").paths>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -927,6 +930,8 @@ export class SmplManagementClient {
   readonly logGroups: LogGroupsClient;
   /** Audit SIEM forwarder CRUD. */
   readonly audit: ManagementAuditClient;
+  /** Scheduled-job CRUD, runs, and usage. */
+  readonly jobs: ManagementJobsClient;
 
   /** @internal — shared HTTP transports (so SmplClient can alias them). */
   readonly _appHttp: AppHttp;
@@ -951,6 +956,7 @@ export class SmplManagementClient {
     this.loggers = this._loggersRef;
     this.logGroups = this._logGroupsRef;
     this.audit = this._auditRef;
+    this.jobs = this._jobsRef;
     this._appHttp = this._appHttpRef;
     this._configHttp = this._configHttpRef;
     this._flagsHttp = this._flagsHttpRef;
@@ -970,6 +976,7 @@ export class SmplManagementClient {
   private _loggersRef!: LoggersClient;
   private _logGroupsRef!: LogGroupsClient;
   private _auditRef!: ManagementAuditClient;
+  private _jobsRef!: ManagementJobsClient;
   private _appHttpRef!: AppHttp;
   private _configHttpRef!: ConfigHttp;
   private _flagsHttpRef!: FlagsHttp;
@@ -982,13 +989,15 @@ export class SmplManagementClient {
     const flagsBaseUrl = serviceUrl(cfg.scheme, "flags", cfg.baseDomain);
     const loggingBaseUrl = serviceUrl(cfg.scheme, "logging", cfg.baseDomain);
     const auditBaseUrl = serviceUrl(cfg.scheme, "audit", cfg.baseDomain);
+    const jobsBaseUrl = serviceUrl(cfg.scheme, "jobs", cfg.baseDomain);
 
     const headers = {
       Authorization: `Bearer ${cfg.apiKey}`,
       Accept: "application/json",
     };
 
-    const auditHeaders = {
+    // JSON:API services (audit, jobs) negotiate the vendor media type.
+    const jsonApiHeaders = {
       Authorization: `Bearer ${cfg.apiKey}`,
       Accept: "application/vnd.api+json",
       "Content-Type": "application/vnd.api+json",
@@ -1012,7 +1021,11 @@ export class SmplManagementClient {
     });
     const auditHttpRef = createClient<import("../generated/audit.d.ts").paths>({
       baseUrl: auditBaseUrl,
-      headers: auditHeaders,
+      headers: jsonApiHeaders,
+    });
+    const jobsHttpRef = createClient<import("../generated/jobs.d.ts").paths>({
+      baseUrl: jobsBaseUrl,
+      headers: jsonApiHeaders,
     });
 
     this._sharedContextBuffer = new ContextRegistrationBuffer();
@@ -1027,6 +1040,7 @@ export class SmplManagementClient {
     this._loggersRef = new LoggersClient(this._loggingHttpRef);
     this._logGroupsRef = new LogGroupsClient(this._loggingHttpRef);
     this._auditRef = new ManagementAuditClient(auditHttpRef as AuditHttp);
+    this._jobsRef = new ManagementJobsClient(jobsHttpRef as JobsHttp);
   }
 
   /** @internal — used by SmplClient to share the buffer. */

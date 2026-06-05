@@ -71,6 +71,9 @@ export {
   ManagementAuditClient,
   ForwardersClient as AuditForwardersClient,
 } from "./management/audit.js";
+export { ManagementJobsClient, RunsClient as JobsRunsClient } from "./management/jobs.js";
+export { HttpConfig, HttpMethod as JobsHttpMethod, Job, Run, Usage } from "./jobs/types.js";
+export type { JobModelClient, ListJobsParams, ListRunsParams } from "./jobs/types.js";
 export { Environment, ContextType, AccountSettings, Service } from "./management/models.js";
 export { EnvironmentClassification, Color } from "./management/types.js";
 
