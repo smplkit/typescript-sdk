@@ -21,7 +21,7 @@ export interface paths {
          * Create Job
          * @description Create a job for this account.
          *
-         *     The caller supplies the job's id (a slug) as `data.id`. Slugs are unique
+         *     The caller supplies the job's id as `data.id`. Ids are unique
          *     within an account and immutable. An enabled job begins scheduling
          *     immediately.
          */
@@ -41,7 +41,7 @@ export interface paths {
         };
         /**
          * Get Job
-         * @description Retrieve a single job by its id (slug).
+         * @description Retrieve a single job by its id.
          */
         get: operations["get_job"];
         /**
@@ -55,7 +55,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Job
-         * @description Delete a job. Its run history is retained; the slug may be reused later.
+         * @description Delete a job. Its run history is retained; the id may be reused later.
          */
         delete: operations["delete_job"];
         options?: never;
@@ -98,7 +98,7 @@ export interface paths {
          * List Runs
          * @description List runs for this account, newest first (cursor paginated).
          *
-         *     Use `filter[job]={slug}` for a single job's run history.
+         *     Use `filter[job]={id}` for a single job's run history.
          */
         get: operations["list_runs"];
         put?: never;
@@ -418,7 +418,7 @@ export interface components {
         };
         /**
          * JobResource
-         * @description JSON:API resource envelope for a job. The caller supplies `id` (the slug) on create.
+         * @description JSON:API resource envelope for a job. The caller supplies `id` on create.
          * @example {
          *       "attributes": {
          *         "concurrency_policy": "ALLOW",
@@ -508,7 +508,7 @@ export interface components {
         Run: {
             /**
              * Job
-             * @description The slug of the job this run belongs to.
+             * @description The id of the job this run belongs to.
              */
             job: string;
             /**
