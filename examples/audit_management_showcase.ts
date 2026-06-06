@@ -17,11 +17,17 @@ import { randomUUID } from "node:crypto";
 
 import { SmplManagementClient } from "../src/index.js";
 import {
+  ForwarderEnvironment,
   ForwarderType,
   HttpConfiguration,
   HttpMethod,
   TransformType,
 } from "../src/audit/index.js";
+
+// The environment the forwarder delivers in. Forwarders are enabled
+// per-environment via the `environments` map — the base `enabled` field is
+// always false and cannot be set directly.
+const ENVIRONMENT = "production";
 
 // JSON Logic filter — only forward `invoice.*` event types.
 // Events that don't match the filter aren't forwarded (and produce no delivery record).
@@ -46,7 +52,7 @@ async function main(): Promise<void> {
   try {
     const forwarderName = `showcase-${randomUUID().slice(0, 6)}`;
 
-    // create a new forwarder
+    // create a new forwarder, enabled in the `production` environment
     const forwarder = manage.audit.forwarders.new(forwarderName, {
       name: forwarderName,
       forwarderType: ForwarderType.HTTP,
@@ -55,6 +61,9 @@ async function main(): Promise<void> {
         url: "https://httpbin.org/post",
         headers: [{ name: "X-Showcase", value: "ok" }],
       }),
+      // Enablement is per-environment. A forwarder delivers in an
+      // environment only when that environment's entry is `enabled: true`.
+      environments: { [ENVIRONMENT]: { enabled: true } },
       filter: INVOICE_FILTER,
       transformType: TransformType.JSONATA,
       transform: SIEM_TRANSFORM,
@@ -70,14 +79,15 @@ async function main(): Promise<void> {
     // get a forwarder
     const fetched = await manage.audit.forwarders.get(forwarder.id!);
     assert.equal(fetched.id, forwarder.id);
-    assert.equal(fetched.enabled, true);
-    console.log(`Fetched forwarder: ${fetched.name}`);
+    // The base `enabled` is always false; check the per-environment entry.
+    assert.equal(fetched.environments[ENVIRONMENT]?.enabled, true);
+    console.log(`Fetched forwarder: ${fetched.name} (enabled in ${ENVIRONMENT})`);
 
-    // update a forwarder
-    fetched.enabled = false;
+    // disable delivery in the `production` environment
+    fetched.environments[ENVIRONMENT] = new ForwarderEnvironment({ enabled: false });
     await fetched.save();
-    assert.equal(fetched.enabled, false);
-    console.log(`Disabled forwarder: ${fetched.name} (enabled=${fetched.enabled})`);
+    assert.equal(fetched.environments[ENVIRONMENT]?.enabled, false);
+    console.log(`Disabled forwarder in ${ENVIRONMENT}: ${fetched.name}`);
 
     // delete a forwarder
     await fetched.delete();

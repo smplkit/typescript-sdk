@@ -18,9 +18,13 @@ import { randomUUID } from "node:crypto";
 import { SmplClient } from "../src/index.js";
 
 async function main(): Promise<void> {
-  // create the client (use SmplClient for synchronous use)
+  // create the client (use SmplClient for synchronous use). Runtime audit
+  // operations are environment-scoped: the SDK stamps the configured
+  // `environment` onto every record/list/get call, and recorded events are
+  // tagged with it.
+  const ENVIRONMENT = "production";
   const client = new SmplClient({
-    environment: "production",
+    environment: ENVIRONMENT,
     service: "showcase-service",
   });
   try {
@@ -58,7 +62,9 @@ async function main(): Promise<void> {
     assert.equal(event.id, recordedEventId);
     assert.equal(event.resourceId, someResourceId);
     assert.equal(event.eventType, "invoice.created");
-    console.log(`Fetched event ${event.id}: ${event.eventType}`);
+    // The event is tagged with the environment it was recorded in.
+    assert.equal(event.environment, ENVIRONMENT);
+    console.log(`Fetched event ${event.id}: ${event.eventType} (env=${event.environment})`);
 
     // list resource types observed
     const resourceTypesPage = await client.audit.resourceTypes.list();

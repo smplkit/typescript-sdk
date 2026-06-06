@@ -11,6 +11,7 @@ import { SmplManagementClient } from "../../../src/management/client.js";
 import { ManagementAuditClient, ForwardersClient } from "../../../src/management/audit.js";
 import {
   Forwarder,
+  ForwarderEnvironment,
   ForwarderType,
   HttpConfiguration,
   HttpMethod,
@@ -56,7 +57,9 @@ function _forwarderResource(
       name: "Datadog production",
       description: null,
       forwarder_type: ForwarderType.DATADOG,
-      enabled: true,
+      // Base `enabled` is server-pinned false; enablement is per-environment.
+      enabled: false,
+      environments: { production: { enabled: true } },
       filter: null,
       transform_type: null,
       transform: null,
@@ -80,6 +83,10 @@ function _newForwarder(
     filter: Record<string, unknown>;
     transform: unknown;
     transformType: TransformType;
+    environments: Record<
+      string,
+      ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
+    >;
   }> = {},
   key: string = FWD_ID,
 ) {
@@ -158,9 +165,10 @@ describe("mgmt.audit.forwarders.new", () => {
     expect(forwarder._client).not.toBeNull();
   });
 
-  test("defaults enabled to true and description/filter/transform to null", () => {
+  test("defaults enabled false (server-pinned), environments empty, description/filter/transform null", () => {
     const { forwarder } = _newForwarder();
-    expect(forwarder.enabled).toBe(true);
+    expect(forwarder.enabled).toBe(false);
+    expect(forwarder.environments).toEqual({});
     expect(forwarder.description).toBeNull();
     expect(forwarder.filter).toBeNull();
     expect(forwarder.transform).toBeNull();
@@ -344,7 +352,7 @@ describe("Forwarder.save() — update", () => {
     );
     const fwd = await mgmt.audit.forwarders.get(FWD_ID);
     fwd.name = "Renamed";
-    fwd.enabled = false;
+    fwd.environments = { production: new ForwarderEnvironment({ enabled: false }) };
     await fwd.save();
 
     const reqs = mockFetch.mock.calls.map((c) => c[0]) as Request[];
@@ -407,12 +415,22 @@ describe("mgmt.audit.forwarders.list", () => {
     const mgmt = makeClient();
     const page = await mgmt.audit.forwarders.list({
       forwarderType: ForwarderType.DATADOG,
-      enabled: true,
       pageSize: 2,
     });
     expect(page.forwarders).toHaveLength(2);
     expect(page.forwarders[0]).toBeInstanceOf(Forwarder);
     expect(page.pagination).toEqual({ page: 1, size: 2 });
+  });
+
+  test("does not send filter[enabled] (param removed from the contract)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: [_forwarderResource()], meta: { pagination: { page: 1, size: 1 } } }),
+    );
+    const mgmt = makeClient();
+    await mgmt.audit.forwarders.list({ forwarderType: ForwarderType.DATADOG });
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    expect(req.url).not.toMatch(/filter(\[|%5B)enabled/);
+    expect(req.url).toMatch(/filter(\[|%5B)forwarder_type(\]|%5D)=datadog/);
   });
 
   test("passes page[number], page[size], meta[total] and surfaces totals", async () => {
@@ -572,5 +590,117 @@ describe("Forwarder defaults from sparse wire shape", () => {
     expect(fwd.description).toBeNull();
     expect(fwd.transformType).toBeNull();
     expect(fwd.transform).toBeNull();
+    // Absent `environments` on the wire defaults to an empty map.
+    expect(fwd.environments).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Environment scoping (ADR-055): per-environment enablement + config override
+// ---------------------------------------------------------------------------
+
+describe("Forwarder environments (env scoping)", () => {
+  test("enabled is read-only and pinned false; never sent on create", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder({
+      environments: { production: { enabled: true } },
+    });
+    // The base `enabled` stays false even though the forwarder delivers in prod.
+    expect(forwarder.enabled).toBe(false);
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    // The base `enabled` is server-pinned; the wrapper must not send it.
+    expect(body.data.attributes).not.toHaveProperty("enabled");
+  });
+
+  test("create sends environments map (enabled + optional configuration override)", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder({
+      environments: {
+        production: {
+          enabled: true,
+          configuration: new HttpConfiguration({
+            url: "https://prod.example/in",
+            headers: [{ name: "X-Env", value: "prod-secret" }],
+          }),
+        },
+        staging: new ForwarderEnvironment({ enabled: false }),
+      },
+    });
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    const envs = body.data.attributes.environments;
+    expect(envs.production.enabled).toBe(true);
+    // Per-env configuration override carries plaintext header values.
+    expect(envs.production.configuration.url).toBe("https://prod.example/in");
+    expect(envs.production.configuration.headers[0]).toEqual({
+      name: "X-Env",
+      value: "prod-secret",
+    });
+    expect(envs.staging.enabled).toBe(false);
+    // No override on staging → null configuration (inherits the base).
+    expect(envs.staging.configuration).toBeNull();
+  });
+
+  test("omits environments from the wire body when the map is empty", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes).not.toHaveProperty("environments");
+  });
+
+  test("parses the environments map from a read, including config overrides", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _forwarderResource({
+          environments: {
+            production: {
+              enabled: true,
+              configuration: {
+                method: HttpMethod.POST,
+                url: "https://prod.example/in",
+                headers: [{ name: "X-Env", value: "<redacted>" }],
+                success_status: "2xx",
+              },
+            },
+            staging: { enabled: false },
+          },
+        }),
+      }),
+    );
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    expect(fwd.environments.production).toBeInstanceOf(ForwarderEnvironment);
+    expect(fwd.environments.production!.enabled).toBe(true);
+    expect(fwd.environments.production!.configuration).toBeInstanceOf(HttpConfiguration);
+    expect(fwd.environments.production!.configuration!.url).toBe("https://prod.example/in");
+    // Reads redact header values; re-supply real ones before save().
+    expect(fwd.environments.production!.configuration!.headers[0]!.value).toBe("<redacted>");
+    expect(fwd.environments.staging!.enabled).toBe(false);
+    expect(fwd.environments.staging!.configuration).toBeNull();
+  });
+
+  test("ForwarderEnvironment defaults: disabled, no config override", () => {
+    const env = new ForwarderEnvironment();
+    expect(env.enabled).toBe(false);
+    expect(env.configuration).toBeNull();
+  });
+
+  test("environments round-trip through save() — _apply copies the map", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(
+        { data: _forwarderResource({ environments: { production: { enabled: true } } }) },
+        201,
+      ),
+    );
+    const { forwarder } = _newForwarder({ environments: { production: { enabled: true } } });
+    await forwarder.save();
+    // After save(), `_apply` refreshes from the server response.
+    expect(forwarder.environments.production).toBeInstanceOf(ForwarderEnvironment);
+    expect(forwarder.environments.production!.enabled).toBe(true);
   });
 });

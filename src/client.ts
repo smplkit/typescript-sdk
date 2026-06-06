@@ -230,6 +230,7 @@ export class SmplClient {
     this.audit = new AuditClient({
       apiKey: cfg.apiKey,
       baseUrl: auditBaseUrl,
+      environment: this._environment,
       timeoutMs: this._timeout,
       extraHeaders,
     });
