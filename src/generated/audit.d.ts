@@ -49,9 +49,15 @@ export interface paths {
          * Record Event
          * @description Record an audit event for this account.
          *
+         *     The event is stamped with the environment it occurred in: a
+         *     single-environment credential implies it; a multi-environment or
+         *     unrestricted credential must send the `X-Smplkit-Environment` header.
+         *     The resolved environment must exist and be managed for the account.
+         *
          *     Returns `201 Created` on first write, `200 OK` if the request was a
          *     duplicate (matched by `Idempotency-Key` or a key derived from the
-         *     event's content).
+         *     event's content). The same content recorded in two environments
+         *     produces two distinct events.
          *
          *     `resource_type` values beginning with `smpl.` are reserved for events
          *     that smplkit emits about its own resources and cannot be used here.
@@ -73,6 +79,13 @@ export interface paths {
         /**
          * Get Event
          * @description Retrieve a single audit event by id.
+         *
+         *     Authorized against the caller's permitted environment set: the event
+         *     is returned only if its environment is one the caller may access,
+         *     otherwise `404` (the same response as a non-existent id, so existence
+         *     never leaks across environments). The `X-Smplkit-Environment` header is
+         *     ignored here — a single-object lookup names the object by id, it does
+         *     not resolve an ambient environment.
          */
         get: operations["get_event"];
         put?: never;
@@ -95,6 +108,9 @@ export interface paths {
         /**
          * Search Events
          * @description Search audit events with column filters and an optional JSON Logic expression.
+         *
+         *     Scoped to the resolved environment (a single-environment credential
+         *     implies it; otherwise send the `X-Smplkit-Environment` header).
          *
          *     Without a JSON Logic `filter`: behaves like `GET /api/v1/events`
          *     with the same column filters.
@@ -214,7 +230,9 @@ export interface paths {
          * List Forwarders
          * @description List forwarders for this account.
          *
-         *     Default sort is `-created_at` (newest first).
+         *     Default sort is `-created_at` (newest first). Each forwarder's
+         *     `environments` override map is scoped to the caller's environment
+         *     groups.
          */
         get: operations["list_forwarders"];
         put?: never;
@@ -225,6 +243,11 @@ export interface paths {
          *     The caller supplies the forwarder's key as `data.id`. Keys are
          *     unique within an account and immutable for the lifetime of the
          *     forwarder.
+         *
+         *     Enablement is per-environment: a forwarder is enabled in an
+         *     environment only via `environments[<env>].enabled`; the base `enabled`
+         *     is always false. Every environment referenced in `environments` must
+         *     exist and be managed for the account.
          */
         post: operations["create_forwarder"];
         delete?: never;
@@ -246,11 +269,18 @@ export interface paths {
          *
          *     Header values are returned in plaintext so the resource can be
          *     round-tripped with `GET`, mutate, `PUT` without re-entering secrets.
+         *     The `environments` override map is scoped to the caller's environment
+         *     groups.
          */
         get: operations["get_forwarder"];
         /**
          * Update Forwarder
          * @description Replace an existing forwarder. Every writable field is overwritten.
+         *
+         *     The `environments` override map is a full replace for the environments
+         *     you can manage; overrides for environments outside your access (which
+         *     were hidden from your read) are preserved. Every environment referenced
+         *     in `environments` must exist and be managed.
          */
         put: operations["update_forwarder"];
         post?: never;
@@ -278,9 +308,10 @@ export interface paths {
          * List Forwarder Deliveries
          * @description List delivery log entries for a forwarder.
          *
-         *     Default sort is `-created_at` (newest first). Filter by `status`
-         *     (`SUCCEEDED` or `FAILED`, case-insensitive), by `event`, or by a
-         *     `created_at` range using interval notation
+         *     Scoped to the resolved environment — only that environment's deliveries
+         *     for the forwarder are shown. Default sort is `-created_at` (newest
+         *     first). Filter by `status` (`SUCCEEDED` or `FAILED`, case-insensitive),
+         *     by `event`, or by a `created_at` range using interval notation
          *     (e.g. `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
@@ -305,7 +336,10 @@ export interface paths {
          * Retry Forwarder Delivery
          * @description Retry a single failed delivery.
          *
-         *     Returns the new delivery log entry. The prior entry is left in place.
+         *     The delivery is named by id, so it is authorized against the caller's
+         *     permitted environment set: a delivery in an environment the caller
+         *     can't access returns `404` (existence never leaks). Returns the new
+         *     delivery log entry. The prior entry is left in place.
          */
         post: operations["retry_forwarder_delivery"];
         delete?: never;
@@ -325,10 +359,13 @@ export interface paths {
         put?: never;
         /**
          * Retry Failed Forwarder Deliveries
-         * @description Retry every failed delivery for this forwarder.
+         * @description Retry every failed delivery for this forwarder in the resolved environment.
          *
-         *     Each failed delivery is re-attempted using the forwarder's current
-         *     configuration and the original event. Returns the counts.
+         *     Scoped to the resolved environment (a single-environment credential
+         *     implies it; otherwise send the `X-Smplkit-Environment` header): only
+         *     that environment's failed deliveries are re-attempted, each using the
+         *     forwarder's effective configuration for that environment and the
+         *     original event. Returns the counts.
          */
         post: operations["retry_failed_forwarder_deliveries"];
         delete?: never;
@@ -420,8 +457,9 @@ export interface paths {
          *
          *     The resource `id` is the slug itself. Default sort is `key`
          *     ascending; pass `sort=-key` for descending. Useful for populating
-         *     filter dropdowns in a UI. Results are scoped to the resource types
-         *     visible under the account's current plan.
+         *     filter dropdowns in a UI. Results are scoped to the resolved
+         *     environment and to the resource types visible under the account's
+         *     current plan.
          */
         get: operations["list_resource_types"];
         put?: never;
@@ -444,9 +482,9 @@ export interface paths {
          * @description List the distinct `event_type` slugs recorded for this account.
          *
          *     Default sort is `key` ascending; pass `sort=-key` for descending.
-         *     Without `filter[resource_type]`, returns one row per distinct
-         *     event_type. With `filter[resource_type]`, returns the event_types
-         *     recorded for that specific resource type.
+         *     Scoped to the resolved environment. Without `filter[resource_type]`,
+         *     returns one row per distinct event_type. With `filter[resource_type]`,
+         *     returns the event_types recorded for that specific resource type.
          */
         get: operations["list_event_types"];
         put?: never;
@@ -469,8 +507,8 @@ export interface paths {
          * @description List the distinct `category` values recorded for this account.
          *
          *     The resource `id` is the category value itself. Default sort is
-         *     `key` ascending; pass `sort=-key` for descending. Useful for
-         *     populating filter dropdowns in a UI.
+         *     `key` ascending; pass `sort=-key` for descending. Scoped to the
+         *     resolved environment. Useful for populating filter dropdowns in a UI.
          */
         get: operations["list_categories"];
         put?: never;
@@ -600,6 +638,11 @@ export interface components {
              */
             do_not_forward: boolean;
             /**
+             * Environment
+             * @description The environment the event occurred in. Always present on read. Resolved when the event is recorded — from a single-environment credential, or the `X-Smplkit-Environment` header for multi-environment credentials — and never set on the request body. The same content recorded in two environments produces two distinct events.
+             */
+            readonly environment?: string | null;
+            /**
              * Created At
              * @description When the event was received and recorded.
              */
@@ -666,6 +709,7 @@ export interface components {
          *         },
          *         "description": "Alice signed up via the marketing site.",
          *         "do_not_forward": false,
+         *         "environment": "production",
          *         "event_type": "user.created",
          *         "idempotency_key": "auto-1234abcd",
          *         "occurred_at": "2026-05-06T20:00:00Z",
@@ -1041,10 +1085,10 @@ export interface components {
             forwarder_type: components["schemas"]["ForwarderType"];
             /**
              * Enabled
-             * @description Whether the forwarder is currently delivering events. Set to `false` to pause deliveries without deleting the forwarder.
-             * @default true
+             * @description Always false. Enablement is per-environment: a forwarder delivers in an environment only when `environments[<env>].enabled` is true. The base value is pinned false and cannot be set.
+             * @default false
              */
-            enabled: boolean;
+            readonly enabled: boolean;
             /**
              * Filter
              * @description JSON Logic expression evaluated against each event. The event is delivered only if the expression returns truthy. Omit to deliver every event.
@@ -1062,8 +1106,15 @@ export interface components {
              * @description Template applied to each event before delivery. The shape depends on ``transform_type``: for `JSONATA`, a string containing a JSONata expression. Omit to deliver the event JSON unchanged.
              */
             transform?: unknown | null;
-            /** @description Transport-specific delivery configuration. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. Branded vendor types (everything except `http`) constrain the configuration against a per-vendor template — see `GET /api/v1/forwarder_types` for the URL pattern, fixed headers, and customer-supplied placeholders for each type. */
+            /** @description Base delivery configuration template. Shape is discriminated by ``forwarder_type``; today all destination types use ``HttpConfiguration``. Branded vendor types (everything except `http`) constrain the configuration against a per-vendor template — see `GET /api/v1/forwarder_types` for the URL pattern, fixed headers, and customer-supplied placeholders for each type. A per-environment override in `environments` replaces this template for that environment. */
             configuration: components["schemas"]["HttpConfiguration"];
+            /**
+             * Environments
+             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry sets `enabled` (whether the forwarder delivers in that environment) and an optional `configuration` override (omit to inherit the base `configuration`). A forwarder with no entry for an environment is disabled there. Every referenced environment must exist and be managed for the account.
+             */
+            environments?: {
+                [key: string]: components["schemas"]["ForwarderEnvironment"];
+            };
             /**
              * Created At
              * @description When the forwarder was created.
@@ -1116,7 +1167,11 @@ export interface components {
          *           "url": "https://http-intake.logs.datadoghq.com/api/v2/logs"
          *         },
          *         "description": "Forwards user.* events to the prod Datadog tenant.",
-         *         "enabled": true,
+         *         "environments": {
+         *           "production": {
+         *             "enabled": true
+         *           }
+         *         },
          *         "filter": {
          *           "==": [
          *             {
@@ -1153,6 +1208,11 @@ export interface components {
          * @description A log entry for one attempt to deliver an event to a forwarder.
          */
         ForwarderDelivery: {
+            /**
+             * Environment
+             * @description Environment the delivered event occurred in. Deliveries are scoped to one environment.
+             */
+            environment: string;
             /**
              * Forwarder
              * Format: uuid
@@ -1245,6 +1305,7 @@ export interface components {
          *       "attributes": {
          *         "attempt_number": 1,
          *         "created_at": "2026-05-07T12:00:01.234Z",
+         *         "environment": "production",
          *         "event": "33333333-4444-5555-6666-777777777777",
          *         "forwarder": "11111111-2222-3333-4444-555555555555",
          *         "latency_ms": 187,
@@ -1283,6 +1344,20 @@ export interface components {
          */
         ForwarderDeliveryResponse: {
             data: components["schemas"]["ForwarderDeliveryResource"];
+        };
+        /**
+         * ForwarderEnvironment
+         * @description Per-environment override for a forwarder's enablement and configuration.
+         */
+        ForwarderEnvironment: {
+            /**
+             * Enabled
+             * @description Whether the forwarder delivers events in this environment. A forwarder is enabled in an environment only via this field — the base `enabled` is always false.
+             * @default false
+             */
+            enabled: boolean;
+            /** @description Per-environment delivery configuration override. Omit to inherit the forwarder's base `configuration`. When present, it fully replaces the base configuration for this environment and is validated against the same per-vendor template. */
+            configuration?: components["schemas"]["HttpConfiguration"] | null;
         };
         /**
          * ForwarderListResponse
@@ -1324,7 +1399,12 @@ export interface components {
          *         },
          *         "created_at": "2026-05-07T12:00:00Z",
          *         "description": "Forwards user.* events to the prod Datadog tenant.",
-         *         "enabled": true,
+         *         "enabled": false,
+         *         "environments": {
+         *           "production": {
+         *             "enabled": true
+         *           }
+         *         },
          *         "filter": {
          *           "==": [
          *             {
@@ -2099,7 +2179,6 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[forwarder_type]"?: string | null;
-                "filter[enabled]"?: boolean | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `updated_at`, `-updated_at`. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
