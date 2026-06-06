@@ -1575,19 +1575,18 @@ export interface components {
         };
         /**
          * HttpConfiguration
-         * @description HTTP request configuration used to deliver an event to the destination.
+         * @description HTTP request configuration for delivering a payload to a destination.
          *
-         *     Used when the parent forwarder's ``forwarder_type`` is one of the
-         *     HTTP-family destinations (``HTTP``, ``DATADOG``, ``SPLUNK_HEC``,
-         *     ``SUMO_LOGIC``, ``NEW_RELIC``, ``HONEYCOMB``, ``ELASTIC``). When other
-         *     transports land (``FTP``, ``SQS``, …) their own configuration schemas
-         *     will join this one as members of a discriminated union under the
-         *     ``configuration`` field of ``Forwarder``.
+         *     The shared base shape for any product that posts to a customer-supplied
+         *     HTTP destination. Smpl Audit forwarders use it directly; Smpl Jobs
+         *     extends it (adding ``body`` and ``timeout``). When other transports land
+         *     (``FTP``, ``SQS``, …) their own configuration schemas will join this one
+         *     as members of a discriminated union under a ``configuration`` field.
          */
         HttpConfiguration: {
             /**
              * Method
-             * @description HTTP method used when delivering an event.
+             * @description HTTP method used when delivering the request.
              * @default POST
              * @enum {string}
              */
@@ -1599,12 +1598,12 @@ export interface components {
             url: string;
             /**
              * Headers
-             * @description HTTP headers attached to each delivery request.
+             * @description HTTP headers attached to each request.
              */
             headers?: components["schemas"]["HttpHeader"][];
             /**
              * Success Status
-             * @description HTTP response status that indicates a successful delivery. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
+             * @description HTTP response status that indicates success. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
              * @default 2xx
              */
             success_status: string;
@@ -1622,7 +1621,7 @@ export interface components {
         };
         /**
          * HttpHeader
-         * @description A single HTTP header attached to a forwarder delivery request.
+         * @description A single HTTP header attached to an outbound request.
          *
          *     Header values are encrypted at the application layer before
          *     persistence regardless of header name; the wire representation here
