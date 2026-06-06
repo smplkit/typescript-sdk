@@ -48,6 +48,14 @@ export interface AuditEvent {
    * forwarder delivery regardless of any matching forwarder filter.
    */
   doNotForward: boolean;
+  /**
+   * The environment the event was recorded in. Read-only and always
+   * present on reads — the audit service resolves it when the event is
+   * recorded (from a single-environment credential, or from the runtime
+   * SDK's configured environment, which the SDK sends on every recording
+   * call). Never set on the recording request body.
+   */
+  environment: string | null;
 }
 
 /**
@@ -320,6 +328,37 @@ export class HttpConfiguration {
 }
 
 /**
+ * Per-environment enablement and optional configuration override for a
+ * forwarder.
+ *
+ * A forwarder delivers events in a given environment only when that
+ * environment has an entry in {@link Forwarder.environments} with
+ * `enabled: true`. An environment with no entry (or `enabled: false`)
+ * receives no deliveries.
+ */
+export class ForwarderEnvironment {
+  /**
+   * Whether the forwarder delivers events in this environment. Defaults
+   * to `false`.
+   */
+  enabled: boolean;
+  /**
+   * Optional per-environment destination configuration that fully
+   * replaces the forwarder's base {@link Forwarder.configuration} for
+   * this environment. `null` (the default) inherits the base
+   * configuration. As with the base configuration, header values are
+   * plaintext on writes and returned redacted on reads — re-supply real
+   * values before {@link Forwarder.save}.
+   */
+  configuration: HttpConfiguration | null;
+
+  constructor(fields: { enabled?: boolean; configuration?: HttpConfiguration | null } = {}) {
+    this.enabled = fields.enabled ?? false;
+    this.configuration = fields.configuration ?? null;
+  }
+}
+
+/**
  * A SIEM streaming forwarder configured on the customer's account.
  *
  * Active-record style: mutate fields directly and call {@link save} to
@@ -342,10 +381,21 @@ export class Forwarder {
   /** Destination request configuration. */
   configuration: HttpConfiguration;
   /**
-   * When `false`, the audit service skips delivery for this forwarder
-   * but still records `filtered_out` deliveries.
+   * Read-only. Always `false` — the base enablement is pinned off.
+   * Whether a forwarder actually delivers is decided per environment via
+   * {@link environments}; mutating this field has no effect on the
+   * server.
    */
-  enabled: boolean;
+  readonly enabled: boolean;
+  /**
+   * Per-environment overrides keyed by environment key (e.g.
+   * `"production"`, `"staging"`). A forwarder delivers in an environment
+   * only when `environments[env].enabled` is `true`. Each entry may carry
+   * an optional {@link HttpConfiguration} override; omit it to inherit
+   * the base {@link configuration}. Every referenced environment must
+   * exist and be managed for the account.
+   */
+  environments: Record<string, ForwarderEnvironment>;
   /** Optional free-text description. */
   description: string | null;
   /**
@@ -394,6 +444,7 @@ export class Forwarder {
       forwarderType: ForwarderType;
       configuration: HttpConfiguration;
       enabled?: boolean;
+      environments?: Record<string, ForwarderEnvironment> | null;
       description?: string | null;
       filter?: Record<string, unknown> | null;
       transform?: unknown;
@@ -409,7 +460,11 @@ export class Forwarder {
     this.name = fields.name;
     this.forwarderType = fields.forwarderType;
     this.configuration = fields.configuration;
-    this.enabled = fields.enabled ?? true;
+    // `enabled` is server-pinned false; we keep the field so reads
+    // round-trip the server value, but enablement is driven by
+    // `environments` (see the field docs).
+    this.enabled = fields.enabled ?? false;
+    this.environments = fields.environments ?? {};
     this.description = fields.description ?? null;
     this.filter = fields.filter ?? null;
     this.transform = fields.transform ?? null;
@@ -454,7 +509,11 @@ export class Forwarder {
     this.name = other.name;
     this.forwarderType = other.forwarderType;
     this.configuration = other.configuration;
-    this.enabled = other.enabled;
+    // `enabled` is declared readonly to the public API (it's server-pinned
+    // false and inert), but the internal refresh still round-trips
+    // whatever the server returned.
+    (this as { enabled: boolean }).enabled = other.enabled;
+    this.environments = other.environments;
     this.description = other.description;
     this.filter = other.filter;
     this.transform = other.transform;
@@ -483,8 +542,6 @@ export interface ForwarderModelClient {
 export interface ListForwardersParams {
   /** Filter to a single forwarder type. */
   forwarderType?: ForwarderType;
-  /** Filter to forwarders matching this enabled state. */
-  enabled?: boolean;
   /** 1-based page number to return. Defaults to 1. */
   pageNumber?: number;
   /** Items per page (1–1000). Defaults to 1000. */

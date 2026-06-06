@@ -17,6 +17,7 @@ import type { components, paths } from "../generated/audit.d.ts";
 import { SmplError, SmplkitConnectionError, throwForStatus } from "../errors.js";
 import {
   Forwarder,
+  ForwarderEnvironment,
   ForwarderType,
   HttpConfiguration,
   HttpMethod,
@@ -31,6 +32,7 @@ import {
 type AuditHttp = ReturnType<typeof createClient<paths>>;
 type GenForwarder = components["schemas"]["Forwarder"];
 type GenHttpConfiguration = components["schemas"]["HttpConfiguration"];
+type GenForwarderEnvironment = components["schemas"]["ForwarderEnvironment"];
 type GenForwarderCreateRequest = components["schemas"]["ForwarderCreateRequest"];
 type GenForwarderRequest = components["schemas"]["ForwarderRequest"];
 
@@ -112,13 +114,79 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
   });
 }
 
+function _environmentsToWire(environments: Record<string, ForwarderEnvironment>): {
+  [key: string]: GenForwarderEnvironment;
+} {
+  // Per-environment `configuration` overrides are sent as full
+  // HttpConfiguration payloads (plaintext headers in), mirroring the
+  // base configuration's round-trip semantics.
+  const out: { [key: string]: GenForwarderEnvironment } = {};
+  for (const [envKey, env] of Object.entries(environments)) {
+    out[envKey] = {
+      enabled: env.enabled,
+      configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
+    };
+  }
+  return out;
+}
+
+function _environmentsFromWire(
+  raw: Record<string, unknown> | undefined,
+): Record<string, ForwarderEnvironment> {
+  const out: Record<string, ForwarderEnvironment> = {};
+  for (const [envKey, value] of Object.entries(raw ?? {})) {
+    const v = (value ?? {}) as {
+      enabled?: unknown;
+      configuration?: Record<string, unknown> | null;
+    };
+    out[envKey] = new ForwarderEnvironment({
+      enabled: Boolean(v.enabled ?? false),
+      configuration:
+        v.configuration == null
+          ? null
+          : _configurationFromWire(v.configuration as Record<string, unknown>),
+    });
+  }
+  return out;
+}
+
+function _normalizeEnvironments(
+  environments:
+    | Record<
+        string,
+        ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
+      >
+    | null
+    | undefined,
+): Record<string, ForwarderEnvironment> {
+  // Accept either ForwarderEnvironment instances or plain objects
+  // (`{ enabled: true, configuration: new HttpConfiguration(...) }`) so
+  // callers can use the lightweight literal form without importing the
+  // class.
+  const out: Record<string, ForwarderEnvironment> = {};
+  for (const [envKey, value] of Object.entries(environments ?? {})) {
+    out[envKey] =
+      value instanceof ForwarderEnvironment
+        ? value
+        : new ForwarderEnvironment({
+            enabled: value.enabled ?? false,
+            configuration: value.configuration ?? null,
+          });
+  }
+  return out;
+}
+
 function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
+  // The base `enabled` is server-pinned false (ADR-055); we don't send
+  // it. Enablement travels entirely through `environments`.
   const attrs: GenForwarder = {
     name: forwarder.name,
     forwarder_type: forwarder.forwarderType,
-    enabled: forwarder.enabled,
     configuration: _configurationToWire(forwarder.configuration),
-  };
+  } as GenForwarder;
+  if (Object.keys(forwarder.environments).length > 0) {
+    attrs.environments = _environmentsToWire(forwarder.environments);
+  }
   if (forwarder.description !== null) attrs.description = forwarder.description;
   if (forwarder.filter !== null) {
     attrs.filter = forwarder.filter as { [key: string]: unknown };
@@ -159,7 +227,10 @@ function _forwarderFromResource(
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
     forwarderType: a.forwarder_type as ForwarderType,
-    enabled: Boolean(a.enabled ?? true),
+    // The base `enabled` is server-pinned false; round-trip whatever the
+    // server returned (always false) without assuming a default of true.
+    enabled: Boolean(a.enabled ?? false),
+    environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
     filter: (a.filter as Record<string, unknown> | null) ?? null,
     transformType: (a.transform_type as TransformType | null) ?? null,
     transform: (a.transform as string | null) ?? null,
@@ -193,7 +264,16 @@ export class ForwardersClient implements ForwarderModelClient {
    *                               Headers carry credentials and are
    *                               encrypted at rest server-side; reads
    *                               return them redacted.
-   * @param fields.enabled         Whether the forwarder is active. Defaults true.
+   * @param fields.environments    Per-environment overrides keyed by
+   *                               environment key (e.g. `"production"`). A
+   *                               forwarder delivers in an environment only
+   *                               when that environment's entry has
+   *                               `enabled: true`. Each entry may carry an
+   *                               optional `configuration` override; omit it
+   *                               to inherit the base `configuration`. Omit
+   *                               the map to create a forwarder that
+   *                               delivers nowhere until enabled per
+   *                               environment.
    * @param fields.description     Optional free-text description.
    * @param fields.filter          Optional JSON Logic filter; events that
    *                               don't match are recorded as
@@ -215,7 +295,10 @@ export class ForwardersClient implements ForwarderModelClient {
       name: string;
       forwarderType: ForwarderType;
       configuration: HttpConfiguration;
-      enabled?: boolean;
+      environments?: Record<
+        string,
+        ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
+      > | null;
       description?: string | null;
       filter?: Record<string, unknown> | null;
       transformType?: TransformType | null;
@@ -227,7 +310,7 @@ export class ForwardersClient implements ForwarderModelClient {
       name: fields.name,
       forwarderType: fields.forwarderType,
       configuration: fields.configuration,
-      enabled: fields.enabled,
+      environments: _normalizeEnvironments(fields.environments),
       description: fields.description,
       filter: fields.filter,
       transformType: fields.transformType,
@@ -247,7 +330,6 @@ export class ForwardersClient implements ForwarderModelClient {
   async list(params: ListForwardersParams = {}): Promise<ListForwardersPage> {
     const query: Record<string, string | number | boolean> = {};
     if (params.forwarderType !== undefined) query["filter[forwarder_type]"] = params.forwarderType;
-    if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;

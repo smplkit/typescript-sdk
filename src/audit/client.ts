@@ -86,6 +86,7 @@ function _eventFromResource(resource: {
     data: (attrs.data as Record<string, unknown> | undefined) ?? {},
     idempotencyKey: String(attrs.idempotency_key ?? ""),
     doNotForward: Boolean(attrs.do_not_forward ?? false),
+    environment: (attrs.environment as string | null) ?? null,
   };
 }
 
@@ -125,11 +126,23 @@ class EventsClient {
   constructor(opts: {
     apiKey: string;
     baseUrl: string;
+    environment?: string;
     timeoutMs?: number;
     fetch?: typeof fetch;
     extraHeaders?: Record<string, string>;
   }) {
     const baseUrl = opts.baseUrl.replace(/\/$/, "");
+
+    // Runtime audit ops are environment-scoped: record / list / get /
+    // discovery all resolve their environment from the
+    // `X-Smplkit-Environment` request header (ADR-055). We stamp it once
+    // at the client level from the SDK's configured runtime environment so
+    // every generated call carries it. A caller-supplied `extraHeaders`
+    // entry of the same name wins (explicit override), so the env header
+    // goes in before `extraHeaders`.
+    const headers: Record<string, string> = {};
+    if (opts.environment !== undefined) headers["X-Smplkit-Environment"] = opts.environment;
+    Object.assign(headers, opts.extraHeaders ?? {});
 
     // openapi-fetch wraps the runtime fetch and provides typed
     // GET/POST/PUT/DELETE methods keyed off the OpenAPI paths interface.
@@ -137,7 +150,7 @@ class EventsClient {
       baseUrl,
       fetch: opts.fetch,
       headers: {
-        ...(opts.extraHeaders ?? {}),
+        ...headers,
         Authorization: `Bearer ${opts.apiKey}`,
         Accept: JSONAPI_CONTENT_TYPE,
         "Content-Type": JSONAPI_CONTENT_TYPE,
@@ -307,6 +320,7 @@ export class AuditClient {
   constructor(opts: {
     apiKey: string;
     baseUrl: string;
+    environment?: string;
     timeoutMs?: number;
     fetch?: typeof fetch;
     extraHeaders?: Record<string, string>;

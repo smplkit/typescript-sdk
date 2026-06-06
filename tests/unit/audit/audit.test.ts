@@ -366,6 +366,171 @@ describe("AuditClient — extraHeaders", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Environment scoping (ADR-055) — X-Smplkit-Environment header injection
+// ---------------------------------------------------------------------------
+
+describe("AuditClient — environment header injection", () => {
+  function _captureHeaders(seen: Headers[]): typeof fetch {
+    return vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      seen.push(req.headers);
+      return new Response(
+        JSON.stringify({
+          data: {
+            id: "00000000-0000-0000-0000-000000000001",
+            type: "event",
+            attributes: {
+              event_type: "x",
+              resource_type: "y",
+              resource_id: "1",
+              occurred_at: "2026-05-06T12:00:00+00:00",
+              created_at: "2026-05-06T12:00:01+00:00",
+              actor_type: "API_KEY",
+              actor_id: null,
+              actor_label: "",
+              data: {},
+              idempotency_key: "",
+              environment: "production",
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    }) as typeof fetch;
+  }
+
+  test("stamps X-Smplkit-Environment on record from the configured environment", async () => {
+    const seen: Headers[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      fetch: _captureHeaders(seen),
+    });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    expect(seen[0]!.get("x-smplkit-environment")).toBe("production");
+    await client._close();
+  });
+
+  test("stamps X-Smplkit-Environment on read paths (list / get)", async () => {
+    const seen: Headers[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "staging",
+      fetch: vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+        const req =
+          urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+        seen.push(req.headers);
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.api+json" },
+        });
+      }) as typeof fetch,
+    });
+    await client.events.list();
+    expect(seen[0]!.get("x-smplkit-environment")).toBe("staging");
+    await client._close();
+  });
+
+  test("omits the header when no environment is configured", async () => {
+    const seen: Headers[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: _captureHeaders(seen),
+    });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    expect(seen[0]!.has("x-smplkit-environment")).toBe(false);
+    await client._close();
+  });
+
+  test("an explicit extraHeaders X-Smplkit-Environment overrides the configured one", async () => {
+    const seen: Headers[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      extraHeaders: { "X-Smplkit-Environment": "override-env" },
+      fetch: _captureHeaders(seen),
+    });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    expect(seen[0]!.get("x-smplkit-environment")).toBe("override-env");
+    await client._close();
+  });
+
+  test("surfaces the read-only environment field on a parsed event", async () => {
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                id: "00000000-0000-0000-0000-000000000009",
+                type: "event",
+                attributes: {
+                  event_type: "invoice.created",
+                  resource_type: "invoice",
+                  resource_id: "inv-9",
+                  occurred_at: "2026-05-06T12:00:00+00:00",
+                  created_at: "2026-05-06T12:00:01+00:00",
+                  actor_type: "API_KEY",
+                  actor_id: null,
+                  actor_label: "",
+                  data: {},
+                  idempotency_key: "k",
+                  environment: "production",
+                },
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+          ),
+      ) as typeof fetch,
+    });
+    const ev = await client.events.get("00000000-0000-0000-0000-000000000009");
+    expect(ev.environment).toBe("production");
+    await client._close();
+  });
+
+  test("environment is null when the wire omits it", async () => {
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                id: "00000000-0000-0000-0000-000000000010",
+                type: "event",
+                attributes: {
+                  event_type: "x",
+                  resource_type: "y",
+                  resource_id: "z",
+                  occurred_at: "2026-05-06T12:00:00+00:00",
+                  created_at: "2026-05-06T12:00:01+00:00",
+                  data: {},
+                },
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+          ),
+      ) as typeof fetch,
+    });
+    const ev = await client.events.get("00000000-0000-0000-0000-000000000010");
+    expect(ev.environment).toBeNull();
+    await client._close();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // do_not_forward kwarg on event create
 // ---------------------------------------------------------------------------
 
