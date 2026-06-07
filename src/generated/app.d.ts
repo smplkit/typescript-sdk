@@ -800,7 +800,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Group Membership
-         * @description Remove a user from a group. Returns `409` when the membership is the user's `default` membership — every user must remain in the `default` group per ADR-055 §4.
+         * @description Remove a user from a group. Returns `409` when removing the membership would leave the user with no group memberships in this account — every user must belong to at least one group.
          */
         delete: operations["delete_group_membership"];
         options?: never;
