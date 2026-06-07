@@ -399,6 +399,16 @@ export class Forwarder {
   /** Optional free-text description. */
   description: string | null;
   /**
+   * When `true`, this forwarder also receives smplkit's own platform
+   * change events — the audit events smplkit records about your own
+   * resources (flag, configuration, and similar changes). Each such event
+   * is delivered through every environment this forwarder is
+   * {@link environments enabled} in, using that environment's resolved
+   * configuration. Defaults to `false`: platform change events are not
+   * forwarded unless you opt in.
+   */
+  forwardSmplkitEvents: boolean;
+  /**
    * Optional JSON Logic expression evaluated per event. When set, events
    * that don't match are recorded as `filtered_out` deliveries instead
    * of being POSTed to the destination.
@@ -446,6 +456,7 @@ export class Forwarder {
       enabled?: boolean;
       environments?: Record<string, ForwarderEnvironment> | null;
       description?: string | null;
+      forwardSmplkitEvents?: boolean;
       filter?: Record<string, unknown> | null;
       transform?: unknown;
       transformType?: TransformType | null;
@@ -466,6 +477,7 @@ export class Forwarder {
     this.enabled = fields.enabled ?? false;
     this.environments = fields.environments ?? {};
     this.description = fields.description ?? null;
+    this.forwardSmplkitEvents = fields.forwardSmplkitEvents ?? false;
     this.filter = fields.filter ?? null;
     this.transform = fields.transform ?? null;
     this.transformType = fields.transformType ?? null;
@@ -515,6 +527,7 @@ export class Forwarder {
     (this as { enabled: boolean }).enabled = other.enabled;
     this.environments = other.environments;
     this.description = other.description;
+    this.forwardSmplkitEvents = other.forwardSmplkitEvents;
     this.filter = other.filter;
     this.transform = other.transform;
     this.transformType = other.transformType;

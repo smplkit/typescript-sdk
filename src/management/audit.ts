@@ -183,6 +183,7 @@ function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
     name: forwarder.name,
     forwarder_type: forwarder.forwarderType,
     configuration: _configurationToWire(forwarder.configuration),
+    forward_smplkit_events: forwarder.forwardSmplkitEvents,
   } as GenForwarder;
   if (Object.keys(forwarder.environments).length > 0) {
     attrs.environments = _environmentsToWire(forwarder.environments);
@@ -231,6 +232,7 @@ function _forwarderFromResource(
     // server returned (always false) without assuming a default of true.
     enabled: Boolean(a.enabled ?? false),
     environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
+    forwardSmplkitEvents: Boolean(a.forward_smplkit_events ?? false),
     filter: (a.filter as Record<string, unknown> | null) ?? null,
     transformType: (a.transform_type as TransformType | null) ?? null,
     transform: (a.transform as string | null) ?? null,
@@ -275,6 +277,12 @@ export class ForwardersClient implements ForwarderModelClient {
    *                               delivers nowhere until enabled per
    *                               environment.
    * @param fields.description     Optional free-text description.
+   * @param fields.forwardSmplkitEvents
+   *                               When `true`, the forwarder also receives
+   *                               smplkit's own platform change events (flag,
+   *                               configuration, and similar changes),
+   *                               delivered through every environment it is
+   *                               enabled in. Defaults to `false`.
    * @param fields.filter          Optional JSON Logic filter; events that
    *                               don't match are recorded as
    *                               `filtered_out` deliveries.
@@ -300,6 +308,7 @@ export class ForwardersClient implements ForwarderModelClient {
         ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
       > | null;
       description?: string | null;
+      forwardSmplkitEvents?: boolean;
       filter?: Record<string, unknown> | null;
       transformType?: TransformType | null;
       transform?: unknown;
@@ -312,6 +321,7 @@ export class ForwardersClient implements ForwarderModelClient {
       configuration: fields.configuration,
       environments: _normalizeEnvironments(fields.environments),
       description: fields.description,
+      forwardSmplkitEvents: fields.forwardSmplkitEvents,
       filter: fields.filter,
       transformType: fields.transformType,
       transform: fields.transform,
