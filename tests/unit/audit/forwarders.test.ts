@@ -173,6 +173,19 @@ describe("mgmt.audit.forwarders.new", () => {
     expect(forwarder.filter).toBeNull();
     expect(forwarder.transform).toBeNull();
     expect(forwarder.transformType).toBeNull();
+    // forwardSmplkitEvents is opt-in; an omitted value defaults false.
+    expect(forwarder.forwardSmplkitEvents).toBe(false);
+  });
+
+  test("forwardSmplkitEvents reflects the value passed to new()", () => {
+    const mgmt = makeClient();
+    const fwd = mgmt.audit.forwarders.new(FWD_ID, {
+      name: "Datadog production",
+      forwarderType: ForwarderType.DATADOG,
+      configuration: new HttpConfiguration({ url: "https://siem.example.com/in" }),
+      forwardSmplkitEvents: true,
+    });
+    expect(fwd.forwardSmplkitEvents).toBe(true);
   });
 
   test("HttpConfiguration defaults method=POST and success_status=2xx", () => {
@@ -261,6 +274,34 @@ describe("Forwarder.save() — create", () => {
     const req = mockFetch.mock.calls[0]![0] as Request;
     const body = JSON.parse(await req.text());
     expect(body.data.attributes.description).toBe("internal notes");
+  });
+
+  test("create sends forward_smplkit_events: false by default", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _forwarderResource() }, 201));
+    const { forwarder } = _newForwarder();
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.forward_smplkit_events).toBe(false);
+  });
+
+  test("create sends forward_smplkit_events: true when opted in", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _forwarderResource({ forward_smplkit_events: true }) }, 201),
+    );
+    const mgmt = makeClient();
+    const forwarder = mgmt.audit.forwarders.new(FWD_ID, {
+      name: "Datadog production",
+      forwarderType: ForwarderType.DATADOG,
+      configuration: new HttpConfiguration({ url: "https://siem.example.com/in" }),
+      forwardSmplkitEvents: true,
+    });
+    await forwarder.save();
+    const req = mockFetch.mock.calls[0]![0] as Request;
+    const body = JSON.parse(await req.text());
+    expect(body.data.attributes.forward_smplkit_events).toBe(true);
+    // The server echo refreshes the field on the instance.
+    expect(forwarder.forwardSmplkitEvents).toBe(true);
   });
 
   test("wire body uses `configuration`, not `http`", async () => {
@@ -358,6 +399,29 @@ describe("Forwarder.save() — update", () => {
     const reqs = mockFetch.mock.calls.map((c) => c[0]) as Request[];
     expect(reqs[1]!.method).toBe("PUT");
     expect(fwd.name).toBe("Renamed");
+  });
+
+  test("update toggles forward_smplkit_events and refreshes from the response", async () => {
+    const mgmt = makeClient();
+    // GET returns a forwarder with the flag off.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _forwarderResource({ forward_smplkit_events: false }) }),
+    );
+    // PUT returns the same forwarder with the flag on.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _forwarderResource({ forward_smplkit_events: true }) }),
+    );
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    expect(fwd.forwardSmplkitEvents).toBe(false);
+    fwd.forwardSmplkitEvents = true;
+    await fwd.save();
+
+    const reqs = mockFetch.mock.calls.map((c) => c[0]) as Request[];
+    expect(reqs[1]!.method).toBe("PUT");
+    const body = JSON.parse(await reqs[1]!.text());
+    expect(body.data.attributes.forward_smplkit_events).toBe(true);
+    // _apply copies the server-authoritative value back onto the instance.
+    expect(fwd.forwardSmplkitEvents).toBe(true);
   });
 
   test("propagates SmplError on update failure", async () => {
@@ -484,6 +548,15 @@ describe("mgmt.audit.forwarders.get", () => {
     expect(fwd._client).not.toBeNull();
   });
 
+  test("surfaces forward_smplkit_events from the read", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _forwarderResource({ forward_smplkit_events: true }) }),
+    );
+    const mgmt = makeClient();
+    const fwd = await mgmt.audit.forwarders.get(FWD_ID);
+    expect(fwd.forwardSmplkitEvents).toBe(true);
+  });
+
   test("throws SmplNotFoundError on 404", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(
@@ -590,6 +663,8 @@ describe("Forwarder defaults from sparse wire shape", () => {
     expect(fwd.description).toBeNull();
     expect(fwd.transformType).toBeNull();
     expect(fwd.transform).toBeNull();
+    // Absent `forward_smplkit_events` on the wire defaults to false.
+    expect(fwd.forwardSmplkitEvents).toBe(false);
     // Absent `environments` on the wire defaults to an empty map.
     expect(fwd.environments).toEqual({});
   });
