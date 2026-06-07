@@ -109,8 +109,10 @@ export interface paths {
          * Search Events
          * @description Search audit events with column filters and an optional JSON Logic expression.
          *
-         *     Scoped to the resolved environment (a single-environment credential
-         *     implies it; otherwise send the `X-Smplkit-Environment` header).
+         *     Scoped by `filter[environment]` (a comma-separated set). When omitted, a
+         *     single-environment credential is implied; otherwise send the
+         *     `X-Smplkit-Environment` header. The reserved `smplkit` value selects
+         *     platform change events smplkit records about your own resources.
          *
          *     Without a JSON Logic `filter`: behaves like `GET /api/v1/events`
          *     with the same column filters.
@@ -457,9 +459,9 @@ export interface paths {
          *
          *     The resource `id` is the slug itself. Default sort is `key`
          *     ascending; pass `sort=-key` for descending. Useful for populating
-         *     filter dropdowns in a UI. Results are scoped to the resolved
-         *     environment and to the resource types visible under the account's
-         *     current plan.
+         *     filter dropdowns in a UI. Results are scoped to the selected
+         *     environments (see `filter[environment]`); platform resource types
+         *     appear under the reserved `smplkit` value.
          */
         get: operations["list_resource_types"];
         put?: never;
@@ -482,9 +484,10 @@ export interface paths {
          * @description List the distinct `event_type` slugs recorded for this account.
          *
          *     Default sort is `key` ascending; pass `sort=-key` for descending.
-         *     Scoped to the resolved environment. Without `filter[resource_type]`,
-         *     returns one row per distinct event_type. With `filter[resource_type]`,
-         *     returns the event_types recorded for that specific resource type.
+         *     Scoped to the selected environments (see `filter[environment]`).
+         *     Without `filter[resource_type]`, returns one row per distinct
+         *     event_type. With `filter[resource_type]`, returns the event_types
+         *     recorded for that specific resource type.
          */
         get: operations["list_event_types"];
         put?: never;
@@ -508,7 +511,8 @@ export interface paths {
          *
          *     The resource `id` is the category value itself. Default sort is
          *     `key` ascending; pass `sort=-key` for descending. Scoped to the
-         *     resolved environment. Useful for populating filter dropdowns in a UI.
+         *     selected environments (see `filter[environment]`). Useful for
+         *     populating filter dropdowns in a UI.
          */
         get: operations["list_categories"];
         put?: never;
@@ -788,6 +792,11 @@ export interface components {
             filter?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Filter[Environment]
+             * @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results are scoped to your single accessible environment; send the `X-Smplkit-Environment` header instead if you can access more than one. The reserved value `smplkit` selects platform change events that smplkit records about your own resources (flags, configuration, and so on); these are not tied to a deployment environment and are readable regardless of which environments you manage.
+             */
+            "filter[environment]"?: string | null;
             /**
              * Filter[Event Type]
              * @description Exact match on the event's `event_type` field.
@@ -1090,6 +1099,12 @@ export interface components {
              */
             readonly enabled: boolean;
             /**
+             * Forward Smplkit Events
+             * @description When true, this forwarder also receives platform change events that smplkit records about your own resources (flag, configuration, and similar changes). Each such event is delivered through every environment this forwarder is enabled in, using that environment's resolved configuration. Defaults to false — platform change events are not forwarded unless you opt in. Independent of the per-environment `enabled` settings, since platform change events are not tied to a deployment environment.
+             * @default false
+             */
+            forward_smplkit_events: boolean;
+            /**
              * Filter
              * @description JSON Logic expression evaluated against each event. The event is delivered only if the expression returns truthy. Omit to deliver every event.
              */
@@ -1180,6 +1195,7 @@ export interface components {
          *             "user.created"
          *           ]
          *         },
+         *         "forward_smplkit_events": false,
          *         "forwarder_type": "datadog",
          *         "name": "Datadog production",
          *         "transform": "{ \"message\": event_type & ' on ' & resource_type }",
@@ -1413,6 +1429,7 @@ export interface components {
          *             "user.created"
          *           ]
          *         },
+         *         "forward_smplkit_events": false,
          *         "forwarder_type": "datadog",
          *         "name": "Datadog production",
          *         "transform": "{ \"message\": event_type & ' on ' & resource_type }",
@@ -1982,6 +1999,8 @@ export interface operations {
     list_events: {
         parameters: {
             query?: {
+                /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results are scoped to your single accessible environment; send the `X-Smplkit-Environment` header instead if you can access more than one. The reserved value `smplkit` selects platform change events that smplkit records about your own resources (flags, configuration, and so on); these are not tied to a deployment environment and are readable regardless of which environments you manage. */
+                "filter[environment]"?: string | null;
                 "filter[occurred_at]"?: string | null;
                 "filter[actor_type]"?: string | null;
                 "filter[actor_id]"?: string | null;
@@ -2441,6 +2460,8 @@ export interface operations {
     list_resource_types: {
         parameters: {
             query?: {
+                /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results are scoped to your single accessible environment; send the `X-Smplkit-Environment` header instead if you can access more than one. The reserved value `smplkit` selects platform change events that smplkit records about your own resources (flags, configuration, and so on); these are not tied to a deployment environment and are readable regardless of which environments you manage. */
+                "filter[environment]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
                 sort?: "key" | "-key";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
@@ -2470,6 +2491,8 @@ export interface operations {
     list_event_types: {
         parameters: {
             query?: {
+                /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results are scoped to your single accessible environment; send the `X-Smplkit-Environment` header instead if you can access more than one. The reserved value `smplkit` selects platform change events that smplkit records about your own resources (flags, configuration, and so on); these are not tied to a deployment environment and are readable regardless of which environments you manage. */
+                "filter[environment]"?: string | null;
                 "filter[resource_type]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
                 sort?: "key" | "-key";
@@ -2500,6 +2523,8 @@ export interface operations {
     list_categories: {
         parameters: {
             query?: {
+                /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results are scoped to your single accessible environment; send the `X-Smplkit-Environment` header instead if you can access more than one. The reserved value `smplkit` selects platform change events that smplkit records about your own resources (flags, configuration, and so on); these are not tied to a deployment environment and are readable regardless of which environments you manage. */
+                "filter[environment]"?: string | null;
                 /** @description Field to sort by. Prefix with `-` for descending order. Default: `key`. Allowed values: `key`, `-key`. */
                 sort?: "key" | "-key";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
