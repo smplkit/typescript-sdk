@@ -116,6 +116,17 @@ export interface ListEventsParams {
   actorId?: string;
   /** Range notation per ADR-014, e.g. `"[2026-01-01T00:00:00Z,*)"`. */
   occurredAtRange?: string;
+  /**
+   * Restrict results to these environment keys (e.g.
+   * `["production", "staging"]`). Sent as a comma-separated
+   * `filter[environment]`. Omit (or pass an empty array) to scope to your
+   * single accessible environment; send more than one only when your
+   * credential can read multiple. The reserved value `"smplkit"` selects
+   * the platform change events smplkit records about your own resources
+   * (flags, configuration, and so on), which are not tied to a deployment
+   * environment.
+   */
+  environments?: string[];
   /** Items per page (1–1000). Defaults to 1000. */
   pageSize?: number;
   /** Opaque cursor returned by the prior page's `nextCursor`. */
@@ -150,6 +161,15 @@ export interface ResourceType {
  * Parameters accepted by `client.audit.resourceTypes.list(...)`.
  */
 export interface ListResourceTypesParams {
+  /**
+   * Restrict the discovered resource types to those seen in these
+   * environment keys (e.g. `["production", "staging"]`). Sent as a
+   * comma-separated `filter[environment]`. Omit (or pass an empty array)
+   * to scope to your single accessible environment. The reserved value
+   * `"smplkit"` selects the platform resource types smplkit records about
+   * your own resources.
+   */
+  environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
   pageNumber?: number;
   /** Items per page (1–1000). Defaults to 1000. */
@@ -193,6 +213,14 @@ export interface EventType {
 export interface ListEventTypesParams {
   /** When set, returns only the event types seen with this resource_type. */
   filterResourceType?: string;
+  /**
+   * Restrict the discovered event types to those seen in these environment
+   * keys (e.g. `["production", "staging"]`). Sent as a comma-separated
+   * `filter[environment]`. Omit (or pass an empty array) to scope to your
+   * single accessible environment. The reserved value `"smplkit"` selects
+   * the platform event types smplkit records about your own resources.
+   */
+  environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
   pageNumber?: number;
   /** Items per page (1–1000). Defaults to 1000. */

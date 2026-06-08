@@ -118,6 +118,16 @@ async function _throwForResponse(response: Response): Promise<never> {
   throwForStatus(response.status, body);
 }
 
+/**
+ * Comma-join environment keys for the `filter[environment]` read filter.
+ * Returns `undefined` (so the caller omits the param entirely) when the
+ * list is absent or empty, matching the "unset ⇒ no filter sent" contract.
+ */
+function _joinEnvironments(environments: string[] | undefined): string | undefined {
+  if (environments === undefined || environments.length === 0) return undefined;
+  return environments.join(",");
+}
+
 class EventsClient {
   /** @internal */
   readonly _http: AuditHttp;
@@ -194,6 +204,8 @@ class EventsClient {
     if (params.actorType !== undefined) query["filter[actor_type]"] = params.actorType;
     if (params.actorId !== undefined) query["filter[actor_id]"] = params.actorId;
     if (params.occurredAtRange !== undefined) query["filter[occurred_at]"] = params.occurredAtRange;
+    const environments = _joinEnvironments(params.environments);
+    if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
 
@@ -249,6 +261,8 @@ class ResourceTypesClient {
    */
   async list(params: ListResourceTypesParams = {}): Promise<ListResourceTypesPage> {
     const query: Record<string, string | number | boolean> = {};
+    const environments = _joinEnvironments(params.environments);
+    if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
@@ -288,6 +302,8 @@ class EventTypesClient {
     const query: Record<string, string | number | boolean> = {};
     if (params.filterResourceType !== undefined)
       query["filter[resource_type]"] = params.filterResourceType;
+    const environments = _joinEnvironments(params.environments);
+    if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.metaTotal !== undefined) query["meta[total]"] = params.metaTotal;
