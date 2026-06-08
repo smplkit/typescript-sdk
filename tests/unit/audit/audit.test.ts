@@ -318,6 +318,98 @@ describe("AuditClient", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// filter[environment] read filter (events.list + discovery lists)
+// ---------------------------------------------------------------------------
+
+describe("AuditClient — environments read filter", () => {
+  function _captureClient(captured: { url: string }): AuditClient {
+    return new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: vi.fn(async (input: unknown, init?: RequestInit) => {
+        const req = input instanceof Request ? input : new Request(input as string, init);
+        captured.url = req.url;
+        return new Response(
+          JSON.stringify({ data: [], meta: { pagination: { page: 1, size: 1000 } } }),
+          { status: 200, headers: { "Content-Type": "application/vnd.api+json" } },
+        );
+      }) as typeof fetch,
+    });
+  }
+
+  // Brackets may arrive percent-encoded depending on openapi-fetch's
+  // serializer, so match either literal or %5B/%5D form.
+  const FILTER_ENV = /filter(\[|%5B)environment(\]|%5D)=/;
+
+  // Each surface that accepts `environments`, exercised through the same
+  // matrix below. `call` invokes the list with the given options.
+  const surfaces: Array<{
+    name: string;
+    call: (c: AuditClient, environments?: string[]) => Promise<unknown>;
+  }> = [
+    {
+      name: "events.list",
+      call: (c, environments) => c.events.list(environments === undefined ? {} : { environments }),
+    },
+    {
+      name: "resourceTypes.list",
+      call: (c, environments) =>
+        c.resourceTypes.list(environments === undefined ? {} : { environments }),
+    },
+    {
+      name: "eventTypes.list",
+      call: (c, environments) =>
+        c.eventTypes.list(environments === undefined ? {} : { environments }),
+    },
+  ];
+
+  for (const surface of surfaces) {
+    describe(surface.name, () => {
+      test("omits filter[environment] when environments is unset", async () => {
+        const captured = { url: "" };
+        const c = _captureClient(captured);
+        await surface.call(c);
+        expect(captured.url).not.toMatch(FILTER_ENV);
+        await c._close();
+      });
+
+      test("omits filter[environment] when environments is an empty array", async () => {
+        const captured = { url: "" };
+        const c = _captureClient(captured);
+        await surface.call(c, []);
+        expect(captured.url).not.toMatch(FILTER_ENV);
+        await c._close();
+      });
+
+      test("sends a single environment value", async () => {
+        const captured = { url: "" };
+        const c = _captureClient(captured);
+        await surface.call(c, ["production"]);
+        expect(captured.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=production/);
+        await c._close();
+      });
+
+      test("comma-joins multiple environment values", async () => {
+        const captured = { url: "" };
+        const c = _captureClient(captured);
+        await surface.call(c, ["production", "staging"]);
+        // The comma may be percent-encoded (%2C); accept either form.
+        expect(captured.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=production(,|%2C)staging/);
+        await c._close();
+      });
+
+      test("accepts the reserved 'smplkit' control-plane bucket", async () => {
+        const captured = { url: "" };
+        const c = _captureClient(captured);
+        await surface.call(c, ["smplkit"]);
+        expect(captured.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=smplkit/);
+        await c._close();
+      });
+    });
+  }
+});
+
 describe("AuditClient — extraHeaders", () => {
   test("extraHeaders are merged into every request, SDK headers win on collision", async () => {
     const seen: Headers[] = [];
