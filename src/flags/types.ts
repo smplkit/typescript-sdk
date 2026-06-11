@@ -1,14 +1,15 @@
 /**
- * Public types for the Flags SDK: Op, Context, FlagDeclaration, Rule.
+ * Public types for the Flags SDK: Context, FlagDeclaration, Op, Rule.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Operators supported by `Rule.when`.
+ * Operators supported by {@link Rule.when}.
  *
  * Customers should prefer `Op.EQ` etc. over raw strings so the IDE
- * can validate calls. Raw strings are still accepted for flexibility.
+ * can validate calls. Raw strings are still accepted for backward
+ * compatibility.
  */
 export enum Op {
   CONTAINS = "contains",
@@ -39,29 +40,21 @@ export interface ContextClient {
 }
 
 /**
- * A typed evaluation-context entity.
+ * A typed entity referenced by targeting rules and registered with smplkit.
  *
  * Represents a single entity (user, account, device, etc.). The *type*
- * and *key* identify the entity; *attributes* carry the data that
- * targeting rules evaluate against.
+ * and *key* identify the entity; *attributes* (provided as an object and/or
+ * keyword arguments) carry the data that targeting rules evaluate against.
  *
  * Used for both authoring (`flag.get({ context: [...] })`,
- * `client.setContext([...])`, `mgmt.contexts.register([...])`) and
- * reading (`mgmt.contexts.list/get` return populated `Context`
- * instances with `save()` / `delete()` ready to call).
- *
- * Validation happens at construction:
- * - `type` and `key` must be strings (numeric IDs rejected — stringify
- *   them at the SDK boundary).
- * - Unknown property assignment via dotted notation is blocked. Use
- *   `ctx.attributes["plan"] = ...` instead.
- * - Once persisted (`createdAt` is set), `type` and `key` become
- *   immutable.
+ * `client.setContext([...])`, `client.platform.contexts.register([...])`)
+ * and reading (`client.platform.contexts.list/get` return populated
+ * `Context` instances with `save()` / `delete()` ready to call).
  *
  * @example
  * ```typescript
  * new Context("user", "user-123", { plan: "enterprise" });
- * new Context("account", "acme", { region: "us" }, { name: "Acme" });
+ * new Context("account", "acme-corp", { region: "us" }, { name: "Acme Corp" });
  * ```
  */
 export class Context {
@@ -208,7 +201,7 @@ export class Context {
 /**
  * Describes a flag declaration for buffered registration.
  *
- * Used by `mgmt.flags.register` to queue declarations for bulk
+ * Used by `client.flags.register` to queue declarations for bulk
  * registration. `service` and `environment` default to `null`; the
  * runtime client fills them from the active `SmplClient` when it
  * forwards declarations.
@@ -243,14 +236,13 @@ export class FlagDeclaration {
  * ```typescript
  * new Rule("Enable for enterprise users", { environment: "staging" })
  *   .when("user.plan", Op.EQ, "enterprise")
- *   .when("account.region", Op.EQ, "us")
  *   .serve(true);
  * ```
  *
  * Multiple `.when()` calls are AND'd. `environment` is required so the
  * target environment is unambiguous when the rule is passed to
- * `Flag.addRule`. `.serve()` finalizes the rule and returns a built
- * dict ready to pass to `addRule`.
+ * {@link Flag.addRule}. `.serve()` finalizes the rule and returns the
+ * built object ready to pass to `addRule`.
  */
 export class Rule {
   private readonly _description: string;
@@ -271,9 +263,14 @@ export class Rule {
    * Add a condition. Multiple calls are AND'd at the top level.
    *
    * Two forms:
+   *
    * - `when(var, op, value)` — convenience for simple comparisons.
+   *   `op` accepts an {@link Op} enum value (preferred) or a raw
+   *   string (e.g. `"=="`, `"contains"`).
+   *
    * - `when(expr)` — escape hatch accepting an arbitrary JSON Logic
    *   expression (use this for OR, nested AND/OR, `if`, etc.).
+   *   See https://jsonlogic.com/ for the full expression grammar.
    */
   when(expr: Record<string, any>): Rule;
   when(variable: string, op: Op | string, value: any): Rule;

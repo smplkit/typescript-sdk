@@ -1,5 +1,5 @@
 /**
- * Flag, FlagValue, FlagRule, FlagEnvironment — flag model + frozen wrappers.
+ * Flag model classes.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -7,11 +7,11 @@
 import type { FlagsClient } from "./client.js";
 import type { Context } from "./types.js";
 
-/** @internal Flag client surface needed by the model (covers both runtime + management). */
+/** @internal Flag client surface needed by the model (CRUD + runtime evaluation). */
 export interface FlagModelClient {
-  _createFlag?: (flag: Flag) => Promise<Flag>;
-  _updateFlag?: (flag: Flag) => Promise<Flag>;
-  _deleteFlag?: (id: string) => Promise<void>;
+  _createFlag(flag: Flag): Promise<Flag>;
+  _updateFlag(flag: Flag): Promise<Flag>;
+  delete(id: string): Promise<void>;
   _evaluateHandle(id: string, defaultValue: unknown, context: Context[] | null): unknown;
 }
 
@@ -100,8 +100,8 @@ export class FlagEnvironment {
  * Provides management operations (save, addRule, environment settings)
  * and runtime evaluation via {@link Flag.get}.
  *
- * Use typed variants ({@link BooleanFlag}, {@link StringFlag},
- * {@link NumberFlag}, {@link JsonFlag}) for type-safe `get()` returns.
+ * Use typed variants (BooleanFlag, StringFlag, NumberFlag, JsonFlag)
+ * for type-safe {@link Flag.get} return values.
  */
 export class Flag {
   id: string | null;
@@ -175,27 +175,18 @@ export class Flag {
    * Persist this flag to the server.
    *
    * Creates a new flag if unsaved, or updates the existing one.
+   * Requires a flags client (i.e. the flag was constructed via
+   * `client.flags.newBooleanFlag` etc. or returned from
+   * `client.flags.get/list`).
    */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("Flag was constructed without a client; cannot save");
     }
     if (this.createdAt === null) {
-      if (!this._client._createFlag) {
-        throw new Error(
-          "Flag handles obtained from the runtime FlagsClient cannot be saved. " +
-            "Use mgmt.flags.newBooleanFlag(...) etc. (or client.manage.flags.*) to author flags.",
-        );
-      }
       const created = await this._client._createFlag(this);
       this._apply(created);
     } else {
-      if (!this._client._updateFlag) {
-        throw new Error(
-          "Flag handles obtained from the runtime FlagsClient cannot be saved. " +
-            "Use mgmt.flags.newBooleanFlag(...) etc. (or client.manage.flags.*) to author flags.",
-        );
-      }
       const updated = await this._client._updateFlag(this);
       this._apply(updated);
     }
@@ -206,13 +197,7 @@ export class Flag {
     if (this._client === null || this.id === null) {
       throw new Error("Flag was constructed without a client or id; cannot delete");
     }
-    if (!this._client._deleteFlag) {
-      throw new Error(
-        "Flag handles obtained from the runtime FlagsClient cannot be deleted. " +
-          "Use client.manage.flags.delete(id) instead.",
-      );
-    }
-    await this._client._deleteFlag(this.id);
+    await this._client.delete(this.id);
   }
 
   // -------------------------------------------------------------------
@@ -222,8 +207,10 @@ export class Flag {
   /**
    * Append a rule to a specific environment.
    *
-   * The *builtRule* dict must include an `environment` key. Call
-   * {@link save} to persist. Returns `this` for chaining.
+   * The *builtRule* object must include an `environment` key.
+   * Call {@link save} to persist.
+   *
+   * Returns *this* for chaining.
    */
   addRule(builtRule: Record<string, any>): this {
     const envKey = builtRule.environment as string | undefined;
@@ -395,7 +382,7 @@ export class Flag {
   }
 }
 
-/** Typed flag that returns `boolean` from {@link Flag.get}. */
+/** A boolean flag — .get() returns boolean. */
 export class BooleanFlag extends Flag {
   override get(options?: { context?: Context[] }): boolean {
     const value = super.get(options);
@@ -403,7 +390,7 @@ export class BooleanFlag extends Flag {
   }
 }
 
-/** Typed flag that returns `string` from {@link Flag.get}. */
+/** A string flag — .get() returns string. */
 export class StringFlag extends Flag {
   override get(options?: { context?: Context[] }): string {
     const value = super.get(options);
@@ -411,7 +398,7 @@ export class StringFlag extends Flag {
   }
 }
 
-/** Typed flag that returns `number` from {@link Flag.get}. */
+/** A numeric flag — .get() returns number. */
 export class NumberFlag extends Flag {
   override get(options?: { context?: Context[] }): number {
     const value = super.get(options);
@@ -419,7 +406,7 @@ export class NumberFlag extends Flag {
   }
 }
 
-/** Typed flag that returns `Record<string, unknown>` from {@link Flag.get}. */
+/** A JSON flag — .get() returns object. */
 export class JsonFlag extends Flag {
   override get(options?: { context?: Context[] }): Record<string, unknown> {
     const value = super.get(options);

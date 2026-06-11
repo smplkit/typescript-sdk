@@ -105,7 +105,19 @@ describe("SmplClient config integration", () => {
     expect(() => new SmplClient()).toThrow(SmplError);
   });
 
-  it("should accept baseDomain and scheme options", () => {
+  it("should accept baseDomain and scheme options", async () => {
+    // The fused sub-clients borrow a shared transport from the parent and no
+    // longer expose a `_baseUrl`. To verify the custom `baseDomain`/`scheme`
+    // actually reach the sub-clients, trigger a real awaited request and assert
+    // the URL the transport built. The audit client owns its transport and its
+    // reads round-trip through `globalThis.fetch`, so spying there observes the
+    // host the SDK computed from `baseDomain`/`scheme`.
+    const seen: string[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(typeof req === "string" ? req : req.url);
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+
     const client = new SmplClient({
       apiKey: "sk_api_test",
       environment: "test",
@@ -113,11 +125,14 @@ describe("SmplClient config integration", () => {
       baseDomain: "local.dev",
       scheme: "http",
     });
-    // Verify the sub-clients got the custom base URLs
-    expect(client.config._baseUrl).toBe("http://config.local.dev");
-    expect(client.flags._baseUrl).toBe("http://flags.local.dev");
-    expect(client.logging._baseUrl).toBe("http://logging.local.dev");
-    client.close();
+
+    await client.audit.resourceTypes.list();
+
+    expect(seen).toHaveLength(1);
+    const url = new URL(seen[0]);
+    expect(url.protocol).toBe("http:");
+    expect(url.host).toBe("audit.local.dev");
+    await client.close();
   });
 
   it("should accept profile option to select config file section", () => {

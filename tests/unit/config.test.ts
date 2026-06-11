@@ -374,12 +374,12 @@ describe("resolveConfig", () => {
     expect(() => resolveConfig({ environment: "prod", service: "svc" })).toThrow("No API key");
   });
 
-  it("should throw when environment is missing", () => {
-    expect(() => resolveConfig({ apiKey: "sk_test", service: "svc" })).toThrow("No environment");
+  it("resolves environment to null when missing (optional)", () => {
+    expect(resolveConfig({ apiKey: "sk_test", service: "svc" }).environment).toBeNull();
   });
 
-  it("should throw when service is missing", () => {
-    expect(() => resolveConfig({ apiKey: "sk_test", environment: "prod" })).toThrow("No service");
+  it("resolves service to null when missing (optional)", () => {
+    expect(resolveConfig({ apiKey: "sk_test", environment: "prod" }).service).toBeNull();
   });
 
   // ---- Full 4-step precedence ----

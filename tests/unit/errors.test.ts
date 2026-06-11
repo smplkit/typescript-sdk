@@ -7,6 +7,8 @@ import {
   SmplConflictError,
   SmplValidationError,
   SmplPaymentRequiredError,
+  SmplNotInstalledError,
+  SmplkitNotInstalledError,
   throwForStatus,
 } from "../../src/errors.js";
 
@@ -136,6 +138,42 @@ describe("SmplValidationError", () => {
   it("should have the correct name", () => {
     const error = new SmplValidationError("fail");
     expect(error.name).toBe("SmplValidationError");
+  });
+});
+
+describe("SmplNotInstalledError", () => {
+  it("should extend SmplError", () => {
+    const error = new SmplNotInstalledError("not installed");
+    expect(error).toBeInstanceOf(SmplError);
+    expect(error).toBeInstanceOf(SmplNotInstalledError);
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  it("should have the correct name", () => {
+    const error = new SmplNotInstalledError("fail");
+    expect(error.name).toBe("SmplNotInstalledError");
+  });
+
+  it("should leave statusCode/responseBody undefined by default", () => {
+    const error = new SmplNotInstalledError("not installed");
+    expect(error.statusCode).toBeUndefined();
+    expect(error.responseBody).toBeUndefined();
+    expect(error.errors).toEqual([]);
+  });
+
+  it("should store statusCode, responseBody, and errors when provided", () => {
+    const apiErrors = [{ status: "409", detail: "install first" }];
+    const error = new SmplNotInstalledError("not installed", 409, '{"x":1}', apiErrors);
+    expect(error.statusCode).toBe(409);
+    expect(error.responseBody).toBe('{"x":1}');
+    expect(error.errors).toEqual(apiErrors);
+  });
+
+  it("should be exported under the Smplkit* alias as the same class", () => {
+    expect(SmplkitNotInstalledError).toBe(SmplNotInstalledError);
+    const error = new SmplkitNotInstalledError("aliased");
+    expect(error).toBeInstanceOf(SmplNotInstalledError);
+    expect(error.name).toBe("SmplNotInstalledError");
   });
 });
 

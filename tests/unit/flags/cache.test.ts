@@ -1,16 +1,51 @@
+/**
+ * Resolution-cache behaviour: hit/miss accounting, LRU eviction, and
+ * context-sensitive cache keys. Exercised through the synchronous
+ * `_evaluateHandle` path after seeding the flag store directly (so these
+ * tests stay focused on the cache, not the connect/fetch plumbing).
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { describe, expect, it } from "vitest";
 import { Context } from "../../../src/flags/types.js";
-import { FlagsClient } from "../../../src/flags/client.js";
+import { BooleanFlag, StringFlag } from "../../../src/flags/models.js";
+import { makeWiredClient } from "./_helpers.js";
+import type { FlagsClient } from "../../../src/flags/client.js";
 
-function makeFlagsClient(): FlagsClient {
-  const mockWs = { on: () => {}, off: () => {}, connectionStatus: "disconnected" };
-  return new FlagsClient("sk_test", () => mockWs as never, 30000);
+/** Seed the live store + mark connected so `_evaluateHandle` resolves locally. */
+function seedStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
+  (client as any)._flagStore = store;
+  (client as any)._connected = true;
 }
 
-function setFlagStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
-  (client as Record<string, unknown>)["_flagStore"] = store;
-  (client as Record<string, unknown>)["_initialized"] = true;
-  (client as Record<string, unknown>)["_environment"] = "staging";
+/** Build a typed handle without going through the async connect path. */
+function boolHandle(client: FlagsClient, id: string, def: boolean): BooleanFlag {
+  return new BooleanFlag(client as any, {
+    id,
+    name: id,
+    type: "BOOLEAN",
+    default: def,
+    values: null,
+    description: null,
+    environments: {},
+    createdAt: null,
+    updatedAt: null,
+  });
+}
+
+function strHandle(client: FlagsClient, id: string, def: string): StringFlag {
+  return new StringFlag(client as any, {
+    id,
+    name: id,
+    type: "STRING",
+    default: def,
+    values: null,
+    description: null,
+    environments: {},
+    createdAt: null,
+    updatedAt: null,
+  });
 }
 
 const FLAG_DEF = {
@@ -19,125 +54,97 @@ const FLAG_DEF = {
   environments: {
     staging: {
       enabled: true,
-      rules: [
-        {
-          logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-          value: true,
-        },
-      ],
+      rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: true }],
     },
   },
 };
 
+async function statsFor(client: FlagsClient): Promise<{ cacheHits: number; cacheMisses: number }> {
+  const s = await client.stats();
+  return { cacheHits: s.cacheHits, cacheMisses: s.cacheMisses };
+}
+
 describe("Resolution cache", () => {
-  it("should track cache hits and misses", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, { "my-flag": FLAG_DEF });
-
+  it("tracks cache hits and misses", async () => {
+    const { client } = makeWiredClient();
+    seedStore(client, { "my-flag": FLAG_DEF });
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
 
-    const handle = client.booleanFlag("my-flag", false);
+    const handle = boolHandle(client, "my-flag", false);
 
-    // First call = cache miss
-    handle.get();
-    let stats = client.stats();
-    expect(stats.cacheMisses).toBe(1);
-    expect(stats.cacheHits).toBe(0);
+    handle.get(); // miss
+    expect(await statsFor(client)).toEqual({ cacheMisses: 1, cacheHits: 0 });
 
-    // Second call = cache hit
-    handle.get();
-    stats = client.stats();
-    expect(stats.cacheHits).toBe(1);
-    expect(stats.cacheMisses).toBe(1);
+    handle.get(); // hit
+    expect(await statsFor(client)).toEqual({ cacheMisses: 1, cacheHits: 1 });
   });
 
-  it("should accumulate cache hits on repeated reads", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, { "my-flag": FLAG_DEF });
-
+  it("accumulates cache hits on repeated reads", async () => {
+    const { client } = makeWiredClient();
+    seedStore(client, { "my-flag": FLAG_DEF });
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
 
-    const handle = client.booleanFlag("my-flag", false);
+    const handle = boolHandle(client, "my-flag", false);
+    for (let i = 0; i < 100; i++) handle.get();
 
-    // 1 miss + 99 hits
-    for (let i = 0; i < 100; i++) {
-      handle.get();
-    }
-
-    const stats = client.stats();
-    expect(stats.cacheHits).toBe(99);
-    expect(stats.cacheMisses).toBe(1);
+    expect(await statsFor(client)).toEqual({ cacheHits: 99, cacheMisses: 1 });
   });
 
-  it("should evict oldest cache entries when max size is exceeded", () => {
-    // Create a client with a small cache for testing
-    const client = makeFlagsClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  it("evicts the oldest entry when the cache exceeds max size", async () => {
+    const { client } = makeWiredClient();
     const cache = (client as any)._cache;
-    // Override maxSize to a small value for testing
     cache._maxSize = 3;
 
-    setFlagStore(client, {
+    seedStore(client, {
       a: { id: "a", default: "val-a", environments: { staging: { enabled: true, rules: [] } } },
       b: { id: "b", default: "val-b", environments: { staging: { enabled: true, rules: [] } } },
       c: { id: "c", default: "val-c", environments: { staging: { enabled: true, rules: [] } } },
       d: { id: "d", default: "val-d", environments: { staging: { enabled: true, rules: [] } } },
     });
 
-    // Evaluate 4 flags to overflow the cache (max 3)
-    const ha = client.stringFlag("a", "");
-    const hb = client.stringFlag("b", "");
-    const hc = client.stringFlag("c", "");
-    const hd = client.stringFlag("d", "");
+    const ha = strHandle(client, "a", "");
+    const hb = strHandle(client, "b", "");
+    const hc = strHandle(client, "c", "");
+    const hd = strHandle(client, "d", "");
 
-    ha.get(); // miss, cached
-    hb.get(); // miss, cached
-    hc.get(); // miss, cached
-    hd.get(); // miss, cached — evicts "a"
-
-    const stats = client.stats();
-    expect(stats.cacheMisses).toBe(4);
-
-    // "a" was evicted, should be a miss again
     ha.get();
-    expect(client.stats().cacheMisses).toBe(5);
+    hb.get();
+    hc.get();
+    hd.get(); // overflow → evicts "a"
+    expect((await statsFor(client)).cacheMisses).toBe(4);
 
-    // "d" should still be cached
-    hd.get();
-    expect(client.stats().cacheHits).toBe(1);
+    ha.get(); // "a" evicted → miss again
+    expect((await statsFor(client)).cacheMisses).toBe(5);
+
+    hd.get(); // "d" still cached → hit
+    expect((await statsFor(client)).cacheHits).toBe(1);
   });
 
-  it("should update existing cache entry without growing size", () => {
-    const client = makeFlagsClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  it("updates an existing cache entry in place without growing", () => {
+    const { client } = makeWiredClient();
     const cache = (client as any)._cache;
 
-    // Directly test the internal cache.put for an existing key
     cache.put("key1", "value1");
-    cache.put("key1", "value2"); // update existing
+    cache.put("key1", "value2"); // update existing key
 
     const [hit, val] = cache.get("key1");
     expect(hit).toBe(true);
     expect(val).toBe("value2");
   });
 
-  it("should cache miss when context changes", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, { "my-flag": FLAG_DEF });
+  it("misses when the context changes", async () => {
+    const { client } = makeWiredClient();
+    seedStore(client, { "my-flag": FLAG_DEF });
 
-    let currentPlan = "enterprise";
-    client.setContextProvider(() => [new Context("user", "u-1", { plan: currentPlan })]);
+    let plan = "enterprise";
+    client.setContextProvider(() => [new Context("user", "u-1", { plan })]);
 
-    const handle = client.booleanFlag("my-flag", false);
-
+    const handle = boolHandle(client, "my-flag", false);
     handle.get(); // miss
     handle.get(); // hit
+    plan = "free";
+    handle.get(); // different context hash → miss
 
-    currentPlan = "free";
-    handle.get(); // miss (different context hash)
-
-    const stats = client.stats();
-    expect(stats.cacheMisses).toBe(2);
-    expect(stats.cacheHits).toBe(1);
+    expect(await statsFor(client)).toEqual({ cacheMisses: 2, cacheHits: 1 });
   });
 });

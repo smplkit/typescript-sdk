@@ -3,12 +3,13 @@ import { Logger, LogGroup } from "../../../src/logging/models.js";
 import { LogLevel, LoggerEnvironment } from "../../../src/logging/types.js";
 import type { LoggingClient } from "../../../src/logging/client.js";
 
-/** Minimal mock of LoggingClient for model construction. */
+/** Minimal mock of a model client for model construction. */
 function mockClient(): LoggingClient {
   return {
     _saveLogger: vi.fn(),
     _createGroup: vi.fn(),
     _updateGroup: vi.fn(),
+    delete: vi.fn(),
   } as unknown as LoggingClient;
 }
 
@@ -266,8 +267,8 @@ describe("Logger", () => {
       await expect(logger.save()).rejects.toThrow("cannot save");
     });
 
-    it("should throw on runtime client (no _saveLogger)", async () => {
-      // Runtime LoggingClient does not implement _saveLogger.
+    it("should reject when the client lacks _saveLogger (TypeError)", async () => {
+      // A client object without the _saveLogger method surfaces a TypeError.
       const runtimeClient = {} as never;
       const logger = new Logger(runtimeClient, {
         id: "test",
@@ -280,14 +281,14 @@ describe("Logger", () => {
         createdAt: null,
         updatedAt: null,
       });
-      await expect(logger.save()).rejects.toThrow(/cannot be saved/);
+      await expect(logger.save()).rejects.toThrow(TypeError);
     });
   });
 
   describe("delete()", () => {
-    it("should call _deleteLogger when client and id present", async () => {
+    it("should call client.delete when client and id present", async () => {
       const client = mockClient();
-      (client as unknown as Record<string, unknown>)._deleteLogger = vi.fn();
+      (client as unknown as Record<string, unknown>).delete = vi.fn();
       const logger = new Logger(client, {
         id: "test",
         name: "Test",
@@ -300,7 +301,7 @@ describe("Logger", () => {
         updatedAt: null,
       });
       await logger.delete();
-      expect(client._deleteLogger).toHaveBeenCalledWith("test");
+      expect(client.delete).toHaveBeenCalledWith("test");
     });
 
     it("should throw when client is null", async () => {
@@ -334,7 +335,7 @@ describe("Logger", () => {
       await expect(logger.delete()).rejects.toThrow("cannot delete");
     });
 
-    it("should throw on runtime client (no _deleteLogger)", async () => {
+    it("should reject when the client lacks a delete method (TypeError)", async () => {
       const runtimeClient = {} as never;
       const logger = new Logger(runtimeClient, {
         id: "test",
@@ -347,19 +348,19 @@ describe("Logger", () => {
         createdAt: null,
         updatedAt: null,
       });
-      await expect(logger.delete()).rejects.toThrow(/cannot be deleted/);
+      await expect(logger.delete()).rejects.toThrow(TypeError);
     });
   });
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const logger = makeLogger({ id: "app.server", level: LogLevel.INFO });
-      expect(logger.toString()).toBe("Logger(id=app.server, level=INFO)");
+      const logger = makeLogger({ id: "app.server", name: "App Server" });
+      expect(logger.toString()).toBe("Logger(id=app.server, name=App Server)");
     });
 
-    it("should handle null level", () => {
-      const logger = makeLogger({ id: "app.db", level: null });
-      expect(logger.toString()).toBe("Logger(id=app.db, level=null)");
+    it("should handle a null id", () => {
+      const logger = makeLogger({ id: null, name: "Anon" });
+      expect(logger.toString()).toBe("Logger(id=null, name=Anon)");
     });
   });
 });
@@ -570,7 +571,7 @@ describe("LogGroup", () => {
       await expect(group.save()).rejects.toThrow("cannot save");
     });
 
-    it("should throw on runtime client (no _createGroup) when creating", async () => {
+    it("should reject when the client lacks _createGroup (TypeError) when creating", async () => {
       const runtimeClient = {} as never;
       const group = new LogGroup(runtimeClient, {
         id: "test-group",
@@ -581,10 +582,10 @@ describe("LogGroup", () => {
         createdAt: null,
         updatedAt: null,
       });
-      await expect(group.save()).rejects.toThrow(/cannot be saved/);
+      await expect(group.save()).rejects.toThrow(TypeError);
     });
 
-    it("should throw on runtime client (no _updateGroup) when updating", async () => {
+    it("should reject when the client lacks _updateGroup (TypeError) when updating", async () => {
       const runtimeClient = {} as never;
       const group = new LogGroup(runtimeClient, {
         id: "test-group",
@@ -595,14 +596,14 @@ describe("LogGroup", () => {
         createdAt: "2026-04-01T00:00:00Z",
         updatedAt: "2026-04-01T00:00:00Z",
       });
-      await expect(group.save()).rejects.toThrow(/cannot be saved/);
+      await expect(group.save()).rejects.toThrow(TypeError);
     });
   });
 
   describe("delete()", () => {
-    it("should call _deleteGroup with id when client and id are present", async () => {
+    it("should call client.delete with id when client and id are present", async () => {
       const client = mockClient();
-      (client as unknown as Record<string, unknown>)._deleteGroup = vi.fn();
+      (client as unknown as Record<string, unknown>).delete = vi.fn();
       const group = new LogGroup(client, {
         id: "test-group",
         name: "Test Group",
@@ -615,7 +616,7 @@ describe("LogGroup", () => {
 
       await group.delete();
 
-      expect(client._deleteGroup).toHaveBeenCalledWith("test-group");
+      expect(client.delete).toHaveBeenCalledWith("test-group");
     });
 
     it("should throw when client is null", async () => {
@@ -645,7 +646,7 @@ describe("LogGroup", () => {
       await expect(group.delete()).rejects.toThrow("cannot delete");
     });
 
-    it("should throw on runtime client (no _deleteGroup)", async () => {
+    it("should reject when the client lacks a delete method (TypeError)", async () => {
       const runtimeClient = {} as never;
       const group = new LogGroup(runtimeClient, {
         id: "test-group",
@@ -656,19 +657,19 @@ describe("LogGroup", () => {
         createdAt: null,
         updatedAt: null,
       });
-      await expect(group.delete()).rejects.toThrow(/cannot be deleted/);
+      await expect(group.delete()).rejects.toThrow(TypeError);
     });
   });
 
   describe("toString()", () => {
     it("should return a human-readable representation", () => {
-      const group = makeGroup({ id: "db-loggers", level: LogLevel.WARN });
-      expect(group.toString()).toBe("LogGroup(id=db-loggers, level=WARN)");
+      const group = makeGroup({ id: "db-loggers", name: "Database Loggers" });
+      expect(group.toString()).toBe("LogGroup(id=db-loggers, name=Database Loggers)");
     });
 
-    it("should handle null level", () => {
-      const group = makeGroup({ id: "misc", level: null });
-      expect(group.toString()).toBe("LogGroup(id=misc, level=null)");
+    it("should handle a null id", () => {
+      const group = makeGroup({ id: null, name: "Misc" });
+      expect(group.toString()).toBe("LogGroup(id=null, name=Misc)");
     });
   });
 });

@@ -147,6 +147,26 @@ export class SmplPaymentRequiredError extends SmplError {
   }
 }
 
+/**
+ * Raised when a logging operation is attempted before `install()`.
+ *
+ * Smpl Logging hooks into your logging framework, so it stays opt-in: its
+ * live surface requires an explicit {@link LoggingClient.install} first.
+ * Config and flags connect lazily on first live use and never raise this.
+ */
+export class SmplNotInstalledError extends SmplError {
+  constructor(
+    message: string,
+    statusCode?: number,
+    responseBody?: string,
+    errors?: ApiErrorDetail[],
+  ) {
+    super(message, statusCode, responseBody, errors);
+    this.name = "SmplNotInstalledError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // `Smplkit*` aliases — added in PR #103 for callers that prefer the
 // longer prefix (matches the package name `@smplkit/sdk`). They are
@@ -160,6 +180,7 @@ export { SmplNotFoundError as SmplkitNotFoundError };
 export { SmplConflictError as SmplkitConflictError };
 export { SmplValidationError as SmplkitValidationError };
 export { SmplPaymentRequiredError as SmplkitPaymentRequiredError };
+export { SmplNotInstalledError as SmplkitNotInstalledError };
 
 /** @deprecated Use {@link ApiErrorDetail}. */
 export type ApiErrorObject = ApiErrorDetail;

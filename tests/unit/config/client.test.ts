@@ -1,13 +1,31 @@
 /**
- * Runtime-only tests for ConfigClient. Management/CRUD coverage lives in
- * tests/unit/management/management_config.test.ts.
+ * Tests for the management/CRUD + discovery surface of the fused
+ * ConfigClient: construction (standalone + wired), `new` / `get` / `list` /
+ * `delete`, the active-record `Config.save()` / `.delete()` round-trip, the
+ * owned discovery buffer (`registerConfig` / `registerConfigItem` / `flush` /
+ * `pendingCount` + the threshold auto-flush), error wrapping, and `close()`.
+ *
+ * The live surface (subscribe / getValue / bind / refresh / onChange / WS
+ * handlers / LiveConfigProxy) is exercised in prescriptive.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConfigClient } from "../../../src/config/client.js";
-import { SmplError, SmplTimeoutError } from "../../../src/errors.js";
+import {
+  ConfigClient,
+  ConfigChangeEvent,
+  ConfigRegistrationBuffer,
+} from "../../../src/config/client.js";
+import { Config } from "../../../src/config/types.js";
+import {
+  SmplkitConnectionError,
+  SmplkitNotFoundError,
+  SmplkitTimeoutError,
+  SmplkitValidationError,
+  SmplkitError,
+} from "../../../src/errors.js";
+import type { ConfigParent } from "../../../src/config/client.js";
+import type { SharedWebSocket } from "../../../src/ws.js";
 
-// Mock global fetch — openapi-fetch calls fetch(request: Request)
 const mockFetch = vi.fn();
 
 beforeEach(() => {
@@ -20,10 +38,6 @@ afterEach(() => {
 
 const API_KEY = "sk_api_test";
 
-function makeClient(): ConfigClient {
-  return new ConfigClient(API_KEY);
-}
-
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -35,536 +49,717 @@ function textResponse(body: string, status: number): Response {
   return new Response(body, { status });
 }
 
-describe("ConfigClient", () => {
-  describe("_connectInternal", () => {
-    it("should populate cache and config store", async () => {
-      const client = makeClient();
+/** A wire-format JSON:API config resource. */
+function configResource(opts: {
+  id: string;
+  name?: string;
+  description?: string | null;
+  parent?: string | null;
+  items?: Record<string, unknown>;
+  environments?: Record<string, Record<string, unknown>>;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}) {
+  return {
+    id: opts.id,
+    type: "config",
+    attributes: {
+      name: opts.name ?? opts.id,
+      description: opts.description ?? null,
+      parent: opts.parent ?? null,
+      items: Object.fromEntries(
+        Object.entries(opts.items ?? {}).map(([k, v]) => [k, { value: v }]),
+      ),
+      environments: opts.environments ?? {},
+      created_at: opts.createdAt ?? "2024-01-15T10:30:00Z",
+      updated_at: opts.updatedAt ?? "2024-01-16T14:00:00Z",
+    },
+  };
+}
 
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db",
-              type: "config",
-              attributes: {
-                name: "DB Config",
-                description: null,
-                parent: null,
-                items: { host: "localhost", port: 5432 },
-                environments: {},
-              },
-            },
-          ],
-        }),
-      );
+/** Standalone client (owns its own transport). */
+function makeStandalone(extra: Record<string, unknown> = {}): ConfigClient {
+  return new ConfigClient({ apiKey: API_KEY, environment: "production", ...extra });
+}
 
-      await client._connectInternal("production");
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
 
-      // Cache stores resolved values as raw {key: value}. The wire-shaped
-      // {value, type, description} envelope is unwrapped in _buildChain
-      // before resolveChain merges values into the cache.
-      expect(client._getCachedConfig("db")).toEqual({
-        host: "localhost",
-        port: 5432,
-      });
+describe("ConfigClient construction", () => {
+  it("standalone form resolves its own transport and sends an Authorization header", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
     });
 
-    it("should be a no-op if already initialized", async () => {
-      const client = makeClient();
+    const client = makeStandalone();
+    await client.list();
 
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db",
-              type: "config",
-              attributes: {
-                name: "DB",
-                description: null,
-                parent: null,
-                items: { host: { value: "localhost" } },
-                environments: {},
-              },
-            },
-          ],
-        }),
-      );
-
-      await client._connectInternal("production");
-      await client._connectInternal("production"); // no-op
-
-      // Only one fetch call
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    });
-
-    it("should throw SmplError when the list call fails", async () => {
-      const client = makeClient();
-      mockFetch.mockResolvedValueOnce(textResponse("Server Error", 500));
-
-      await expect(client._connectInternal("production")).rejects.toThrow(SmplError);
-    });
-
-    it("should treat empty data list as no configs", async () => {
-      const client = makeClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-      await client._connectInternal("production");
-
-      expect(client._getCachedConfig("anything")).toBeUndefined();
-    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].headers.get("authorization")).toBe(`Bearer ${API_KEY}`);
+    expect(seen[0].url).toContain("/api/v1/configs");
   });
 
-  describe("_listConfigs HTTP fallback", () => {
-    it("delegates to the management plane when wired", async () => {
-      const client = makeClient();
-      const fakeMgmt = {
-        config: {
-          list: vi.fn().mockResolvedValue([]),
-        },
-      };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client._resolveManagement = () => fakeMgmt as any;
-      client._parent = { _environment: "production", _service: "svc", _metrics: null };
-
-      // start() calls _ensureInitialized which calls _listConfigs
-      await client.start();
-
-      expect(fakeMgmt.config.list).toHaveBeenCalledTimes(1);
-      expect(mockFetch).not.toHaveBeenCalled();
+  it("standalone form honours a custom baseUrl and strips trailing slashes", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
     });
 
-    it("falls back to direct HTTP when no management plane is wired", async () => {
-      const client = makeClient();
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-      client._parent = { _environment: "production", _service: "svc", _metrics: null };
-
-      await client.start();
-
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      const url = mockFetch.mock.calls[0][0].url as string;
-      expect(url).toContain("/api/v1/configs");
-      expect(url).toMatch(/page(\[|%5B)number(\]|%5D)=1/);
-      expect(url).toMatch(/page(\[|%5B)size(\]|%5D)=1000/);
+    const client = new ConfigClient({
+      apiKey: API_KEY,
+      environment: "production",
+      baseUrl: "https://config.example.com///",
     });
+    await client.list();
 
-    it("pages through configs when the first page is full (direct HTTP fallback)", async () => {
-      const client = makeClient();
-      client._parent = { _environment: "production", _service: "svc", _metrics: null };
-
-      const PAGE_SIZE = 1000;
-      const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-        id: `cfg-${i}`,
-        type: "config",
-        attributes: {
-          name: `Cfg ${i}`,
-          description: null,
-          parent: null,
-          items: {},
-          environments: {},
-        },
-      }));
-      const secondPage = [
-        {
-          id: "cfg-last",
-          type: "config",
-          attributes: {
-            name: "Last",
-            description: null,
-            parent: null,
-            items: {},
-            environments: {},
-          },
-        },
-      ];
-
-      mockFetch
-        .mockResolvedValueOnce(jsonResponse({ data: firstPage }))
-        .mockResolvedValueOnce(jsonResponse({ data: secondPage }));
-
-      await client.start();
-
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-      const url1 = mockFetch.mock.calls[0][0].url as string;
-      const url2 = mockFetch.mock.calls[1][0].url as string;
-      expect(url1).toMatch(/page(\[|%5B)number(\]|%5D)=1/);
-      expect(url2).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
-      // Both pages landed in the cache
-      expect(client._getCachedConfig("cfg-0")).toBeDefined();
-      expect(client._getCachedConfig("cfg-last")).toBeDefined();
-    });
-
-    it("pages through configs via the management plane when wired", async () => {
-      const client = makeClient();
-      const PAGE_SIZE = 1000;
-      const fakeMgmt = {
-        config: {
-          list: vi
-            .fn()
-            // First page is exactly PAGE_SIZE — must loop.
-            .mockResolvedValueOnce(
-              Array.from({ length: PAGE_SIZE }, (_, i) => ({
-                id: `cfg-${i}`,
-                _buildChain: () => Promise.resolve([]),
-              })),
-            )
-            // Second page is short — loop exits.
-            .mockResolvedValueOnce([{ id: "cfg-last", _buildChain: () => Promise.resolve([]) }]),
-        },
-      };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client._resolveManagement = () => fakeMgmt as any;
-      client._parent = { _environment: "production", _service: "svc", _metrics: null };
-
-      await client.start();
-
-      expect(fakeMgmt.config.list).toHaveBeenCalledTimes(2);
-      expect(fakeMgmt.config.list).toHaveBeenNthCalledWith(1, {
-        pageNumber: 1,
-        pageSize: PAGE_SIZE,
-      });
-      expect(fakeMgmt.config.list).toHaveBeenNthCalledWith(2, {
-        pageNumber: 2,
-        pageSize: PAGE_SIZE,
-      });
-    });
+    expect(seen[0].url.startsWith("https://config.example.com/api/v1/configs")).toBe(true);
   });
 
-  describe("custom fetch wrapper", () => {
-    it("maps DOMException AbortError to SmplTimeoutError", async () => {
-      const client = makeClient();
-      mockFetch.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
-
-      await expect(client._connectInternal("staging")).rejects.toThrow(SmplTimeoutError);
+  it("standalone form attaches extraHeaders to every request", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
     });
+
+    const client = makeStandalone({ extraHeaders: { "X-Test": "v" } });
+    await client.list();
+
+    expect(seen[0].headers.get("x-test")).toBe("v");
+    expect(seen[0].headers.get("authorization")).toMatch(/^Bearer /);
   });
 
-  describe("extractEnvironments defensive path (via wire response)", () => {
-    it("preserves entries that lack a values key when reading a single config", async () => {
-      const client = makeClient();
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "cfg",
-              type: "config",
-              attributes: {
-                name: "Cfg",
-                description: null,
-                parent: null,
-                items: {},
-                // staging has no `values` key — extractEnvironments should
-                // pass the entry through unchanged.
-                environments: { staging: { metadata: "x" } },
-              },
-            },
-          ],
-        }),
-      );
+  it("wired form borrows the supplied transport and parent identity", async () => {
+    const parent: ConfigParent = {
+      _environment: "staging",
+      _service: "svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: vi.fn(),
+    };
+    const transport = {
+      GET: vi.fn().mockResolvedValue({ response: { ok: true }, data: { data: [] } }),
+    } as never;
 
-      await client._connectInternal("production");
-      // No exception means the defensive branch was taken; cache is populated.
-      expect(client._getCachedConfig("cfg")).toBeDefined();
-    });
+    const client = new ConfigClient({ parent, transport });
+    const result = await client.list();
+
+    expect(result).toEqual([]);
+    // Parent identity flows into observe declarations.
+    client.registerConfig("c", { service: null, environment: null });
+    expect(client.pendingCount).toBe(1);
   });
 });
 
-describe("ConfigClient — extraHeaders", () => {
-  it("extraHeaders are present on every request", async () => {
+// ---------------------------------------------------------------------------
+// new()
+// ---------------------------------------------------------------------------
+
+describe("new()", () => {
+  it("returns an unsaved Config with a display-name derived from the id", () => {
+    const client = makeStandalone();
+    const cfg = client.new("billing-v2");
+    expect(cfg).toBeInstanceOf(Config);
+    expect(cfg.id).toBe("billing-v2");
+    expect(cfg.name).toBe("Billing V2");
+    expect(cfg.createdAt).toBeNull();
+  });
+
+  it("accepts an explicit name, description and string parent", () => {
+    const client = makeStandalone();
+    const cfg = client.new("child", {
+      name: "Child Cfg",
+      description: "desc",
+      parent: "base",
+    });
+    expect(cfg.name).toBe("Child Cfg");
+    expect(cfg.description).toBe("desc");
+    expect(cfg.parent).toBe("base");
+  });
+
+  it("accepts a Config instance as the parent and reads its id", () => {
+    const client = makeStandalone();
+    const base = client.new("base");
+    const child = client.new("child", { parent: base });
+    expect(child.parent).toBe("base");
+  });
+
+  it("treats a null parent as no parent", () => {
+    const client = makeStandalone();
+    const cfg = client.new("solo", { parent: null });
+    expect(cfg.parent).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// get()
+// ---------------------------------------------------------------------------
+
+describe("get()", () => {
+  it("fetches and returns an editable Config", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "billing", items: { seats: 5 } }) }),
+    );
+
+    const cfg = await client.get("billing");
+    expect(cfg).toBeInstanceOf(Config);
+    expect(cfg.id).toBe("billing");
+    expect(cfg.items).toEqual({ seats: 5 });
+  });
+
+  it("throws SmplkitNotFoundError when the server returns no data", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    await expect(client.get("missing")).rejects.toThrow(SmplkitNotFoundError);
+  });
+
+  it("maps a 404 response to SmplkitNotFoundError", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(textResponse("not found", 404));
+    await expect(client.get("missing")).rejects.toThrow(SmplkitNotFoundError);
+  });
+
+  it("maps a 500 response to SmplkitError", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(textResponse("boom", 500));
+    await expect(client.get("x")).rejects.toThrow(SmplkitError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// list()
+// ---------------------------------------------------------------------------
+
+describe("list()", () => {
+  it("returns editable Config records", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: [configResource({ id: "a" }), configResource({ id: "b" })],
+      }),
+    );
+
+    const configs = await client.list();
+    expect(configs.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(configs[0]).toBeInstanceOf(Config);
+  });
+
+  it("passes page[number] and page[size] query params", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
+    });
+
+    const client = makeStandalone();
+    await client.list({ pageNumber: 2, pageSize: 25 });
+
+    const url = seen[0].url;
+    expect(url).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+    expect(url).toMatch(/page(\[|%5B)size(\]|%5D)=25/);
+  });
+
+  it("returns an empty array when openapi-fetch yields no parsed data (204)", async () => {
+    const client = makeStandalone();
+    // A 204 No Content yields no parsed success body, so `result.data` is
+    // undefined and `list()` short-circuits to [].
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const result = await client.list();
+    expect(result).toEqual([]);
+  });
+
+  it("wraps an HTTP error into a typed SDK exception", async () => {
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(textResponse("server error", 500));
+    await expect(client.list()).rejects.toThrow(SmplkitError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// delete()
+// ---------------------------------------------------------------------------
+
+describe("delete()", () => {
+  it("issues a DELETE and resolves on 204", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return new Response(null, { status: 204 });
+    });
+
+    const client = makeStandalone();
+    await client.delete("billing");
+
+    expect(seen[0].method).toBe("DELETE");
+    expect(seen[0].url).toContain("/api/v1/configs/billing");
+  });
+
+  it("resolves on a 200 OK as well", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+    const client = makeStandalone();
+    await expect(client.delete("billing")).resolves.toBeUndefined();
+  });
+
+  it("raises on a non-204 error status", async () => {
+    mockFetch.mockResolvedValueOnce(textResponse("nope", 404));
+    const client = makeStandalone();
+    await expect(client.delete("missing")).rejects.toThrow(SmplkitNotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config.save() / Config.delete() round-trip through the client
+// ---------------------------------------------------------------------------
+
+describe("Config active-record round-trip", () => {
+  it("save() on a new config POSTs and applies the server response", async () => {
     const seen: Request[] = [];
     mockFetch.mockImplementation(async (req: Request) => {
       seen.push(req);
       return jsonResponse({
-        data: [],
+        data: configResource({
+          id: "billing",
+          name: "Billing",
+          items: { seats: 50 },
+          createdAt: "2024-02-01T00:00:00Z",
+        }),
       });
     });
 
-    const client = new ConfigClient(API_KEY, undefined, undefined, { "X-Test": "v" });
-    await client._connectInternal("production");
-    expect(seen.length).toBeGreaterThanOrEqual(1);
-    expect(seen[0]!.headers.get("x-test")).toBe("v");
-    // SDK Authorization header still present
-    expect(seen[0]!.headers.get("authorization")).toMatch(/^Bearer /);
+    const client = makeStandalone();
+    const cfg = client.new("billing", { name: "Billing" });
+    cfg.setNumber("seats", 50);
+    await cfg.save();
+
+    expect(seen[0].method).toBe("POST");
+    expect(seen[0].url).toContain("/api/v1/configs");
+    // Server result applied back onto the model.
+    expect(cfg.createdAt).toBe("2024-02-01T00:00:00Z");
+  });
+
+  it("save() on an existing config PUTs to the id path", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({
+        data: configResource({ id: "billing", name: "Renamed" }),
+      });
+    });
+
+    const client = makeStandalone();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "billing", name: "Billing" }) }),
+    );
+    const cfg = await client.get("billing");
+    cfg.name = "Renamed";
+    await cfg.save();
+
+    const put = seen.find((r) => r.method === "PUT");
+    expect(put).toBeDefined();
+    expect(put!.url).toContain("/api/v1/configs/billing");
+    expect(cfg.name).toBe("Renamed");
+  });
+
+  it("save() includes description, parent and environments in the body", async () => {
+    const bodies: unknown[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      bodies.push(await req.clone().json());
+      return jsonResponse({
+        data: configResource({ id: "child", createdAt: "2024-02-01T00:00:00Z" }),
+      });
+    });
+
+    const client = makeStandalone();
+    const cfg = client.new("child", { description: "desc", parent: "base" });
+    cfg.setString("region", "us-east", { environment: "production" });
+    await cfg.save();
+
+    const body = bodies[0] as { data: { attributes: Record<string, unknown> } };
+    expect(body.data.attributes.description).toBe("desc");
+    expect(body.data.attributes.parent).toBe("base");
+    expect(body.data.attributes.environments).toEqual({ production: { region: "us-east" } });
+  });
+
+  it("delete() on an editable config DELETEs through the client", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: configResource({ id: "billing" }) }));
+    const client = makeStandalone();
+    const cfg = await client.get("billing");
+
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return new Response(null, { status: 204 });
+    });
+    await cfg.delete();
+
+    expect(seen[0].method).toBe("DELETE");
+    expect(seen[0].url).toContain("/api/v1/configs/billing");
+  });
+
+  it("_fetchConfig resolves a parent not present in the supplied configs list", async () => {
+    // Config._buildChain calls client._fetchConfig(parentId) when the parent
+    // is not in the local list — that GET round-trips through get().
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "child", parent: "base", items: { a: 1 } }) }),
+    );
+    const client = makeStandalone();
+    const child = await client.get("child");
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: configResource({ id: "base", items: { b: 2 } }) }),
+    );
+    const chain = await child._buildChain();
+    expect(chain.map((c) => c.id)).toEqual(["child", "base"]);
+  });
+
+  it("_updateConfig wraps a server error on PUT", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: configResource({ id: "billing" }) }));
+    const client = makeStandalone();
+    const cfg = await client.get("billing");
+    cfg.name = "Renamed";
+    // PUT fails with a 500.
+    mockFetch.mockResolvedValueOnce(textResponse("server error", 500));
+    await expect(cfg.save()).rejects.toThrow(SmplkitError);
+  });
+
+  it("_updateConfig throws when the config has no id", async () => {
+    const client = makeStandalone();
+    const cfg = new Config(client, {
+      id: null,
+      name: "X",
+      description: null,
+      parent: null,
+      items: {},
+      environments: {},
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: null,
+    });
+    await expect(cfg.save()).rejects.toThrow(/Cannot update a Config with no id/);
+  });
+
+  it("_createConfig raises when the server returns no data", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    const client = makeStandalone();
+    const cfg = client.new("billing");
+    await expect(cfg.save()).rejects.toThrow(SmplkitValidationError);
+  });
+
+  it("_updateConfig raises when the server returns no data", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: configResource({ id: "billing" }) }));
+    const client = makeStandalone();
+    const cfg = await client.get("billing");
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    await expect(cfg.save()).rejects.toThrow(SmplkitValidationError);
   });
 });
 
-describe("ConfigClient — bind + get", () => {
-  function _setupClient(cache: Record<string, Record<string, unknown>> = {}): {
-    client: ConfigClient;
-    registerConfig: ReturnType<typeof vi.fn>;
-    registerConfigItem: ReturnType<typeof vi.fn>;
-  } {
-    const client = makeClient();
-    client._parent = {
-      _environment: "production",
-      _service: "svc",
-      _metrics: null,
-    };
-    // Pre-seed initialized state so we exercise the post-init path.
-    (client as unknown as { _initialized: boolean })._initialized = true;
-    (client as unknown as { _configCache: Record<string, Record<string, unknown>> })._configCache =
-      cache;
-    const registerConfig = vi.fn();
-    const registerConfigItem = vi.fn();
-    const flush = vi.fn().mockResolvedValue(undefined);
-    client._resolveManagement = () =>
-      ({
-        config: { registerConfig, registerConfigItem, flush },
-      }) as never;
-    return { client, registerConfig, registerConfigItem };
-  }
+// ---------------------------------------------------------------------------
+// Error wrapping
+// ---------------------------------------------------------------------------
 
-  // ----- bind: plain object literals -----
-
-  it("bind returns the same object literal back", async () => {
-    const { client } = _setupClient({ billing: {} });
-    const payload = { max_seats: 5, tier: "free" };
-    const result = await client.bind("billing", payload);
-    expect(result).toBe(payload);
+describe("error wrapping", () => {
+  it("maps a network TypeError to SmplkitConnectionError", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    const client = makeStandalone();
+    await expect(client.list()).rejects.toThrow(SmplkitConnectionError);
   });
 
-  it("bind is idempotent — repeat calls return the originally-bound object", async () => {
-    const { client } = _setupClient({ billing: {} });
-    const first = { max_seats: 5 };
-    const second = { max_seats: 999 };
-    const a = await client.bind("billing", first);
-    const b = await client.bind("billing", second);
-    expect(a).toBe(first);
-    expect(b).toBe(first);
+  it("maps a DOMException AbortError to SmplkitTimeoutError", async () => {
+    mockFetch.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
+    const client = makeStandalone({ timeout: 5 });
+    await expect(client.list()).rejects.toThrow(SmplkitTimeoutError);
   });
 
-  it("bind rejects non-object inputs", async () => {
-    const { client } = _setupClient();
-    await expect(client.bind("billing", "nope" as never)).rejects.toThrow(TypeError);
-    await expect(client.bind("billing", null as never)).rejects.toThrow(TypeError);
+  it("maps a generic non-Error rejection to SmplkitConnectionError", async () => {
+    mockFetch.mockRejectedValueOnce("string failure");
+    const client = makeStandalone();
+    await expect(client.list()).rejects.toThrow(SmplkitConnectionError);
   });
 
-  it("bind on a plain object literal queues a config declaration with null name", async () => {
-    const { client, registerConfig } = _setupClient({ billing: {} });
-    await client.bind("billing", { k: 1 });
-    expect(registerConfig).toHaveBeenCalledWith("billing", {
-      service: "svc",
-      environment: "production",
-      parent: null,
-      name: null,
-      description: null,
+  it("re-raises an already-typed SmplkitNotFoundError unchanged", async () => {
+    mockFetch.mockResolvedValueOnce(textResponse("missing", 404));
+    const client = makeStandalone();
+    await expect(client.get("missing")).rejects.toThrow(SmplkitNotFoundError);
+  });
+
+  it("maps a 409 conflict to its typed error during create", async () => {
+    mockFetch.mockResolvedValueOnce(textResponse("conflict", 409));
+    const client = makeStandalone();
+    const cfg = client.new("billing");
+    await expect(cfg.save()).rejects.toThrow(/HTTP 409/);
+  });
+
+  it("maps a 422 validation error during create", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ status: "422", detail: "bad" }] }), {
+        status: 422,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const client = makeStandalone();
+    const cfg = client.new("billing");
+    await expect(cfg.save()).rejects.toThrow(SmplkitValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Discovery buffer (owned)
+// ---------------------------------------------------------------------------
+
+describe("discovery buffer", () => {
+  it("registerConfig + registerConfigItem grow pendingCount", () => {
+    const client = makeStandalone();
+    expect(client.pendingCount).toBe(0);
+    client.registerConfig("billing", { service: "svc", environment: "production" });
+    expect(client.pendingCount).toBe(1);
+    client.registerConfigItem("billing", "seats", "NUMBER", 5);
+    // Items attach to the existing config entry — still one pending config.
+    expect(client.pendingCount).toBe(1);
+  });
+
+  it("registerConfigItem before registerConfig is ignored", () => {
+    const client = makeStandalone();
+    client.registerConfigItem("unknown", "k", "STRING", "v");
+    expect(client.pendingCount).toBe(0);
+  });
+
+  it("flush POSTs the drained batch to /configs/bulk", async () => {
+    const seen: Request[] = [];
+    const bodies: unknown[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      bodies.push(await req.clone().json());
+      return jsonResponse({}, 200);
     });
+
+    const client = makeStandalone();
+    client.registerConfig("billing", { service: "svc", environment: "production" });
+    client.registerConfigItem("billing", "seats", "NUMBER", 5, "max seats");
+    await client.flush();
+
+    expect(seen[0].url).toContain("/api/v1/configs/bulk");
+    const body = bodies[0] as { configs: Array<{ id: string; items: Record<string, unknown> }> };
+    expect(body.configs[0].id).toBe("billing");
+    expect(body.configs[0].items.seats).toEqual({
+      value: 5,
+      type: "NUMBER",
+      description: "max seats",
+    });
+    // Buffer drained.
+    expect(client.pendingCount).toBe(0);
   });
 
-  it("bind on a class instance uses the class name as the console name", async () => {
-    const { client, registerConfig } = _setupClient({ billing: {} });
-    class BillingPlan {
-      max_seats = 5;
+  it("flush with an empty buffer is a no-op (no request)", async () => {
+    const client = makeStandalone();
+    await client.flush();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("flush swallows a non-OK bulk response", async () => {
+    mockFetch.mockResolvedValueOnce(textResponse("boom", 500));
+    const client = makeStandalone();
+    client.registerConfig("c", { service: null, environment: null });
+    await expect(client.flush()).resolves.toBeUndefined();
+  });
+
+  it("flush swallows a thrown network error", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network"));
+    const client = makeStandalone();
+    client.registerConfig("c", { service: null, environment: null });
+    await expect(client.flush()).resolves.toBeUndefined();
+  });
+
+  it("auto-flushes when the buffer crosses the batch threshold", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 200));
+    const client = makeStandalone();
+    // CONFIG_BATCH_FLUSH_SIZE is 50 — declare 50 distinct configs.
+    for (let i = 0; i < 50; i++) {
+      client.registerConfig(`cfg-${i}`, { service: "svc", environment: "production" });
     }
-    await client.bind("billing", new BillingPlan());
-    expect(registerConfig.mock.calls[0][1].name).toBe("BillingPlan");
+    // Allow the fire-and-forget threshold flush to settle.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalled();
+    const url = mockFetch.mock.calls[0][0].url as string;
+    expect(url).toContain("/api/v1/configs/bulk");
   });
 
-  it("bind registers every leaf with its inferred type", async () => {
-    const { client, registerConfigItem } = _setupClient({ billing: {} });
-    await client.bind("billing", { seats: 5, tier: "free", enabled: true });
-    const calls = registerConfigItem.mock.calls.map((c) => [c[1], c[2], c[3]]);
-    expect(calls).toEqual(
-      expect.arrayContaining([
-        ["seats", "NUMBER", 5],
-        ["tier", "STRING", "free"],
-        ["enabled", "BOOLEAN", true],
-      ]),
-    );
+  it("auto-flushes from registerConfigItem once the buffer is at threshold", async () => {
+    const client = makeStandalone();
+    // Replace flush with a non-draining stub so the buffer can sit at its
+    // threshold across multiple register calls — exercising the threshold
+    // guard inside registerConfigItem rather than the one in registerConfig.
+    const flush = vi.spyOn(client, "flush").mockResolvedValue(undefined);
+    for (let i = 0; i < 50; i++) {
+      client.registerConfig(`cfg-${i}`, { service: "svc", environment: "production" });
+    }
+    // 50 registerConfig calls → 50 threshold flushes (each a no-op stub).
+    flush.mockClear();
+    client.registerConfigItem("cfg-0", "k", "STRING", "v");
+    await new Promise((r) => setTimeout(r, 0));
+    // The item-side guard fired because pendingCount is still >= 50.
+    expect(flush).toHaveBeenCalled();
   });
 
-  it("bind flattens nested plain objects to dot-notation", async () => {
-    const { client, registerConfigItem } = _setupClient({ db: {} });
-    await client.bind("db", {
-      primary: { host: "h", port: 5432 },
-      pool_size: 10,
-    });
-    const keys = registerConfigItem.mock.calls.map((c) => c[1]);
-    expect(keys).toEqual(expect.arrayContaining(["primary.host", "primary.port", "pool_size"]));
+  it("a failed threshold flush is swallowed (debug only)", async () => {
+    const client = makeStandalone();
+    // Make flush itself reject so _thresholdFlush's catch runs.
+    vi.spyOn(client, "flush").mockRejectedValue(new Error("flush boom"));
+    for (let i = 0; i < 50; i++) {
+      client.registerConfig(`cfg-${i}`, { service: "svc", environment: "production" });
+    }
+    // No throw escapes the fire-and-forget threshold flush.
+    await new Promise((r) => setTimeout(r, 10));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ConfigRegistrationBuffer (direct unit tests for the owned buffer)
+// ---------------------------------------------------------------------------
+
+describe("ConfigRegistrationBuffer", () => {
+  const meta = {
+    service: "svc",
+    environment: "production",
+    parent: null,
+    name: null,
+    description: null,
+  };
+
+  it("declare is idempotent per config id", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", meta);
+    buf.declare("a", { ...meta, name: "Second" });
+    expect(buf.pendingCount).toBe(1);
+    const [entry] = buf.drain();
+    // First declaration wins; the second is ignored.
+    expect(entry.name).toBeUndefined();
   });
 
-  it("bind with parent resolves the parent's config id", async () => {
-    const { client, registerConfig } = _setupClient({ base: {}, child: {} });
-    const base = await client.bind("base", { k: 1 });
-    registerConfig.mockClear();
-    await client.bind("child", { other: 2 }, { parent: base });
-    expect(registerConfig).toHaveBeenCalledTimes(1);
-    expect(registerConfig.mock.calls[0][1].parent).toBe("base");
-  });
-
-  it("bind throws when the parent is not a previously-bound object", async () => {
-    const { client } = _setupClient({ child: {} });
-    await expect(client.bind("child", { k: 1 }, { parent: { stray: true } })).rejects.toThrow(
-      /previously returned from client.config.bind/,
-    );
-  });
-
-  it("bind syncs the bound object from cache (existing-config case)", async () => {
-    const { client } = _setupClient({
-      billing: { seats: 999, tier: "enterprise" },
-    });
-    const payload = { seats: 5, tier: "free" };
-    const result = await client.bind("billing", payload);
-    expect(result).toEqual({ seats: 999, tier: "enterprise" });
-  });
-
-  // ----- get: full config -----
-
-  it("get(id) returns a LiveConfigProxy", async () => {
-    const { client } = _setupClient({ billing: { k: 1 } });
-    const proxy = await client.get("billing");
-    expect((proxy as Record<string, unknown>).k).toBe(1);
-  });
-
-  it("get(id) returns the same proxy on repeat calls", async () => {
-    const { client } = _setupClient({ billing: { k: 1 } });
-    const a = await client.get("billing");
-    const b = await client.get("billing");
-    expect(a).toBe(b);
-  });
-
-  it("get(id) throws SmplNotFoundError when the config is missing", async () => {
-    const { client } = _setupClient({});
-    await expect(client.get("missing")).rejects.toThrow(/not found in cache/);
-  });
-
-  // ----- get(id, key) — single value, no default -----
-
-  it("get(id, key) returns the resolved value when present", async () => {
-    const { client } = _setupClient({ db: { connection_string: "postgres://x" } });
-    await expect(client.get("db", "connection_string")).resolves.toBe("postgres://x");
-  });
-
-  it("get(id, key) throws when the config is missing", async () => {
-    const { client } = _setupClient({});
-    await expect(client.get("db", "k")).rejects.toThrow(/Config with id 'db' not found/);
-  });
-
-  it("get(id, key) throws when the key is missing", async () => {
-    const { client } = _setupClient({ db: {} });
-    await expect(client.get("db", "k")).rejects.toThrow(/Config item 'k' not found/);
-  });
-
-  it("get(id, key) does not register anything", async () => {
-    const { client, registerConfig, registerConfigItem } = _setupClient({ db: { k: "v" } });
-    await client.get("db", "k");
-    expect(registerConfig).not.toHaveBeenCalled();
-    expect(registerConfigItem).not.toHaveBeenCalled();
-  });
-
-  // ----- get(id, key, default) — single value with default -----
-
-  it("get(id, key, default) returns the cached value when present", async () => {
-    const { client } = _setupClient({ db: { connection_string: "real" } });
-    await expect(client.get("db", "connection_string", "fallback")).resolves.toBe("real");
-  });
-
-  it("get(id, key, default) returns default when the config is missing", async () => {
-    const { client } = _setupClient({});
-    await expect(client.get("db", "connection_string", "fallback")).resolves.toBe("fallback");
-  });
-
-  it("get(id, key, default) returns default when the key is missing", async () => {
-    const { client } = _setupClient({ db: {} });
-    await expect(client.get("db", "missing", "fallback")).resolves.toBe("fallback");
-  });
-
-  it("get(id, key, default) registers the config and the key", async () => {
-    const { client, registerConfig, registerConfigItem } = _setupClient({});
-    await client.get("db", "connection_string", "postgres://...");
-    expect(registerConfig).toHaveBeenCalledWith("db", {
+  it("_buildEntry includes only non-null meta fields", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", {
       service: "svc",
       environment: "production",
-      parent: null,
-      name: null,
-      description: null,
+      parent: "base",
+      name: "A",
+      description: "d",
     });
-    expect(registerConfigItem).toHaveBeenCalledWith(
-      "db",
-      "connection_string",
-      "STRING",
-      "postgres://...",
-      null,
-    );
-  });
-
-  it("get(id, key, default) infers item type from the default's type", async () => {
-    const { client, registerConfigItem } = _setupClient({});
-    await client.get("billing", "max_seats", 5);
-    await client.get("billing", "trial_days", 14.0);
-    await client.get("billing", "active", true);
-    const types = Object.fromEntries(registerConfigItem.mock.calls.map((c) => [c[1], c[2]]));
-    expect(types).toEqual({
-      max_seats: "NUMBER",
-      trial_days: "NUMBER",
-      active: "BOOLEAN",
+    const [entry] = buf.drain();
+    expect(entry).toMatchObject({
+      id: "a",
+      service: "svc",
+      environment: "production",
+      parent: "base",
+      name: "A",
+      description: "d",
     });
   });
 
-  it("get(id, key, default) falls back to STRING for non-primitive defaults", async () => {
-    const { client, registerConfigItem } = _setupClient({});
-    await client.get("billing", "tags", [1, 2, 3]);
-    await client.get("billing", "payload", null);
-    const types = Object.fromEntries(registerConfigItem.mock.calls.map((c) => [c[1], c[2]]));
-    expect(types.tags).toBe("STRING");
-    expect(types.payload).toBe("STRING");
+  it("addItem is ignored when the config was never declared", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.addItem("never", "k", "STRING", "v", null);
+    expect(buf.pendingCount).toBe(0);
   });
 
-  // ----- bound-target mutation via the listener pipeline -----
-
-  it("WebSocket-driven changes mutate the bound object in place", async () => {
-    const { client } = _setupClient({ billing: { max_seats: 5 } });
-    const payload: { max_seats: number } = { max_seats: 5 };
-    await client.bind("billing", payload);
-    // Simulate a server-side bump by feeding the diff pipeline directly.
-    const oldCache = { billing: { max_seats: 5 } };
-    const newCache = { billing: { max_seats: 50 } };
-    (
-      client as unknown as {
-        _diffAndFire: (a: typeof oldCache, b: typeof newCache, s: string) => void;
-      }
-    )._diffAndFire(oldCache, newCache, "websocket");
-    expect(payload.max_seats).toBe(50);
+  it("addItem records value, type and optional description", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", meta);
+    buf.addItem("a", "k1", "STRING", "v", "desc");
+    buf.addItem("a", "k2", "NUMBER", 5, null);
+    const [entry] = buf.drain();
+    expect(entry.items.k1).toEqual({ value: "v", type: "STRING", description: "desc" });
+    expect(entry.items.k2).toEqual({ value: 5, type: "NUMBER" });
   });
 
-  it("WebSocket-driven changes traverse nested objects to apply at the leaf", async () => {
-    const { client } = _setupClient({
-      billing: { "audit.managed_streams": 0, "audit.siem": false },
+  it("addItem dedupes a key already present in the entry", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", meta);
+    buf.addItem("a", "k", "STRING", "first", null);
+    buf.addItem("a", "k", "STRING", "second", null);
+    const [entry] = buf.drain();
+    expect(entry.items.k).toEqual({ value: "first", type: "STRING" });
+  });
+
+  it("drain records sent items so an already-sent item is not re-queued", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", meta);
+    buf.addItem("a", "k", "STRING", "v", null);
+    buf.drain();
+    // declare("a") is a no-op (meta persists), and re-adding the same item is
+    // suppressed by the _sentItems guard — so the next drain is empty.
+    buf.declare("a", meta);
+    buf.addItem("a", "k", "STRING", "v", null);
+    expect(buf.pendingCount).toBe(0);
+    expect(buf.drain()).toEqual([]);
+  });
+
+  it("addItem rebuilds a pending entry when one was drained but meta persists", () => {
+    const buf = new ConfigRegistrationBuffer();
+    buf.declare("a", meta);
+    buf.drain();
+    // After drain the pending entry is gone but the meta lingers — addItem
+    // for a NEW key rebuilds the entry from meta.
+    buf.addItem("a", "fresh", "STRING", "v", null);
+    expect(buf.pendingCount).toBe(1);
+    const [entry] = buf.drain();
+    expect(entry.items.fresh).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ConfigChangeEvent
+// ---------------------------------------------------------------------------
+
+describe("ConfigChangeEvent", () => {
+  it("is frozen and exposes its fields", () => {
+    const event = new ConfigChangeEvent({
+      configId: "billing",
+      itemKey: "seats",
+      oldValue: 5,
+      newValue: 50,
+      source: "manual",
     });
-    const payload = { audit: { managed_streams: 0, siem: false } };
-    await client.bind("billing", payload);
-    const oldCache = { billing: { "audit.managed_streams": 0, "audit.siem": false } };
-    const newCache = { billing: { "audit.managed_streams": 50, "audit.siem": false } };
-    (
-      client as unknown as {
-        _diffAndFire: (a: typeof oldCache, b: typeof newCache, s: string) => void;
-      }
-    )._diffAndFire(oldCache, newCache, "websocket");
-    expect(payload.audit.managed_streams).toBe(50);
-    // Nested object reference is preserved (mutation, not replacement).
-    expect(payload.audit.siem).toBe(false);
+    expect(event.configId).toBe("billing");
+    expect(event.itemKey).toBe("seats");
+    expect(event.oldValue).toBe(5);
+    expect(event.newValue).toBe(50);
+    expect(event.source).toBe("manual");
+    expect(Object.isFrozen(event)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// close()
+// ---------------------------------------------------------------------------
+
+describe("close()", () => {
+  it("is a no-op for a standalone client that never opened a WebSocket", () => {
+    const client = makeStandalone();
+    expect(() => client.close()).not.toThrow();
   });
 
-  it("WebSocket-driven changes bail silently when the bound object has no matching path", async () => {
-    const { client } = _setupClient({ billing: { other: 1 } });
-    const payload: { other: number } = { other: 1 };
-    await client.bind("billing", payload);
-    // Server pushes a dotted key whose intermediate doesn't exist on the target.
-    const oldCache = { billing: { other: 1 } };
-    const newCache = { billing: { other: 1, "deep.path.missing": "x" } };
-    (
-      client as unknown as {
-        _diffAndFire: (a: typeof oldCache, b: typeof newCache, s: string) => void;
-      }
-    )._diffAndFire(oldCache, newCache, "websocket");
-    // Original property untouched; the bail just no-ops without throwing.
-    expect(payload).toEqual({ other: 1 });
-  });
+  it("stops and clears an owned WebSocket opened on first live use", async () => {
+    const stop = vi.fn();
+    const ws = {
+      start: vi.fn(),
+      stop,
+      on: vi.fn(),
+    } as unknown as SharedWebSocket;
 
-  it("_observeConfigDeclaration and _observeItemDeclaration are no-ops without management wiring", () => {
-    const client = makeClient();
-    client._parent = { _environment: "p", _service: null, _metrics: null };
-    // No _resolveManagement assigned — calls must not throw.
-    client._observeConfigDeclaration("c", null, null, null);
-    client._observeItemDeclaration("c", "k", "NUMBER", 1);
+    const client = makeStandalone();
+    // Inject a fake owned WebSocket through the private fields the standalone
+    // path manages, then ensure close() tears it down.
+    (client as unknown as { _wsManager: SharedWebSocket; _ownsWs: boolean })._wsManager = ws;
+    (client as unknown as { _ownsWs: boolean })._ownsWs = true;
+
+    client.close();
+    expect(stop).toHaveBeenCalledTimes(1);
+    // Second close is a no-op.
+    client.close();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });

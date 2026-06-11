@@ -492,7 +492,6 @@ describe("FlagsClient — metrics instrumentation", () => {
   it("should record cache_hits and evaluations on cache hit", async () => {
     const { FlagsClient } = await import("../../src/flags/client.js");
     const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" };
-    const client = new FlagsClient("sk_test", () => mockWs as any, 30000);
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -501,7 +500,15 @@ describe("FlagsClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
+    // The fused client borrows the parent's environment/service/WebSocket and
+    // its metrics reporter through constructor options.
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => mockWs as any,
+    };
+    const client = new FlagsClient({ apiKey: "sk_test", parent, metrics });
 
     // Initialize with a flag
     mockFetch.mockResolvedValue(
@@ -527,9 +534,9 @@ describe("FlagsClient — metrics instrumentation", () => {
       ),
     );
 
-    await client.initialize();
-
-    const flag = client.booleanFlag("my-flag", false);
+    // The typed-handle getter is now async and auto-connects on first use,
+    // fetching the flag definitions into the local cache.
+    const flag = await client.booleanFlag("my-flag", false);
 
     // First call = cache miss
     recordSpy.mockClear();
@@ -553,9 +560,15 @@ describe("FlagsClient — metrics instrumentation", () => {
   it("should not throw when metrics is null", async () => {
     const { FlagsClient } = await import("../../src/flags/client.js");
     const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" };
-    const client = new FlagsClient("sk_test", () => mockWs as any, 30000);
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: null };
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => mockWs as any,
+    };
+    // No metrics reporter wired (null) — evaluation must not throw.
+    const client = new FlagsClient({ apiKey: "sk_test", parent, metrics: null });
 
     mockFetch.mockResolvedValue(
       new Response(
@@ -580,8 +593,7 @@ describe("FlagsClient — metrics instrumentation", () => {
       ),
     );
 
-    await client.initialize();
-    const flag = client.booleanFlag("my-flag", false);
+    const flag = await client.booleanFlag("my-flag", false);
     expect(() => flag.get()).not.toThrow();
   });
 });
@@ -602,9 +614,8 @@ describe("ConfigClient — metrics instrumentation", () => {
     vi.restoreAllMocks();
   });
 
-  it("should record config.resolutions on resolve()", async () => {
+  it("should record config.resolutions on subscribe()", async () => {
     const { ConfigClient } = await import("../../src/config/client.js");
-    const client = new ConfigClient("sk_test", 30000);
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -613,9 +624,17 @@ describe("ConfigClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
+    // The fused client borrows the parent's environment/service/WebSocket and
+    // its metrics reporter through constructor options.
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => ({ on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" }) as any,
+    };
+    const client = new ConfigClient({ apiKey: "sk_test", parent, metrics });
 
-    // Mock list response for initialization
+    // Mock list response for the lazy auto-connect that subscribe() triggers.
     mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -625,8 +644,12 @@ describe("ConfigClient — metrics instrumentation", () => {
               type: "config",
               attributes: {
                 name: "My Config",
+                description: null,
+                parent: null,
                 items: { host: { value: "localhost" } },
                 environments: {},
+                created_at: null,
+                updated_at: null,
               },
             },
           ],
@@ -635,8 +658,10 @@ describe("ConfigClient — metrics instrumentation", () => {
       ),
     );
 
-    const result = await client.get("my-config");
-    // client.get() returns a LiveConfigProxy; subscript reflects the cached resolved values.
+    // subscribe() auto-connects, resolves the config into the cache, and
+    // records `config.resolutions`. The returned LiveConfigProxy reflects the
+    // cached resolved values.
+    const result = await client.subscribe("my-config");
     expect((result as Record<string, unknown>).host).toEqual("localhost");
     expect(recordSpy).toHaveBeenCalledWith("config.resolutions", 1, "resolutions", {
       config: "my-config",
@@ -696,14 +721,13 @@ describe("LoggingClient — metrics instrumentation", () => {
     vi.restoreAllMocks();
   });
 
-  it("should record logging.loggers_discovered on start() with discovered loggers", async () => {
+  it("should record logging.loggers_discovered on install() with discovered loggers", async () => {
     const { LoggingClient } = await import("../../src/logging/client.js");
     const mockWs = {
       on: vi.fn(),
       off: vi.fn(),
       connectionStatus: "disconnected",
     };
-    const client = new LoggingClient("sk_test", () => mockWs as any, 30000);
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -712,7 +736,13 @@ describe("LoggingClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => mockWs as any,
+    };
+    const client = new LoggingClient({ apiKey: "sk_test", parent, metrics });
 
     // Register a mock adapter that discovers loggers
     const mockAdapter = {
@@ -729,11 +759,11 @@ describe("LoggingClient — metrics instrumentation", () => {
     // Mock server responses for list() calls
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 
-    await client.start();
+    await client.install();
 
     expect(recordSpy).toHaveBeenCalledWith("logging.loggers_discovered", 2, "loggers");
 
-    client._close();
+    client.close();
     metrics.close();
   });
 
@@ -744,7 +774,6 @@ describe("LoggingClient — metrics instrumentation", () => {
       off: vi.fn(),
       connectionStatus: "disconnected",
     };
-    const client = new LoggingClient("sk_test", () => mockWs as any, 30000);
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -753,7 +782,13 @@ describe("LoggingClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => mockWs as any,
+    };
+    const client = new LoggingClient({ apiKey: "sk_test", parent, metrics });
 
     // Register a mock adapter that discovers the "app" logger — without
     // adapter knowledge, _applyLevels would have no logger to push to.
@@ -792,13 +827,13 @@ describe("LoggingClient — metrics instrumentation", () => {
       return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     });
 
-    await client.start();
+    await client.install();
 
     expect(recordSpy).toHaveBeenCalledWith("logging.level_changes", 1, "changes", {
       logger: "app",
     });
 
-    client._close();
+    client.close();
     metrics.close();
   });
 });
@@ -821,7 +856,6 @@ describe("ConfigClient — config.changes instrumentation", () => {
 
   it("should record config.changes on diff detection during refresh", async () => {
     const { ConfigClient } = await import("../../src/config/client.js");
-    const client = new ConfigClient("sk_test", 30000);
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -830,9 +864,15 @@ describe("ConfigClient — config.changes instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    client._parent = { _environment: "test", _service: "test-svc", _metrics: metrics };
+    const parent = {
+      _environment: "test",
+      _service: "test-svc",
+      _ensureStarted: vi.fn(),
+      _ensureWs: () => ({ on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" }) as any,
+    };
+    const client = new ConfigClient({ apiKey: "sk_test", parent, metrics });
 
-    // First call: initialization with value "v1"
+    // First call: lazy auto-connect resolves the config with value "v1".
     mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -842,8 +882,12 @@ describe("ConfigClient — config.changes instrumentation", () => {
               type: "config",
               attributes: {
                 name: "My Config",
+                description: null,
+                parent: null,
                 items: { host: { value: "v1" } },
                 environments: {},
+                created_at: null,
+                updated_at: null,
               },
             },
           ],
@@ -852,7 +896,8 @@ describe("ConfigClient — config.changes instrumentation", () => {
       ),
     );
 
-    await client.get("my-config");
+    // subscribe() auto-connects and seeds the resolved cache from "v1".
+    await client.subscribe("my-config");
     recordSpy.mockClear();
 
     // Now refresh with a changed value
@@ -865,8 +910,12 @@ describe("ConfigClient — config.changes instrumentation", () => {
               type: "config",
               attributes: {
                 name: "My Config",
+                description: null,
+                parent: null,
                 items: { host: { value: "v2" } },
                 environments: {},
+                created_at: null,
+                updated_at: null,
               },
             },
           ],

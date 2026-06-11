@@ -1,10 +1,10 @@
 /**
  * LiveConfigProxy — live, dict-like, read-only view of a config's resolved values.
  *
- * Returned by {@link ConfigClient.get} when called with a single argument.
- * For typed access via an object literal or class instance, use
- * {@link ConfigClient.bind} instead — bound objects stay live on the same
- * WebSocket-driven cache, with no proxy indirection.
+ * Returned by {@link ConfigClient.subscribe}. For typed access via an object
+ * literal or class instance, use {@link ConfigClient.bind} instead — bound
+ * objects stay live on the same WebSocket-driven cache, with no proxy
+ * indirection.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28,7 +28,7 @@ import type { ConfigChangeEvent, ConfigClient } from "./client.js";
  *
  * @example
  * ```typescript
- * const cfg = await client.config.get("user-service");
+ * const cfg = await client.config.subscribe("user-service");
  * console.log(cfg.database);        // resolved value
  * console.log(cfg["max_retries"]);  // subscript also works
  * for (const key of Object.keys(cfg)) console.log(key);
@@ -64,7 +64,7 @@ export class LiveConfigProxy {
       set(_target, prop): boolean {
         throw new Error(
           `LiveConfigProxy is read-only; cannot set ${JSON.stringify(String(prop))}. ` +
-            "Mutate config values via client.manage.config.*",
+            "Edit config values via client.config.get(id) + save().",
         );
       },
 

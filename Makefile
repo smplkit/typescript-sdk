@@ -2,7 +2,7 @@
 	config_runtime_showcase config_management_showcase \
 	flags_runtime_showcase flags_management_showcase \
 	logging_runtime_showcase logging_management_showcase \
-	audit_runtime_showcase audit_management_showcase \
+	audit_showcase \
 	jobs_showcase
 
 install:
@@ -32,11 +32,8 @@ logging_runtime_showcase: build
 logging_management_showcase: build
 	npx tsx examples/logging_management_showcase.ts
 
-audit_runtime_showcase: build
-	npx tsx examples/audit_runtime_showcase.ts
-
-audit_management_showcase: build
-	npx tsx examples/audit_management_showcase.ts
+audit_showcase: build
+	npx tsx examples/audit_showcase.ts
 
 jobs_showcase: build
 	npx tsx examples/jobs_showcase.ts

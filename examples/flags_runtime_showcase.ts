@@ -21,10 +21,10 @@ import { SmplClient, Context, Op, Rule } from "../src/index.js";
 import { cleanupRuntimeShowcase, setupRuntimeShowcase } from "./setup/flags_runtime_setup.js";
 
 // ---------------------------------------------------------------------------
-// Note: this showcase calls client.setContext(...) inline to demonstrate
-// context-driven flag evaluation.  In a real app (Express, Fastify, etc.),
-// setContext is called once per request from middleware — not scattered
-// through your handlers.
+// Note: this showcase calls client.flags.setContextProvider(...) inline to
+// demonstrate context-driven flag evaluation. In a real app (Express,
+// Fastify, etc.), the context provider is wired once from middleware — not
+// scattered through your handlers.
 // ---------------------------------------------------------------------------
 
 const alice = {
@@ -75,37 +75,32 @@ function createContext(user: any, account: any): Context[] {
 }
 
 async function main(): Promise<void> {
-  // create the client (TypeScript has a single Promise-based client)
+  // TypeScript has a single Promise-based client
   const client = new SmplClient({
     environment: "production",
     service: "showcase-service",
   });
   try {
-    await setupRuntimeShowcase(client.manage);
-    // Block until the live-updates WebSocket subscription is registered
-    // server-side. Without this, writes fired immediately afterward can
-    // race the broadcast of their own change events (the SDK isn't in
-    // the subscriber registry yet) and silently miss them. Mirrors
-    // `await client.wait_until_ready()` in the Python showcase.
+    await setupRuntimeShowcase(client);
     await client.waitUntilReady();
 
     // declare flags - default values will be used if the flag does not
     // exist or smplkit is unreachable
-    const checkoutV2 = client.flags.booleanFlag("checkout-v2", false);
-    const bannerColor = client.flags.stringFlag("banner-color", "red");
-    const maxRetries = client.flags.numberFlag("max-retries", 3);
+    const checkoutV2 = await client.flags.booleanFlag("checkout-v2", false);
+    const bannerColor = await client.flags.stringFlag("banner-color", "red");
+    const maxRetries = await client.flags.numberFlag("max-retries", 3);
 
     const allChanges: Array<{ id: string; source: string }> = [];
     const bannerChanges: any[] = [];
 
     // global listener — fires when ANY flag definition changes
-    client.flags.onChange((event) => {
+    await client.flags.onChange((event) => {
       allChanges.push({ id: event.id, source: event.source });
       console.log(`    Global flag listener: '${event.id}' updated via ${event.source}`);
     });
 
     // flag listener — fires only when a specific flag changes
-    client.flags.onChange("banner-color", (event) => {
+    await client.flags.onChange("banner-color", (event) => {
       bannerChanges.push(event);
       console.log("    banner-color flag changed!");
     });
@@ -115,15 +110,17 @@ async function main(): Promise<void> {
       client.flags.setContextProvider(() => createContext(alice, largeTechnologyAccount));
       const checkoutResult = checkoutV2.get();
       console.log(`checkout-v2 = ${checkoutResult}`);
-      assert.equal(checkoutResult, true);
+      assert.equal(checkoutResult, true, `Expected true, got ${checkoutResult}`);
+      assert.equal(typeof checkoutResult, "boolean", "Expected boolean return type");
 
       const bannerResult = bannerColor.get();
       console.log(`banner-color = ${bannerResult}`);
-      assert.equal(bannerResult, "blue");
+      assert.equal(bannerResult, "blue", `Expected 'blue', got ${bannerResult}`);
+      assert.equal(typeof bannerResult, "string", "Expected string return type");
 
       const retriesResult = maxRetries.get();
       console.log(`max-retries = ${retriesResult}`);
-      assert.equal(retriesResult, 5);
+      assert.equal(retriesResult, 5, `Expected 5, got ${retriesResult}`);
     }
 
     // request 2 — Bob from a small retail account
@@ -140,6 +137,19 @@ async function main(): Promise<void> {
       const retriesResult2 = maxRetries.get();
       console.log(`max-retries = ${retriesResult2}`);
       assert.equal(retriesResult2, 3);
+
+      // nested scoped override — temporarily impersonate Alice without
+      // disturbing the surrounding request's context.
+      {
+        const scopedResult = checkoutV2.get({
+          context: createContext(alice, largeTechnologyAccount),
+        });
+        console.log(`checkout-v2 (scoped: Alice) = ${scopedResult}`);
+        assert.equal(scopedResult, true);
+      }
+
+      // surrounding context is still Bob/small retail here
+      assert.equal(checkoutV2.get(), false);
     }
 
     // get a flag's value (explicitly pass context)
@@ -170,7 +180,7 @@ async function main(): Promise<void> {
       `Expected at least one banner change, got ${bannerChanges.length}`,
     );
 
-    await cleanupRuntimeShowcase(client.manage);
+    await cleanupRuntimeShowcase(client);
     console.log("Done!");
   } finally {
     client.close();
@@ -178,7 +188,7 @@ async function main(): Promise<void> {
 }
 
 async function updateRules(client: SmplClient): Promise<void> {
-  const currentBanner = await client.manage.flags.get("banner-color");
+  const currentBanner = await client.flags.get("banner-color");
   currentBanner.addRule(
     new Rule("Red for small companies", { environment: "production" })
       .when("account.employee_count", Op.LT, 50)

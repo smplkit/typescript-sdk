@@ -14,10 +14,10 @@ export enum ItemType {
 
 /** @internal Config client surface used by the active-record `Config.save`/`delete`. */
 export interface ConfigModelClient {
-  _createConfig?: (config: Config) => Promise<Config>;
-  _updateConfig?: (config: Config) => Promise<Config>;
-  _deleteConfig?: (id: string) => Promise<void>;
-  _fetchConfig?: (id: string) => Promise<Config>;
+  _createConfig(config: Config): Promise<Config>;
+  _updateConfig(config: Config): Promise<Config>;
+  _deleteConfig(id: string): Promise<void>;
+  _fetchConfig(id: string): Promise<Config>;
 }
 
 /** A single typed item in a {@link Config}. */
@@ -320,28 +320,16 @@ export class Config {
    *
    * @throws SmplkitNotFoundError if the config no longer exists (update).
    * @throws SmplkitValidationError if the server rejects the request.
-   * @throws Error if the model was constructed without a management client.
+   * @throws Error if the model was constructed without a client.
    */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("Config was constructed without a client; cannot save");
     }
     if (this.createdAt === null) {
-      if (!this._client._createConfig) {
-        throw new Error(
-          "Config models obtained from the runtime ConfigClient cannot be saved. " +
-            "Use mgmt.config.new(...) (or client.manage.config.*) to author configs.",
-        );
-      }
       const created = await this._client._createConfig(this);
       this._apply(created);
     } else {
-      if (!this._client._updateConfig) {
-        throw new Error(
-          "Config models obtained from the runtime ConfigClient cannot be saved. " +
-            "Use mgmt.config.new(...) (or client.manage.config.*) to author configs.",
-        );
-      }
       const updated = await this._client._updateConfig(this);
       this._apply(updated);
     }
@@ -351,12 +339,6 @@ export class Config {
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Config was constructed without a client or id; cannot delete");
-    }
-    if (!this._client._deleteConfig) {
-      throw new Error(
-        "Config models obtained from the runtime ConfigClient cannot be deleted. " +
-          "Use client.manage.config.delete(id) instead.",
-      );
     }
     await this._client._deleteConfig(this.id);
   }

@@ -15,8 +15,12 @@
  *     unchanged) fires nothing.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import createClient from "openapi-fetch";
 import { LoggingClient } from "../../../src/logging/client.js";
+import type { LoggingParent } from "../../../src/logging/client.js";
 import type { SharedWebSocket } from "../../../src/ws.js";
 
 const mockFetch = vi.fn();
@@ -53,11 +57,28 @@ function createMockSharedWs(): MockSharedWs {
   };
 }
 
+/** Build a logging transport driven by the stubbed global fetch. */
+function makeTransport(): any {
+  return createClient<import("../../../src/generated/logging.d.ts").paths>({
+    baseUrl: "https://logging.smplkit.com",
+    headers: { Authorization: "Bearer sk_test", Accept: "application/json" },
+  });
+}
+
 let lastMockWs: MockSharedWs;
 
-function makeClient(): LoggingClient {
+function makeParent(): LoggingParent {
   lastMockWs = createMockSharedWs();
-  return new LoggingClient("sk_test", () => lastMockWs as unknown as SharedWebSocket, 30000);
+  return {
+    _environment: "production",
+    _service: "svc",
+    _ensureStarted: vi.fn(),
+    _ensureWs: () => lastMockWs as unknown as SharedWebSocket,
+  };
+}
+
+function makeClient(): LoggingClient {
+  return new LoggingClient({ parent: makeParent(), transport: makeTransport(), metrics: null });
 }
 
 function jsonResponse(body: object, status = 200): Response {
@@ -129,10 +150,9 @@ describe("fanout — dot-ancestor cascade via logger_changed", () => {
       return Promise.resolve(jsonResponse({ data: [] }));
     });
 
+    await client.install();
     const globalCb = vi.fn();
     client.onChange(globalCb);
-    await client.start();
-    globalCb.mockClear();
 
     // logger_changed: com.acme → ERROR
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: loggerResource("com.acme", "ERROR") }));
@@ -175,10 +195,9 @@ describe("fanout — group cascade via group_changed", () => {
       return Promise.resolve(jsonResponse({ data: [] }));
     });
 
+    await client.install();
     const globalCb = vi.fn();
     client.onChange(globalCb);
-    await client.start();
-    globalCb.mockClear();
 
     // group_changed: app → ERROR
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: logGroupResource("app", "ERROR") }));
@@ -217,13 +236,11 @@ describe("fanout — deletion via group_deleted", () => {
       return Promise.resolve(jsonResponse({ data: [] }));
     });
 
+    await client.install();
     const globalCb = vi.fn();
     const groupCb = vi.fn();
     client.onChange(globalCb);
     client.onChange("app", groupCb); // listener on the group id itself
-    await client.start();
-    globalCb.mockClear();
-    groupCb.mockClear();
 
     lastMockWs._emit("group_deleted", { id: "app" });
     await new Promise((r) => setTimeout(r, 20));
@@ -257,13 +274,11 @@ describe("fanout — no-op edit", () => {
       return Promise.resolve(jsonResponse({ data: [] }));
     });
 
+    await client.install();
     const globalCb = vi.fn();
     const sqlCb = vi.fn();
     client.onChange(globalCb);
     client.onChange("sql", sqlCb);
-    await client.start();
-    globalCb.mockClear();
-    sqlCb.mockClear();
 
     // Same level returned by scoped fetch — only metadata moved server-side.
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: loggerResource("sql", "INFO") }));
@@ -287,10 +302,9 @@ describe("fanout — no-op edit", () => {
       return Promise.resolve(jsonResponse({ data: [] }));
     });
 
+    await client.install();
     const globalCb = vi.fn();
     client.onChange(globalCb);
-    await client.start();
-    globalCb.mockClear();
 
     // Scoped fetch returns same level — only the group's name changed.
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: logGroupResource("app", "WARN") }));

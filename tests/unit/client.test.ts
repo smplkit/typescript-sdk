@@ -15,12 +15,20 @@ import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { FlagsClient } from "../../src/flags/client.js";
 import { LoggingClient } from "../../src/logging/client.js";
+import { AuditClient } from "../../src/audit/client.js";
+import { JobsClient } from "../../src/jobs/client.js";
+import { PlatformClient } from "../../src/platform/client.js";
+import { AccountClient } from "../../src/account/client.js";
 
 // Stub fetch globally so the fire-and-forget _registerServiceContext never hits the network.
 const mockFetch = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
-  mockFetch.mockResolvedValue(new Response(JSON.stringify({ registered: 1 }), { status: 200 }));
+  // Fresh Response per call — a single shared Response body can only be read
+  // once, and several deferred operations may each read a response.
+  mockFetch.mockImplementation(() =>
+    Promise.resolve(new Response(JSON.stringify({ registered: 1, data: [] }), { status: 200 })),
+  );
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -87,6 +95,14 @@ describe("SmplClient", () => {
     expect(client.logging).toBeInstanceOf(LoggingClient);
   });
 
+  it("should expose audit, jobs, platform, and account sub-clients", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    expect(client.audit).toBeInstanceOf(AuditClient);
+    expect(client.jobs).toBeInstanceOf(JobsClient);
+    expect(client.platform).toBeInstanceOf(PlatformClient);
+    expect(client.account).toBeInstanceOf(AccountClient);
+  });
+
   it("should return the same config instance every time (singleton accessor)", () => {
     const client = new SmplClient(DEFAULT_OPTS);
     expect(client.config).toBe(client.config);
@@ -143,22 +159,21 @@ describe("SmplClient", () => {
     expect(client).toBeInstanceOf(SmplClient);
   });
 
-  it("should call logging._close() on close()", () => {
+  it("should call logging.close() on close()", () => {
     const client = new SmplClient(DEFAULT_OPTS);
-    const spy = vi.spyOn(client.logging, "_close");
+    const spy = vi.spyOn(client.logging, "close");
     client.close();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it("should throw SmplError when no environment and no env var", async () => {
+  it("resolves environment to empty (optional) when no environment and no env var", async () => {
     delete process.env.SMPLKIT_ENVIRONMENT;
     delete process.env.SMPLKIT_PROFILE;
     // Point homedir at a nonexistent path so no ~/.smplkit file is read
     vi.mocked(homedir).mockReturnValue("/tmp/nonexistent-smplkit-test-dir");
-    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(SmplError);
-    expect(() => new SmplClient({ apiKey: "sk_api_test", service: "test-svc" })).toThrow(
-      "No environment provided",
-    );
+    const client = new SmplClient({ apiKey: "sk_api_test", service: "test-svc" });
+    expect(client._environment).toBe("");
+    client.close();
   });
 
   it("should resolve environment from SMPLKIT_ENVIRONMENT env var", () => {
@@ -186,25 +201,29 @@ describe("SmplClient", () => {
     expect(client._service).toBe("my-svc");
   });
 
-  it("should throw SmplError when no service and no env var", () => {
+  it("resolves service to null (optional) when no service and no env var", () => {
     delete process.env.SMPLKIT_SERVICE;
-    expect(() => new SmplClient({ apiKey: "sk_api_test", environment: "test" })).toThrow(SmplError);
-    expect(() => new SmplClient({ apiKey: "sk_api_test", environment: "test" })).toThrow(
-      "No service provided",
-    );
+    vi.mocked(homedir).mockReturnValue("/tmp/nonexistent-smplkit-test-dir");
+    const client = new SmplClient({ apiKey: "sk_api_test", environment: "test" });
+    expect(client._service).toBeNull();
+    client.close();
   });
 
-  it("should include all three methods in service error message", () => {
+  it("skips the service-context POST entirely when neither environment nor service is set", async () => {
+    delete process.env.SMPLKIT_ENVIRONMENT;
     delete process.env.SMPLKIT_SERVICE;
-    try {
-      new SmplClient({ apiKey: "sk_api_test", environment: "test" });
-    } catch (e) {
-      expect(e).toBeInstanceOf(SmplError);
-      const msg = (e as SmplError).message;
-      expect(msg).toContain("Pass service in options");
-      expect(msg).toContain("SMPLKIT_SERVICE");
-      expect(msg).toContain("~/.smplkit");
-    }
+    vi.mocked(homedir).mockReturnValue("/tmp/nonexistent-smplkit-test-dir");
+    mockFetch.mockClear();
+    const client = new SmplClient({ apiKey: "sk_api_test" });
+    await (
+      client as unknown as { _registerServiceContext: () => Promise<void> }
+    )._registerServiceContext();
+    const bulkReq = mockFetch.mock.calls.find((c) => {
+      const url = c[0];
+      return (typeof url === "string" ? url : (url as Request).url).includes("/contexts/bulk");
+    });
+    expect(bulkReq).toBeUndefined();
+    client.close();
   });
 
   it("should resolve service from SMPLKIT_SERVICE env var", () => {
@@ -213,18 +232,7 @@ describe("SmplClient", () => {
     expect(client._service).toBe("env-service");
   });
 
-  it("should mention ~/.smplkit in environment error message", () => {
-    delete process.env.SMPLKIT_ENVIRONMENT;
-    try {
-      new SmplClient({ apiKey: "sk_api_test", service: "test-svc" });
-    } catch (e) {
-      expect(e).toBeInstanceOf(SmplError);
-      const msg = (e as SmplError).message;
-      expect(msg).toContain("~/.smplkit");
-    }
-  });
-
-  it("should validate api_key, environment, and service as required", () => {
+  it("requires only api_key; environment and service are optional", () => {
     // Skip if a config file exists (it may supply values that prevent the expected errors)
     if (existsSync(join(homedir(), ".smplkit"))) return;
 
@@ -232,16 +240,14 @@ describe("SmplClient", () => {
     delete process.env.SMPLKIT_SERVICE;
     delete process.env.SMPLKIT_API_KEY;
 
-    // Missing api_key → api_key error (validated first)
+    // Missing api_key → api_key error (the only required field).
     expect(() => new SmplClient({ environment: "test", service: "svc" })).toThrow("No API key");
 
-    // Missing environment → environment error
-    expect(() => new SmplClient({ apiKey: "sk_test" })).toThrow("No environment provided");
-
-    // Has api_key + environment, missing service → service error
-    expect(() => new SmplClient({ apiKey: "sk_test", environment: "test" })).toThrow(
-      "No service provided",
-    );
+    // api_key alone is sufficient — environment and service default to optional.
+    const client = new SmplClient({ apiKey: "sk_test" });
+    expect(client._environment).toBe("");
+    expect(client._service).toBeNull();
+    client.close();
   });
 
   it("should call enableDebug() when debug: true is passed to constructor", () => {
@@ -279,39 +285,165 @@ describe("SmplClient", () => {
     }
   });
 
-  it("close() shuts down the flags subsystem so the event loop can exit", async () => {
+  it("is side-effect-free at construction (no flush timer, no WS, no network)", () => {
+    mockFetch.mockClear();
+    const client = new SmplClient(DEFAULT_OPTS);
+    expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBeNull();
+    expect((client as unknown as { _wsManager: unknown })._wsManager).toBeNull();
+    expect((client as unknown as { _started: boolean })._started).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+    client.close();
+  });
+
+  it("_ensureStarted() schedules the periodic flush exactly once and registers the service", () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch.mockClear();
+      const client = new SmplClient(DEFAULT_OPTS);
+
+      client._ensureStarted();
+      expect((client as unknown as { _started: boolean })._started).toBe(true);
+      expect((client as unknown as { _flushTimer: unknown })._flushTimer).not.toBeNull();
+      // _registerServiceContext fired a POST to /api/v1/contexts/bulk.
+      const bulkReq = mockFetch.mock.calls.find((c) => {
+        const url = c[0];
+        return (typeof url === "string" ? url : (url as Request).url).includes("/contexts/bulk");
+      });
+      expect(bulkReq).toBeDefined();
+
+      const firstTimer = (client as unknown as { _flushTimer: unknown })._flushTimer;
+      // Idempotent — a second call must not reschedule or re-register.
+      client._ensureStarted();
+      expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBe(firstTimer);
+
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the periodic flush timer drains the registration buffers and reschedules", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new SmplClient(DEFAULT_OPTS);
+      const ctxFlush = vi.spyOn(client.platform.contexts, "flush").mockResolvedValue(undefined);
+      const flagsFlush = vi.spyOn(client.flags, "flush").mockResolvedValue(undefined);
+      const loggersFlush = vi.spyOn(client.logging.loggers, "flush").mockResolvedValue(undefined);
+      const configFlush = vi.spyOn(client.config, "flush").mockResolvedValue(undefined);
+
+      client._ensureStarted();
+      const firstTimer = (client as unknown as { _flushTimer: unknown })._flushTimer;
+
+      // Advance past the 60s interval to fire the tick.
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(ctxFlush).toHaveBeenCalled();
+      expect(flagsFlush).toHaveBeenCalled();
+      expect(loggersFlush).toHaveBeenCalled();
+      expect(configFlush).toHaveBeenCalled();
+
+      // Self-rescheduling: a new timer is installed after the tick settles.
+      const secondTimer = (client as unknown as { _flushTimer: unknown })._flushTimer;
+      expect(secondTimer).not.toBe(firstTimer);
+
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the periodic tick is a no-op after close()", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new SmplClient(DEFAULT_OPTS);
+      client._ensureStarted();
+      client.close();
+      const ctxFlush = vi.spyOn(client.platform.contexts, "flush");
+      // After close, _closed short-circuits; the timer was cleared anyway.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(ctxFlush).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("_ensureStarted() is a no-op once the client is closed", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    client.close();
+    client._ensureStarted();
+    expect((client as unknown as { _started: boolean })._started).toBe(false);
+    expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBeNull();
+  });
+
+  it("close() clears the flush timer, stops the WS, and closes sub-clients", () => {
     const client = new SmplClient(DEFAULT_OPTS);
 
-    // Stub the WS factory used by lazy initialisation. We never let the WS
-    // dial out — _ensureWs() is replaced before flags.initialize() runs.
-    const fakeWs = {
-      on: vi.fn(),
-      off: vi.fn(),
-      stop: vi.fn(),
-      start: vi.fn(),
-      connectionStatus: "connected",
-    };
-    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => fakeWs;
+    // Spies on the sub-client teardown chain.
+    const loggingClose = vi.spyOn(client.logging, "close");
+    const flagsClose = vi.spyOn(client.flags, "close");
+    const configClose = vi.spyOn(client.config, "close");
+    const auditClose = vi.spyOn(client.audit, "_close").mockResolvedValue(undefined);
+
+    // Start machinery + a fake WS so close() exercises every branch.
+    client._ensureStarted();
+    const fakeWs = { stop: vi.fn(), connectionStatus: "connected" };
     (client as unknown as { _wsManager: unknown })._wsManager = fakeWs;
-
-    // initialize() schedules the periodic flag-flush interval. It also tries
-    // to GET /flags; the global mockFetch returns 200/empty so that's fine.
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-    await client.flags.initialize();
-
-    const timer = (client.flags as unknown as { _flagFlushTimer: NodeJS.Timeout | null })
-      ._flagFlushTimer;
-    expect(timer).not.toBeNull();
-    const clearSpy = vi.spyOn(global, "clearInterval");
+    expect((client as unknown as { _flushTimer: unknown })._flushTimer).not.toBeNull();
 
     client.close();
 
-    expect(clearSpy).toHaveBeenCalledWith(timer);
-    expect(
-      (client.flags as unknown as { _flagFlushTimer: NodeJS.Timeout | null })._flagFlushTimer,
-    ).toBeNull();
-    expect(fakeWs.off).toHaveBeenCalledWith("flag_changed", expect.any(Function));
-    clearSpy.mockRestore();
+    expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBeNull();
+    expect((client as unknown as { _wsManager: unknown })._wsManager).toBeNull();
+    expect(fakeWs.stop).toHaveBeenCalledTimes(1);
+    expect(loggingClose).toHaveBeenCalledTimes(1);
+    expect(flagsClose).toHaveBeenCalledTimes(1);
+    expect(configClose).toHaveBeenCalledTimes(1);
+    expect(auditClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("close() with telemetry enabled closes the metrics reporter", () => {
+    const client = new SmplClient({ ...DEFAULT_OPTS, disableTelemetry: false });
+    const metrics = (client as unknown as { _metrics: { close: () => void } | null })._metrics;
+    expect(metrics).not.toBeNull();
+    const metricsClose = vi.spyOn(metrics!, "close");
+    client.close();
+    expect(metricsClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not build a metrics reporter when telemetry is disabled", () => {
+    const client = new SmplClient({ ...DEFAULT_OPTS, disableTelemetry: true });
+    expect((client as unknown as { _metrics: unknown })._metrics).toBeNull();
+    client.close();
+  });
+
+  it("_ensureWs() starts the deferred machinery and returns a shared WS", () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    const ws = client._ensureWs();
+    expect(ws).toBeDefined();
+    expect((client as unknown as { _started: boolean })._started).toBe(true);
+    // Same instance on a second call.
+    expect(client._ensureWs()).toBe(ws);
+    client.close();
+  });
+
+  it("masks a short API key (<= 14 chars) in the lifecycle debug log", () => {
+    // Exercises the short-key branch of the mask computation.
+    const client = new SmplClient({ ...DEFAULT_OPTS, apiKey: "sk_short" });
+    expect(client).toBeInstanceOf(SmplClient);
+    client.close();
+  });
+
+  it("_registerServiceContext swallows POST failures (fire-and-forget)", async () => {
+    const client = new SmplClient(DEFAULT_OPTS);
+    // Force the bulk POST to reject so the catch branch runs.
+    const appHttp = (client as unknown as { _appHttp: { POST: unknown } })._appHttp;
+    appHttp.POST = vi.fn().mockRejectedValue(new Error("network down"));
+    await expect(
+      (
+        client as unknown as { _registerServiceContext: () => Promise<void> }
+      )._registerServiceContext(),
+    ).resolves.toBeUndefined();
+    client.close();
   });
 });
 
@@ -331,7 +463,9 @@ describe("SmplClient — extraHeaders", () => {
       extraHeaders: { "X-Tenant": "acme", Authorization: "should-be-overridden" },
     });
     try {
-      await client.flags._connectInternal("production");
+      // Lazily connect flags; the discovery flush + flags list GETs carry the
+      // shared headers. SDK-owned headers win over the caller's overrides.
+      await client.flags._ensureConnected();
       const flagReq = seen.find((r) => r.url.includes("flags"));
       expect(flagReq).toBeDefined();
       expect(flagReq!.headers.get("x-tenant")).toBe("acme");

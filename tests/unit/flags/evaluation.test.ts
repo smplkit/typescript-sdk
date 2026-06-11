@@ -1,86 +1,87 @@
+/**
+ * Local JSON Logic evaluation via the synchronous `_evaluateHandle` path.
+ *
+ * Follows ADR-022 §2.6: environment lookup → disabled short-circuit →
+ * first-matching-rule → env default → flag default. The store is seeded
+ * directly so these tests stay focused on evaluation semantics.
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { describe, expect, it } from "vitest";
-
-// We test the internal evaluateFlag function indirectly through
-// _evaluateHandle, which is @internal but accessible.
-
 import { Context } from "../../../src/flags/types.js";
-import { FlagsClient } from "../../../src/flags/client.js";
-import { SmplError } from "../../../src/errors.js";
+import { BooleanFlag, StringFlag, NumberFlag } from "../../../src/flags/models.js";
+import { makeWiredClient } from "./_helpers.js";
+import type { FlagsClient } from "../../../src/flags/client.js";
 
-function makeFlagsClient(): FlagsClient {
-  const mockWs = { on: () => {}, off: () => {}, connectionStatus: "disconnected" };
-  return new FlagsClient("sk_test", () => mockWs as never, 30000);
+function seedStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
+  (client as any)._flagStore = store;
+  (client as any)._connected = true;
 }
 
-function setFlagStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
-  (client as Record<string, unknown>)["_flagStore"] = store;
-  (client as Record<string, unknown>)["_initialized"] = true;
-  (client as Record<string, unknown>)["_environment"] = "staging";
+function handle(client: FlagsClient, type: string, id: string, def: unknown): any {
+  const fields = {
+    id,
+    name: id,
+    type,
+    default: def,
+    values: null,
+    description: null,
+    environments: {},
+    createdAt: null,
+    updatedAt: null,
+  };
+  if (type === "STRING") return new StringFlag(client as any, fields as any);
+  if (type === "NUMERIC") return new NumberFlag(client as any, fields as any);
+  return new BooleanFlag(client as any, fields as any);
 }
 
 describe("Local JSON Logic evaluation", () => {
-  it("should throw SmplError when not initialized", () => {
-    const client = makeFlagsClient();
-    const handle = client.booleanFlag("my-flag", false);
-    expect(() => handle.get()).toThrow(SmplError);
-    expect(() => handle.get()).toThrow("Flags not initialized");
+  it("returns the code default when the flag is not in the store", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {});
+    expect(handle(client, "BOOLEAN", "my-flag", false).get()).toBe(false);
   });
 
-  it("should evaluate enabled environment with matching rule", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("evaluates an enabled environment with a matching rule", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "checkout-v2": {
         id: "checkout-v2",
         default: false,
         environments: {
           staging: {
             enabled: true,
-            rules: [
-              {
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: true,
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: true }],
           },
         },
       },
     });
-
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
-
-    const handle = client.booleanFlag("checkout-v2", false);
-    expect(handle.get()).toBe(true);
+    expect(handle(client, "BOOLEAN", "checkout-v2", false).get()).toBe(true);
   });
 
-  it("should return flag default when environment is disabled", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("returns the flag default when the environment is disabled", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "my-flag": {
         id: "my-flag",
         default: "red",
         environments: {
           staging: {
             enabled: false,
-            rules: [
-              {
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: "blue",
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: "blue" }],
           },
         },
       },
     });
-
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
-
-    const handle = client.stringFlag("my-flag", "green");
-    expect(handle.get()).toBe("red");
+    expect(handle(client, "STRING", "my-flag", "green").get()).toBe("red");
   });
 
-  it("should return env default when no rules match", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("returns the env default when no rules match", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "banner-color": {
         id: "banner-color",
         default: "red",
@@ -88,27 +89,18 @@ describe("Local JSON Logic evaluation", () => {
           staging: {
             enabled: true,
             default: "blue",
-            rules: [
-              {
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: "green",
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: "green" }],
           },
         },
       },
     });
-
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
-
-    const handle = client.stringFlag("banner-color", "yellow");
-    // No rule matches, env default is "blue"
-    expect(handle.get()).toBe("blue");
+    expect(handle(client, "STRING", "banner-color", "yellow").get()).toBe("blue");
   });
 
-  it("should use first-match-wins semantics", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("uses first-match-wins semantics", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "banner-color": {
         id: "banner-color",
         default: "red",
@@ -116,55 +108,29 @@ describe("Local JSON Logic evaluation", () => {
           staging: {
             enabled: true,
             rules: [
-              {
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: "blue",
-              },
-              {
-                logic: { "==": [{ var: "account.industry" }, "technology"] },
-                value: "green",
-              },
+              { logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: "blue" },
+              { logic: { "==": [{ var: "account.industry" }, "technology"] }, value: "green" },
             ],
           },
         },
       },
     });
-
-    // Both rules match, but first should win
     client.setContextProvider(() => [
       new Context("user", "u-1", { plan: "enterprise" }),
       new Context("account", "a-1", { industry: "technology" }),
     ]);
-
-    const handle = client.stringFlag("banner-color", "red");
-    expect(handle.get()).toBe("blue");
+    expect(handle(client, "STRING", "banner-color", "red").get()).toBe("blue");
   });
 
-  it("should return flag default when environment not configured", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
-      "my-flag": {
-        id: "my-flag",
-        default: 42,
-        environments: {},
-      },
-    });
-
-    const handle = client.numberFlag("my-flag", 0);
-    expect(handle.get()).toBe(42);
+  it("returns the flag default when the environment is not configured", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, { "my-flag": { id: "my-flag", default: 42, environments: {} } });
+    expect(handle(client, "NUMERIC", "my-flag", 0).get()).toBe(42);
   });
 
-  it("should return code default when flag not in store", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {});
-
-    const handle = client.booleanFlag("nonexistent", false);
-    expect(handle.get()).toBe(false);
-  });
-
-  it("should skip rules with empty logic", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("skips rules with empty logic", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "my-flag": {
         id: "my-flag",
         default: false,
@@ -173,61 +139,40 @@ describe("Local JSON Logic evaluation", () => {
             enabled: true,
             rules: [
               { logic: {}, value: true },
-              {
-                logic: { "==": [{ var: "user.plan" }, "free"] },
-                value: false,
-              },
+              { logic: { "==": [{ var: "user.plan" }, "free"] }, value: false },
             ],
           },
         },
       },
     });
-
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
-
-    const handle = client.booleanFlag("my-flag", false);
-    // First rule has empty logic and should be skipped, second matches
-    expect(handle.get()).toBe(false);
+    expect(handle(client, "BOOLEAN", "my-flag", false).get()).toBe(false);
   });
 
-  it("should handle explicit context override", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("honours an explicit context override over the provider", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "checkout-v2": {
         id: "checkout-v2",
         default: false,
         environments: {
           staging: {
             enabled: true,
-            rules: [
-              {
-                logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-                value: true,
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "user.plan" }, "enterprise"] }, value: true }],
           },
         },
       },
     });
-
-    // Provider returns free user
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "free" })]);
+    const h = handle(client, "BOOLEAN", "checkout-v2", false);
 
-    const handle = client.booleanFlag("checkout-v2", false);
-
-    // Override with enterprise user
-    const result = handle.get({
-      context: [new Context("user", "u-1", { plan: "enterprise" })],
-    });
-    expect(result).toBe(true);
-
-    // Without override, provider context is used (free user)
-    expect(handle.get()).toBe(false);
+    expect(h.get({ context: [new Context("user", "u-1", { plan: "enterprise" })] })).toBe(true);
+    expect(h.get()).toBe(false); // provider context (free) used when no override
   });
 
-  it("should skip rules with invalid json-logic that throws", () => {
-    const client = makeFlagsClient();
-    setFlagStore(client, {
+  it("skips rules whose json-logic throws", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
       "my-flag": {
         id: "my-flag",
         default: "fallback",
@@ -237,7 +182,6 @@ describe("Local JSON Logic evaluation", () => {
             default: "env-default",
             rules: [
               {
-                // Invalid logic that will cause json-logic-js to throw
                 logic: { invalid_op_that_does_not_exist: [{ var: "user.plan" }] },
                 value: "should-not-be-returned",
               },
@@ -246,65 +190,42 @@ describe("Local JSON Logic evaluation", () => {
         },
       },
     });
-
     client.setContextProvider(() => [new Context("user", "u-1", { plan: "enterprise" })]);
-
-    const handle = client.stringFlag("my-flag", "code-default");
-    // Invalid rule is caught and skipped, falls through to env default
-    expect(handle.get()).toBe("env-default");
+    expect(handle(client, "STRING", "my-flag", "code-default").get()).toBe("env-default");
   });
 
-  it("should auto-inject service context from parent", () => {
-    const client = makeFlagsClient();
-    // Set a parent with service
-    client._parent = { _environment: "staging", _service: "my-svc" };
-
-    setFlagStore(client, {
+  it("auto-injects the service context from the parent", () => {
+    const { client } = makeWiredClient({ service: "my-svc" });
+    seedStore(client, {
       "svc-flag": {
         id: "svc-flag",
         default: false,
         environments: {
           staging: {
             enabled: true,
-            rules: [
-              {
-                logic: { "==": [{ var: "service.key" }, "my-svc"] },
-                value: true,
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "service.key" }, "my-svc"] }, value: true }],
           },
         },
       },
     });
-
-    const handle = client.booleanFlag("svc-flag", false);
-    expect(handle.get()).toBe(true);
+    expect(handle(client, "BOOLEAN", "svc-flag", false).get()).toBe(true);
   });
 
-  it("should not override explicit service context", () => {
-    const client = makeFlagsClient();
-    client._parent = { _environment: "staging", _service: "auto-svc" };
-
-    setFlagStore(client, {
+  it("does not override an explicit service context", () => {
+    const { client } = makeWiredClient({ service: "auto-svc" });
+    seedStore(client, {
       "svc-flag": {
         id: "svc-flag",
         default: false,
         environments: {
           staging: {
             enabled: true,
-            rules: [
-              {
-                logic: { "==": [{ var: "service.key" }, "explicit-svc"] },
-                value: true,
-              },
-            ],
+            rules: [{ logic: { "==": [{ var: "service.key" }, "explicit-svc"] }, value: true }],
           },
         },
       },
     });
-
-    const handle = client.booleanFlag("svc-flag", false);
-    // Explicit service context overrides auto-injected
-    expect(handle.get({ context: [new Context("service", "explicit-svc", {})] })).toBe(true);
+    const h = handle(client, "BOOLEAN", "svc-flag", false);
+    expect(h.get({ context: [new Context("service", "explicit-svc", {})] })).toBe(true);
   });
 });

@@ -3,12 +3,9 @@
  */
 
 /**
- * Log severity levels used by the Smpl Logging service.
+ * Severity level of a logger.
  *
- * Members are declared in increasing order of severity per the
- * convention of every major JS/TS logging library (winston, bunyan,
- * pino, npm). `SILENT` is the all-suppressing sentinel and sits at
- * the end.
+ * Ordered from most-verbose (`TRACE`) to least-verbose (`SILENT`).
  */
 export enum LogLevel {
   TRACE = "TRACE",
@@ -21,11 +18,15 @@ export enum LogLevel {
 }
 
 /**
- * Describes a logger effective-level change. Frozen — fields cannot be
- * mutated after construction so a listener cannot affect later listeners.
+ * Fired once per managed logger whose effective level the SDK just applied.
  *
- * One instance per logger whose effective level moved; emitted in lockstep
- * with the matching `adapter.applyLevel(...)` call.
+ * Fields:
+ * - `id`: the affected logger's normalized id.
+ * - `level`: the newly-applied effective smplkit level string (e.g.
+ *   `"INFO"`, `"DEBUG"`); same value the resolution algorithm returns and
+ *   that `smplLevelToPython` converts.
+ * - `source`: short string identifying the trigger — typically `"websocket"`
+ *   or `"manual"` (a {@link LoggingClient.refresh} call).
  */
 export class LoggerChangeEvent {
   readonly id: string;
@@ -41,25 +42,26 @@ export class LoggerChangeEvent {
 }
 
 /**
- * Describes a logger to register via `mgmt.loggers.register([source, ...])`.
+ * Describes a logger to register via `client.logging.loggers.register`.
  *
- * Unlike runtime auto-discovery (which reads the current process's logging
- * framework), `mgmt.loggers.register` accepts explicit `service` and
- * `environment` overrides — useful for sample-data seeding, cross-tenant
- * migration, and test fixtures.
+ * Used both for buffered runtime discovery (called by {@link SmplClient} as
+ * adapters discover loggers) and for explicit registration from setup scripts
+ * that already know the `(service, environment)` they belong to.
  *
- * Frozen.
+ * @param name - Logger name (e.g. `"sqlalchemy.engine"`). Normalized to
+ *   lowercase with slashes and colons replaced by dots before sending to the
+ *   API.
+ * @param resolvedLevel - Effective log level for this source.
+ * @param level - Explicit (configured) log level, if different from
+ *   `resolvedLevel`. Pass `null` when the level is inherited.
+ * @param service - Service name this source belongs to (optional).
+ * @param environment - Environment name this source belongs to (optional).
  */
 export class LoggerSource {
-  /** Logger name (e.g. `"sqlalchemy.engine"`). */
   readonly name: string;
-  /** Service name this source belongs to. */
   readonly service: string | null;
-  /** Environment name this source belongs to. */
   readonly environment: string | null;
-  /** Effective log level for this source. */
   readonly resolvedLevel: LogLevel;
-  /** Explicit (configured) log level, if different from `resolvedLevel`. */
   readonly level: LogLevel | null;
 
   constructor(
@@ -83,8 +85,10 @@ export class LoggerSource {
 /**
  * Per-environment configuration on a logger or log group.
  *
- * Frozen — mutate via `logger.setLevel(level, { environment: "..." })`
- * or remove with `logger.clearLevel({ environment: "..." })`.
+ * Lives at `logger.environments[envName]` (a
+ * `Record<string, LoggerEnvironment>`). Frozen — mutate the override via
+ * `logger.setLevel(level, { environment: "..." })` or remove it via
+ * `logger.clearLevel({ environment: "..." })`.
  */
 export class LoggerEnvironment {
   /** Per-environment level override (`null` means no override). */

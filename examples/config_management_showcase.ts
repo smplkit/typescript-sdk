@@ -6,27 +6,26 @@
  *   - A valid smplkit API key, provided via one of:
  *     - `SMPLKIT_API_KEY` environment variable
  *     - `~/.smplkit` configuration file (see SDK docs)
- *   - The smplkit Config service running and reachable
  *
  * Usage:
  *
  *   tsx examples/config_management_showcase.ts
  */
 
-import { SmplManagementClient } from "../src/index.js";
+import { SmplClient } from "../src/index.js";
 import {
   cleanupManagementShowcase,
   setupManagementShowcase,
 } from "./setup/config_management_setup.js";
 
 async function main(): Promise<void> {
-  // create the client (TypeScript has a single Promise-based client)
-  const manage = new SmplManagementClient();
+  // TypeScript has a single Promise-based client
+  const client = new SmplClient();
   try {
-    await setupManagementShowcase(manage);
+    await setupManagementShowcase(client);
 
     // create a "parent" configuration that all other configs inherit from
-    const shared = manage.config.new("showcase-common", {
+    const shared = client.config.new("showcase-common", {
       name: "Showcase Common",
       description: "Showcase-only shared configuration.",
     });
@@ -41,7 +40,7 @@ async function main(): Promise<void> {
     console.log(`Created config: ${shared.id}`);
 
     // create a config (inherits from showcase-common)
-    const userService = manage.config.new("showcase-user-service", {
+    const userService = client.config.new("showcase-user-service", {
       name: "Showcase User Service",
       description: "Configuration for the user microservice.",
       parent: shared,
@@ -67,14 +66,14 @@ async function main(): Promise<void> {
     console.log(`Updated config: ${userService.id}`);
 
     // list configs
-    const configs = await manage.config.list();
+    const configs = await client.config.list();
     for (const cfg of configs) {
       const parentInfo = cfg.parent ? ` (parent: ${cfg.parent})` : " (root)";
       console.log(`  ${cfg.id}${parentInfo}`);
     }
 
     // get a config
-    const fetched = await manage.config.get("showcase-user-service");
+    const fetched = await client.config.get("showcase-user-service");
     console.log(`Fetched: id=${fetched.id}, name=${fetched.name}`);
     console.log(`  description=${fetched.description}`);
     console.log(`  parent=${fetched.parent ?? "(none)"}`);
@@ -86,10 +85,10 @@ async function main(): Promise<void> {
     console.log("Deleted configs");
 
     // cleanup
-    await cleanupManagementShowcase(manage);
+    await cleanupManagementShowcase(client);
     console.log("Done!");
   } finally {
-    await manage.close();
+    client.close();
   }
 }
 

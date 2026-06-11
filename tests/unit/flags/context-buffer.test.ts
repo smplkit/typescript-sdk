@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Context } from "../../../src/flags/types.js";
-import { ContextRegistrationBuffer } from "../../../src/flags/client.js";
+import { ContextRegistrationBuffer } from "../../../src/buffer.js";
 
 describe("ContextRegistrationBuffer", () => {
   it("should accept single context", () => {

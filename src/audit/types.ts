@@ -1,29 +1,44 @@
 /**
- * Audit event resource types — surface exposed by `client.audit.events.*`.
+ * Audit resource models exposed by the SDK.
  *
- * ADR-047 §2.3.1.
+ * The wrapper layer's domain types — `Event`, `Forwarder`,
+ * `HttpConfiguration`, `HttpHeader`, `ResourceType`, `EventType` —
+ * sit on top of the auto-generated `../generated/audit.d.ts` types.
+ * The split keeps the public-facing SDK surface stable across
+ * regenerations.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /**
- * A single audit event as returned by the audit service. ADR-047 §2.3.1.
+ * A single audit event as returned by the audit service.
+ *
+ * Field set mirrors the JSON:API resource attributes plus the resource
+ * `id`.
+ *
+ * Actor attribution (`actorType`, `actorId`, `actorLabel`) is
+ * customer-supplied and all three are free-form, nullable strings. The
+ * audit service stores whatever the caller passed in and never
+ * backfills from the request credential — callers that want events
+ * attributed to the calling user or API key must populate the fields
+ * themselves on `record(...)`.
  */
 export interface AuditEvent {
   /** Server-assigned UUID for this event. */
   id: string;
-  /** Event type slug — e.g. `"user.created"`, `"invoice.paid"`. */
+  /** What happened (e.g. `"user.created"`, `"invoice.paid"`). Any non-empty string. */
   eventType: string;
-  /** Type of resource the event operated on — e.g. `"invoice"`. */
+  /** Kind of resource the event is about (e.g. `"invoice"`). Any non-empty string. */
   resourceType: string;
-  /** Customer-facing id of the resource the event operated on. */
+  /** Identifier of the specific resource the event is about. */
   resourceId: string;
-  /** ISO-8601-with-offset timestamp of when the event actually happened. */
+  /** When the event actually happened, as reported by the source. */
   occurredAt: string;
-  /** ISO-8601-with-offset timestamp of when the audit service ingested the event. */
+  /** When the audit service first ingested this event. */
   createdAt: string;
   /**
-   * Kind of actor that caused the event — e.g. `"USER"`, `"API_KEY"`,
-   * `"SYSTEM"`, or any label the caller chose. `null` when the caller
-   * did not supply one; the audit service never backfills.
+   * Kind of actor that caused the event (e.g. `"USER"`, `"API_KEY"`,
+   * `"SYSTEM"`, or any label the caller chose). `null` when not supplied.
    */
   actorType: string | null;
   /**
@@ -32,20 +47,27 @@ export interface AuditEvent {
    */
   actorId: string | null;
   /**
-   * Human-readable label for the actor (e.g. an email address or API
-   * key name). `null` when not supplied.
+   * Human-readable label for the actor (e.g. an email address or API key
+   * name). `null` when not supplied.
    */
   actorLabel: string | null;
   /**
-   * Free-form per-event payload defined by the customer. Surfaced on
-   * the audit-event resource as a structured JSONB column.
+   * Free-form bucket label for the event (e.g. `"auth"`, `"billing"`,
+   * `"config-change"`). Stored exactly as supplied; drives the audit log's
+   * category filter and the `categories` discovery listing
+   * ({@link AuditClient.categories}). `null` when not supplied.
+   */
+  category: string | null;
+  /**
+   * Free-form per-event payload defined by the customer. Surfaced on the
+   * audit-event resource as a structured JSONB column.
    */
   data: Record<string, unknown>;
   /** Customer-supplied dedupe key. Empty when the customer didn't supply one. */
   idempotencyKey: string;
   /**
-   * When `true`, the audit service records the event but skips SIEM
-   * forwarder delivery regardless of any matching forwarder filter.
+   * When `true`, skip this event from SIEM forwarder delivery regardless
+   * of any matching forwarder filter.
    */
   doNotForward: boolean;
   /**
@@ -62,32 +84,59 @@ export interface AuditEvent {
  * Inputs for `client.audit.events.record(...)`.
  */
 export interface CreateEventInput {
-  /** Event type slug — e.g. `"invoice.paid"`. */
+  /** What happened (e.g. `"invoice.created"`). Any non-empty string. */
   eventType: string;
-  /** Type of resource the event operated on. */
+  /**
+   * Kind of resource the event is about (e.g. `"invoice"`). Any non-empty
+   * string. Customer events must NOT use the `smpl.` prefix — that
+   * namespace is reserved for smplkit-emitted events and the server will
+   * reject customer attempts with a 403.
+   */
   resourceType: string;
-  /** Customer-facing id of the resource. */
+  /** Identifier of the affected resource. */
   resourceId: string;
-  /** Defaults to server-side `now()` if omitted. */
+  /** When the event happened in the originating system. Defaults to `now` server-side if omitted. */
   occurredAt?: Date | string;
   /**
    * Free-form label for the kind of actor that caused the event (e.g.
    * `"USER"`, `"API_KEY"`, `"SYSTEM"`, or any custom value). The audit
-   * service never backfills this from the request credential — supply
-   * it explicitly when you want the event attributed.
+   * service never backfills this from the request credential — supply it
+   * explicitly when you want the event attributed.
    */
   actorType?: string;
-  /** Free-form identifier of the actor. Any string scheme is accepted. */
+  /** Free-form identifier of the actor that caused the event. Any string scheme is accepted. */
   actorId?: string;
-  /** Human-readable label for the actor (e.g. email or API key name). */
+  /** Human-readable label for the actor (e.g. an email address or API key name). */
   actorLabel?: string;
   /**
-   * Free-form contextual JSON. To record a resource snapshot, nest it
-   * inside `data` — smplkit's internal convention is `data.snapshot`,
-   * but the shape is unconstrained.
+   * Optional free-form bucket label for the event (e.g. `"auth"`,
+   * `"billing"`, `"config-change"`). Stored exactly as supplied; powers
+   * the audit log's category filter and the `categories` discovery
+   * listing ({@link AuditClient.categories}). Omit it to leave the event
+   * uncategorized.
+   */
+  category?: string;
+  /**
+   * Free-form contextual JSON. To record a resource snapshot, place it
+   * inside `data` — smplkit's internal convention nests it at
+   * `data.snapshot` for consistency with the platform's own emissions,
+   * but the shape is unconstrained:
+   *
+   * ```typescript
+   * record({
+   *   eventType: "invoice.created",
+   *   resourceType: "invoice",
+   *   resourceId: "inv-1",
+   *   data: { snapshot: { total_cents: 4900 }, ip: "1.2.3.4" },
+   * });
+   * ```
    */
   data?: Record<string, unknown>;
-  /** Optional caller-supplied idempotency key. Server derives one from event content if absent. */
+  /**
+   * Optional caller-supplied idempotency key. If omitted, the server
+   * derives one from event content (account_id + event_type +
+   * resource_type + resource_id + occurred_at + actor_* + data).
+   */
   idempotencyKey?: string;
   /**
    * When `true`, the audit service records the event normally but does
@@ -96,6 +145,16 @@ export interface CreateEventInput {
    * forwarder so the skip is visible in the forwarder delivery log.
    */
   doNotForward?: boolean;
+  /**
+   * When `true`, block until the buffer drains (or `flushTimeoutMs`
+   * elapses) before returning.
+   */
+  flush?: boolean;
+  /**
+   * Upper bound on the blocking flush, in milliseconds. Ignored when
+   * `flush` is false.
+   */
+  flushTimeoutMs?: number;
 }
 
 /**
@@ -112,19 +171,16 @@ export interface ListEventsParams {
   resourceId?: string;
   /** Filter to this actor type. */
   actorType?: string;
-  /** Filter to this actor id. */
+  /** Filter to this actor id. Matched as a literal string against whatever the recording call stored. */
   actorId?: string;
   /** Range notation per ADR-014, e.g. `"[2026-01-01T00:00:00Z,*)"`. */
   occurredAtRange?: string;
   /**
-   * Restrict results to these environment keys (e.g.
-   * `["production", "staging"]`). Sent as a comma-separated
-   * `filter[environment]`. Omit (or pass an empty array) to scope to your
-   * single accessible environment; send more than one only when your
-   * credential can read multiple. The reserved value `"smplkit"` selects
-   * the platform change events smplkit records about your own resources
-   * (flags, configuration, and so on), which are not tied to a deployment
-   * environment.
+   * Scope the read to a set of environments: pass a list of environment
+   * keys and/or the reserved `"smplkit"` control-plane bucket; the values
+   * are sent comma-separated as `filter[environment]`. Omit it (the
+   * default) to leave the param off entirely and let environment scope
+   * fall back to the `X-Smplkit-Environment` request header.
    */
   environments?: string[];
   /** Items per page (1–1000). Defaults to 1000. */
@@ -134,7 +190,10 @@ export interface ListEventsParams {
 }
 
 /**
- * Page of events returned by `client.audit.events.list(...)`.
+ * A single page from `client.audit.events.list(...)`.
+ *
+ * `events` is the page's events; `nextCursor` is the opaque token for the
+ * next page (or `null` when this is the last page).
  */
 export interface ListEventsPage {
   /** Events on this page, newest first. */
@@ -148,12 +207,20 @@ export interface ListEventsPage {
 // ---------------------------------------------------------------------------
 
 /**
- * A distinct `resource_type` slug seen for the account.
+ * A distinct resource_type slug seen for the account.
+ *
+ * The `id` and `resourceType` fields are the same value — JSON:API
+ * surfaces the customer-facing key as the resource id (ADR-014 "key as
+ * id"). The duplication keeps SDK consumers from having to dig into the
+ * id field when filtering UI controls; pick whichever name reads better
+ * in context.
  */
 export interface ResourceType {
-  /** The resource_type slug, surfaced as the JSON:API resource id. */
+  /** The resource-type slug, surfaced as the JSON:API resource id. */
   id: string;
-  /** ISO-8601 timestamp of the earliest sighting for the account. */
+  /** Same value as {@link id}; provided for readability. */
+  resourceType: string;
+  /** Earliest sighting of this resource_type for the account. */
   createdAt: string;
 }
 
@@ -162,12 +229,10 @@ export interface ResourceType {
  */
 export interface ListResourceTypesParams {
   /**
-   * Restrict the discovered resource types to those seen in these
-   * environment keys (e.g. `["production", "staging"]`). Sent as a
-   * comma-separated `filter[environment]`. Omit (or pass an empty array)
-   * to scope to your single accessible environment. The reserved value
-   * `"smplkit"` selects the platform resource types smplkit records about
-   * your own resources.
+   * Scope the listing to a set of environments: pass a list of environment
+   * keys and/or the reserved `"smplkit"` control-plane bucket; the values
+   * are sent comma-separated as `filter[environment]`. Omit it (the
+   * default) to leave the param off entirely.
    */
   environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
@@ -179,8 +244,11 @@ export interface ListResourceTypesParams {
 }
 
 /**
- * Page of resource types returned by
- * `client.audit.resourceTypes.list(...)`.
+ * A single page from `client.audit.resourceTypes.list(...)`.
+ *
+ * `resourceTypes` is the page; `pagination` is the response's
+ * `meta.pagination` block (`page`, `size`, and — only when the caller
+ * passed `metaTotal: true` — `total` and `totalPages`).
  */
 export interface ListResourceTypesPage {
   /** Resource types on this page, alphabetically sorted. */
@@ -194,15 +262,21 @@ export interface ListResourceTypesPage {
 // ---------------------------------------------------------------------------
 
 /**
- * A distinct event type slug seen for the account.
+ * A distinct event_type slug seen for the account.
+ *
+ * Same shape as {@link ResourceType} — `id` and `eventType` are the same
+ * value. When the parent list call filtered by `resourceType`,
+ * `createdAt` is the first sighting of that specific (event_type,
+ * resource_type) triple, not the event_type overall.
  */
 export interface EventType {
-  /** The event type slug, surfaced as the JSON:API resource id. */
+  /** The event_type slug, surfaced as the JSON:API resource id. */
   id: string;
+  /** Same value as {@link id}; provided for readability. */
+  eventType: string;
   /**
-   * ISO-8601 timestamp of the earliest sighting for the account. When
-   * the list call was filtered by `resourceType`, this is the first
-   * sighting of that specific (event_type, resource_type) pair.
+   * Earliest sighting of this event_type (or event_type/resource_type pair
+   * when the list call was filtered) for the account.
    */
   createdAt: string;
 }
@@ -214,11 +288,10 @@ export interface ListEventTypesParams {
   /** When set, returns only the event types seen with this resource_type. */
   filterResourceType?: string;
   /**
-   * Restrict the discovered event types to those seen in these environment
-   * keys (e.g. `["production", "staging"]`). Sent as a comma-separated
-   * `filter[environment]`. Omit (or pass an empty array) to scope to your
-   * single accessible environment. The reserved value `"smplkit"` selects
-   * the platform event types smplkit records about your own resources.
+   * Scope the listing to a set of environments: pass a list of environment
+   * keys and/or the reserved `"smplkit"` control-plane bucket; the values
+   * are sent comma-separated as `filter[environment]`. Omit it (the
+   * default) to leave the param off entirely.
    */
   environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
@@ -230,11 +303,70 @@ export interface ListEventTypesParams {
 }
 
 /**
- * Page of event types returned by `client.audit.eventTypes.list(...)`.
+ * A single page from `client.audit.eventTypes.list(...)`.
+ *
+ * `eventTypes` is the page; `pagination` is the response's
+ * `meta.pagination` block (`page`, `size`, and — only when the caller
+ * passed `metaTotal: true` — `total` and `totalPages`).
  */
 export interface EventTypeListPage {
   /** Event types on this page, alphabetically sorted. */
   eventTypes: EventType[];
+  /** Pagination metadata. */
+  pagination: Pagination;
+}
+
+// ---------------------------------------------------------------------------
+// Categories (distinct category values seen in the account)
+// ---------------------------------------------------------------------------
+
+/**
+ * A distinct `category` value seen for the account.
+ *
+ * Same shape as {@link ResourceType} and {@link EventType} — `id` and
+ * `category` are the same value, surfaced as the JSON:API resource id
+ * (ADR-014 "key as id"). The duplication keeps SDK consumers from having
+ * to dig into the `id` field when populating filter UI controls; pick
+ * whichever name reads better in context.
+ */
+export interface Category {
+  /** The category value, surfaced as the JSON:API resource id. */
+  id: string;
+  /** Same value as {@link id}; provided for readability. */
+  category: string;
+  /** Earliest sighting of this category for the account. */
+  createdAt: string;
+}
+
+/**
+ * Parameters accepted by `client.audit.categories.list(...)`.
+ */
+export interface ListCategoriesParams {
+  /**
+   * Scope the listing to a set of environments: pass a list of environment
+   * keys and/or the reserved `"smplkit"` control-plane bucket; the values
+   * are sent comma-separated as `filter[environment]`. Omit it (the
+   * default) to leave the param off entirely.
+   */
+  environments?: string[];
+  /** 1-based page number to return. Defaults to 1. */
+  pageNumber?: number;
+  /** Items per page (1–1000). Defaults to 1000. */
+  pageSize?: number;
+  /** Include `total` and `totalPages` in {@link Pagination}. Defaults to false. */
+  metaTotal?: boolean;
+}
+
+/**
+ * A single page from `client.audit.categories.list(...)`.
+ *
+ * `categories` is the page; `pagination` is the response's
+ * `meta.pagination` block (`page`, `size`, and — only when the caller
+ * passed `metaTotal: true` — `total` and `totalPages`).
+ */
+export interface CategoryListPage {
+  /** Categories on this page, alphabetically sorted. */
+  categories: Category[];
   /** Pagination metadata. */
   pagination: Pagination;
 }
@@ -259,12 +391,15 @@ export interface HttpHeader {
 /**
  * Supported SIEM forwarder destination types.
  *
- * ADR-047 §2.12. Mirrors the audit service's OpenAPI `ForwarderType`
- * enum so callers get autocomplete and the compiler rejects typos at
- * build time. The available types are real-time HTTP destinations
- * sharing one outbound plumbing path. Object-storage archival (S3, GCS,
- * etc.) has different operational shape (batching, IAM, lifecycle
- * policies) and will get its own type if customer demand warrants.
+ * The audit service's OpenAPI spec declares `forwarder_type` as a
+ * string-with-enum-constraint (per ADR-047 §2.12, refined by ADR-050);
+ * this TypeScript-side enum mirrors that constraint so customers get
+ * autocomplete and type-checked values instead of stringly-typed inputs.
+ *
+ * The available types are real-time HTTP destinations sharing one
+ * outbound plumbing path. Object-storage archival (S3, GCS, etc.) has
+ * different operational shape (batching, IAM, lifecycle policies) and
+ * will get its own type if customer demand warrants — see ADR-047 §2.12.
  */
 export enum ForwarderType {
   DATADOG = "datadog",
@@ -279,8 +414,8 @@ export enum ForwarderType {
 /**
  * HTTP verb used by a forwarder's outbound delivery.
  *
- * Mirrors the audit service's OpenAPI `HttpConfigurationMethod` enum so
- * callers get autocomplete and a typed value back from
+ * Mirrors the audit spec's `HttpConfigurationMethod` enum so customers
+ * get autocomplete and a typed value back from
  * `forwarder.configuration.method`.
  */
 export enum HttpMethod {
@@ -292,8 +427,9 @@ export enum HttpMethod {
 }
 
 /**
- * Engine used to evaluate {@link Forwarder.transform}. Must be set
- * whenever `transform` is set. Today only `JSONATA` is supported.
+ * Engine used to evaluate a forwarder's `transform`.
+ *
+ * Today only {@link JSONATA} is supported.
  */
 export enum TransformType {
   JSONATA = "JSONATA",
@@ -301,10 +437,6 @@ export enum TransformType {
 
 /**
  * Forwarder destination HTTP request shape.
- *
- * Today every destination type uses HTTP; future transports (FTP, SQS,
- * ...) will join this as members of a discriminated union under
- * {@link Forwarder.configuration}.
  */
 export class HttpConfiguration {
   /** HTTP verb used for delivery. Defaults to {@link HttpMethod.POST}. */
@@ -317,22 +449,22 @@ export class HttpConfiguration {
    */
   headers: HttpHeader[];
   /**
-   * Status the destination must return for delivery to count as success
-   * — either an exact code (`"200"`, `"204"`) or a status class
-   * (`"2xx"`, `"4xx"`). Defaults to `"2xx"`.
+   * Status the destination must return for delivery to count as success —
+   * either an exact code (`"200"`, `"204"`) or a class (`"2xx"`, `"4xx"`).
+   * Defaults to `"2xx"`.
    */
   successStatus: string;
   /**
-   * Whether to verify the destination's TLS certificate chain. Defaults
-   * to `true`; flip to `false` only for short-lived testing against a
+   * Whether to verify the destination's TLS certificate chain. Defaults to
+   * `true`; flip to `false` only for short-lived testing against a
    * destination that serves an untrusted certificate. Prefer pinning the
-   * CA via {@link caCert} for long-lived self-signed setups.
+   * issuing CA via {@link caCert} for long-lived self-signed setups.
    */
   tlsVerify: boolean;
   /**
    * Optional PEM-encoded certificate (or bundle) trusted in addition to
-   * the system CA store. Ignored when {@link tlsVerify} is `false`.
-   * `null` (the default) means "use system CAs only".
+   * the system CA store. Ignored when {@link tlsVerify} is `false`. `null`
+   * (the default) means "use system CAs only".
    */
   caCert: string | null;
 
@@ -356,8 +488,7 @@ export class HttpConfiguration {
 }
 
 /**
- * Per-environment enablement and optional configuration override for a
- * forwarder.
+ * Per-environment enablement and optional configuration override for a forwarder.
  *
  * A forwarder delivers events in a given environment only when that
  * environment has an entry in {@link Forwarder.environments} with
@@ -366,17 +497,17 @@ export class HttpConfiguration {
  */
 export class ForwarderEnvironment {
   /**
-   * Whether the forwarder delivers events in this environment. Defaults
-   * to `false`.
+   * Whether the forwarder delivers events in this environment. Defaults to
+   * `false`.
    */
   enabled: boolean;
   /**
-   * Optional per-environment destination configuration that fully
-   * replaces the forwarder's base {@link Forwarder.configuration} for
-   * this environment. `null` (the default) inherits the base
-   * configuration. As with the base configuration, header values are
-   * plaintext on writes and returned redacted on reads — re-supply real
-   * values before {@link Forwarder.save}.
+   * Optional per-environment destination configuration that fully replaces
+   * the forwarder's base {@link Forwarder.configuration} for this
+   * environment. `null` (the default) inherits the base configuration. As
+   * with the base configuration, header values are plaintext on writes and
+   * returned redacted on reads — re-supply real values before
+   * {@link Forwarder.save}.
    */
   configuration: HttpConfiguration | null;
 
@@ -391,15 +522,17 @@ export class ForwarderEnvironment {
  *
  * Active-record style: mutate fields directly and call {@link save} to
  * persist, or {@link delete} to remove. Header values in
- * `configuration.headers` are always returned redacted on reads — the
- * GET path on the audit API replaces every header value with
- * `"<redacted>"`. Re-supply the real values before calling {@link save}
- * (the SDK does not cache them client-side).
+ * `configuration.headers` are always returned redacted on reads — the GET
+ * path on the audit API replaces every header value with `"<redacted>"`.
+ * Re-supply the real values before calling {@link save} (the SDK does not
+ * cache them client-side).
  */
 export class Forwarder {
   /**
-   * Server-assigned UUID for this forwarder. `null` until {@link save}
-   * has run for the first time.
+   * Caller-supplied unique identifier (key) for this forwarder. Unique
+   * within an account and immutable for the lifetime of the forwarder.
+   * `null` only while the instance represents an unsaved forwarder
+   * constructed without an id (which `save()` would then reject).
    */
   id: string | null;
   /** Display name. Free-form. */
@@ -409,59 +542,53 @@ export class Forwarder {
   /** Destination request configuration. */
   configuration: HttpConfiguration;
   /**
-   * Read-only. Always `false` — the base enablement is pinned off.
-   * Whether a forwarder actually delivers is decided per environment via
-   * {@link environments}; mutating this field has no effect on the
-   * server.
+   * Read-only. Always `false` — the base enablement is pinned off. Whether
+   * a forwarder actually delivers is decided per environment via
+   * {@link environments}; mutating this field has no effect on the server.
    */
-  readonly enabled: boolean;
+  enabled: boolean;
   /**
    * Per-environment overrides keyed by environment key (e.g.
    * `"production"`, `"staging"`). A forwarder delivers in an environment
    * only when `environments[env].enabled` is `true`. Each entry may carry
-   * an optional {@link HttpConfiguration} override; omit it to inherit
-   * the base {@link configuration}. Every referenced environment must
-   * exist and be managed for the account.
+   * an optional {@link HttpConfiguration} override; omit it to inherit the
+   * base {@link configuration}. Every referenced environment must exist and
+   * be managed for the account.
    */
   environments: Record<string, ForwarderEnvironment>;
   /** Optional free-text description. */
   description: string | null;
   /**
-   * When `true`, this forwarder also receives smplkit's own platform
-   * change events — the audit events smplkit records about your own
-   * resources (flag, configuration, and similar changes). Each such event
-   * is delivered through every environment this forwarder is
-   * {@link environments enabled} in, using that environment's resolved
-   * configuration. Defaults to `false`: platform change events are not
-   * forwarded unless you opt in.
+   * When `true`, this forwarder also receives platform change events that
+   * smplkit records about your own resources (flag, configuration, and
+   * similar changes). Each such event is delivered through every
+   * environment this forwarder is enabled in, using that environment's
+   * resolved configuration. Independent of the per-environment
+   * {@link environments} settings, since platform change events are not
+   * tied to a deployment environment. Defaults to `false` — platform
+   * change events are not forwarded unless you opt in.
    */
   forwardSmplkitEvents: boolean;
   /**
    * Optional JSON Logic expression evaluated per event. When set, events
-   * that don't match are recorded as `filtered_out` deliveries instead
-   * of being POSTed to the destination.
+   * that don't match are recorded as `filtered_out` deliveries instead of
+   * being POSTed to the destination.
    */
   filter: Record<string, unknown> | null;
   /**
-   * Optional template applied to each event before delivery. The wire
-   * schema widens to arbitrary JSON to leave room for future transform
-   * engines carrying structured templates; for
-   * {@link TransformType.JSONATA} the value must be a JSONata
-   * expression string. `null` delivers the event JSON as-is.
-   *
-   * {@link transform} and {@link transformType} travel as a pair —
-   * both set, or both `null`. The SDK enforces this at save time.
+   * Optional template applied to each event before delivery. Shape depends
+   * on {@link transformType}; for {@link TransformType.JSONATA}, a string
+   * containing a JSONata expression. `null` delivers the event JSON as-is.
    */
   transform: unknown;
   /**
-   * Engine used to evaluate {@link transform}. Required whenever
-   * {@link transform} is set, forbidden when it isn't. Today only
-   * {@link TransformType.JSONATA} is supported.
+   * Engine used to evaluate {@link transform}. Must be set whenever
+   * {@link transform} is set.
    */
   transformType: TransformType | null;
   /**
-   * When the audit service first persisted this forwarder. `null` for
-   * an unsaved instance.
+   * When the audit service first persisted this forwarder. `null` for an
+   * unsaved instance.
    */
   createdAt: string | null;
   /** When this forwarder was last mutated. */
@@ -518,11 +645,11 @@ export class Forwarder {
   /**
    * Create or update this forwarder on the server.
    *
-   * Upsert behavior is driven by {@link createdAt}: a forwarder with
-   * no `createdAt` is created (POST); otherwise it's full-replace
-   * updated (PUT). After the call, every field is refreshed from the
-   * server response (including newly-assigned `id`, `createdAt`,
-   * `updatedAt`, `version`).
+   * Upsert behavior is driven by {@link createdAt}: a forwarder with no
+   * `createdAt` is created (POST); otherwise it's full-replace updated
+   * (PUT). After the call, every field is refreshed from the server
+   * response (including newly-assigned `id`, `createdAt`, `updatedAt`,
+   * `version`).
    */
   async save(): Promise<void> {
     if (this._client === null) {
@@ -543,16 +670,65 @@ export class Forwarder {
     await this._client._deleteForwarder(this.id);
   }
 
+  /**
+   * Return the override for `environment`, creating an empty one if absent.
+   *
+   * The per-environment mutators reach through here so an existing
+   * override's other field is preserved when only one of `enabled` /
+   * `configuration` is being set.
+   * @internal
+   */
+  private _environmentOverride(environment: string): ForwarderEnvironment {
+    let env = this.environments[environment];
+    if (env === undefined) {
+      env = new ForwarderEnvironment();
+      this.environments[environment] = env;
+    }
+    return env;
+  }
+
+  /**
+   * Set this forwarder's destination configuration in memory.
+   *
+   * With `environment` omitted, replaces the base {@link configuration}.
+   * With `environment` given, sets the per-environment override's
+   * configuration on {@link environments}, creating the override entry if
+   * it doesn't exist yet (preserving any already-set `enabled` on it). Call
+   * {@link save} to persist.
+   */
+  setConfiguration(configuration: HttpConfiguration, environment: string | null = null): void {
+    if (environment === null) {
+      this.configuration = configuration;
+    } else {
+      this._environmentOverride(environment).configuration = configuration;
+    }
+  }
+
+  /**
+   * Set this forwarder's enablement in memory.
+   *
+   * With `environment` omitted, sets the base {@link enabled} (which the
+   * server pins false regardless — enablement is per-environment). With
+   * `environment` given, sets the per-environment override's `enabled` on
+   * {@link environments}, creating the override entry if it doesn't exist
+   * yet (preserving any already-set `configuration` on it). Call
+   * {@link save} to persist.
+   */
+  setEnabled(enabled: boolean, environment: string | null = null): void {
+    if (environment === null) {
+      this.enabled = enabled;
+    } else {
+      this._environmentOverride(environment).enabled = enabled;
+    }
+  }
+
   /** @internal Copy every server-authoritative field from `other` onto self. */
   _apply(other: Forwarder): void {
     this.id = other.id;
     this.name = other.name;
     this.forwarderType = other.forwarderType;
     this.configuration = other.configuration;
-    // `enabled` is declared readonly to the public API (it's server-pinned
-    // false and inert), but the internal refresh still round-trips
-    // whatever the server returned.
-    (this as { enabled: boolean }).enabled = other.enabled;
+    this.enabled = other.enabled;
     this.environments = other.environments;
     this.description = other.description;
     this.forwardSmplkitEvents = other.forwardSmplkitEvents;
@@ -568,8 +744,7 @@ export class Forwarder {
 
 /**
  * @internal Minimal interface that `Forwarder.save()` / `.delete()`
- * call back into. Implemented by `ForwardersClient` in
- * `src/management/audit.ts`.
+ * call back into. Implemented by `ForwardersClient` in `./client.ts`.
  */
 export interface ForwarderModelClient {
   _createForwarder(forwarder: Forwarder): Promise<Forwarder>;
@@ -578,7 +753,7 @@ export interface ForwarderModelClient {
 }
 
 /**
- * Parameters accepted by `mgmt.audit.forwarders.list(...)`.
+ * Parameters accepted by `client.audit.forwarders.list(...)`.
  */
 export interface ListForwardersParams {
   /** Filter to a single forwarder type. */
@@ -592,7 +767,11 @@ export interface ListForwardersParams {
 }
 
 /**
- * Page of forwarders returned by `mgmt.audit.forwarders.list(...)`.
+ * A single page from `client.audit.forwarders.list(...)`.
+ *
+ * `forwarders` is the page's forwarders; `pagination` is the response's
+ * `meta.pagination` block (`page`, `size`, and — only when the caller
+ * passed `metaTotal: true` — `total` and `totalPages`).
  */
 export interface ListForwardersPage {
   /** Forwarders on this page, in server-defined order. */

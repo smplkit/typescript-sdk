@@ -13,48 +13,45 @@
  */
 
 import { strict as assert } from "node:assert";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { SmplClient } from "../src/index.js";
 import type { ConfigChangeEvent } from "../src/index.js";
-import {
-  cleanupRuntimeShowcase,
-  simulateAdminOverride,
-} from "./setup/config_runtime_setup.js";
+import { cleanupRuntimeShowcase, simulateAdminOverride } from "./setup/config_runtime_setup.js";
+
+// Example object-literal shapes to showcase how "code-first" configuration
+// management works. Nested objects flatten to dotted item keys
+// (`app.name`, `plan.max_seats`, ...).
+const common = {
+  app: { name: "Acme SaaS" },
+  support: { email: "support@acme.dev" },
+};
+
+const billing = {
+  app: { name: "Acme SaaS" },
+  support: { email: "support@acme.dev" },
+  plan: { max_seats: 5, trial_days: 14, tier: "free" },
+};
 
 async function main(): Promise<void> {
   // create the client
-  const client = new SmplClient({
-    environment: "production",
-    service: "showcase-billing",
-  });
+  const client = new SmplClient({ environment: "production" });
   try {
-    await cleanupRuntimeShowcase(client.manage);
+    await cleanupRuntimeShowcase(client);
 
     // bind object literals
-    const common = await client.config.bind("showcase-common", {
-      app_name: "Acme SaaS",
-      support_email: "support@acme.dev",
+    const commonCfg = await client.config.bind("showcase-common", common);
+    const billingCfg = await client.config.bind("showcase-billing", billing, {
+      parent: commonCfg,
     });
-    const billing = await client.config.bind(
-      "showcase-billing",
-      {
-        max_seats: 5,
-        trial_days: 14,
-        tier: "free",
-      },
-      { parent: common },
-    );
-
-    console.log(`common.app_name = ${common.app_name}`);
-    console.log(`billing.max_seats = ${billing.max_seats}`);
-    console.log(`billing.tier = ${billing.tier}`);
-    assert.equal(common.app_name, "Acme SaaS");
-    assert.equal(billing.max_seats, 5);
+    console.log(`common.app.name = ${commonCfg.app.name}`);
+    console.log(`billing.app.name = ${billingCfg.app.name}  // inherited from common`);
+    console.log(`billing.plan.max_seats = ${billingCfg.plan.max_seats}`);
 
     // add listeners if desired
     const changes: ConfigChangeEvent[] = [];
 
-    client.config.onChange("showcase-billing", "max_seats", (event) => {
+    client.config.onChange("showcase-billing", "plan.max_seats", (event) => {
       changes.push(event);
       console.log(
         `    [CHANGE] ${event.configId}.${event.itemKey}: ` +
@@ -62,13 +59,15 @@ async function main(): Promise<void> {
       );
     });
 
+    await client.waitUntilReady();
+
     // simulate someone making a change in smplkit console
-    await simulateAdminOverride(client.manage);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await simulateAdminOverride(client);
+    await sleep(400);
 
     // observe changes are automatically reflected in bound objects
-    console.log(`billing.max_seats after override = ${billing.max_seats}`);
-    assert.equal(billing.max_seats, 25);
+    console.log(`billing.plan.max_seats after override = ${billingCfg.plan.max_seats}`);
+    assert.equal(billingCfg.plan.max_seats, 25, `Expected 25, got ${billingCfg.plan.max_seats}`);
     assert.ok(changes.length >= 1);
 
     // you can also bind plain-old dictionaries
@@ -82,28 +81,27 @@ async function main(): Promise<void> {
     assert.equal(db.primary.host, "db.acme.example");
     assert.equal(db.pool_size, 10);
 
-    // or get a config by ID (raises NotFoundError if not found; pass a
-    // default if you want a fallback)
-    const commonView = await client.config.get("showcase-common");
-    console.log("showcase-common (via get):");
+    // or read live values via subscribe(id)
+    const commonView = await client.config.subscribe("showcase-common");
+    console.log("showcase-common (via subscribe):");
     for (const [k, v] of commonView.items()) {
       console.log(`    ${k} = ${v}`);
     }
-    assert.equal(commonView["app_name"], "Acme SaaS");
+    assert.equal(commonView.get("app.name"), "Acme SaaS");
 
-    // or skip the object/dict and just fetch specific keys directly
-    const slowQueryMs = await client.config.get(
+    // or skip the model/dict and just fetch specific keys directly
+    const slowQueryMs = await client.config.getValue(
       "showcase-database",
       "slow_query_threshold_ms",
       500,
     );
     console.log(
       `showcase-database.slow_query_threshold_ms = ${slowQueryMs}  ` +
-        `// default used; now registered for visibility`,
+        `// default used (key absent)`,
     );
     assert.equal(slowQueryMs, 500);
 
-    await cleanupRuntimeShowcase(client.manage);
+    await cleanupRuntimeShowcase(client);
     console.log("Done!");
   } finally {
     client.close();

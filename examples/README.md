@@ -10,133 +10,59 @@ Runnable examples demonstrating the [smplkit TypeScript SDK](https://github.com/
 2. A valid smplkit API key, provided via one of:
    - `SMPLKIT_API_KEY` environment variable
    - `~/.smplkit` configuration file (see SDK docs)
-3. At least one environment configured in your smplkit account.
+3. At least two environments configured (e.g., `staging`, `production`).
 
-## Config Showcase
+## Structure
 
-### Management API
+There is **one** client per product, reached from `SmplClient`: `client.config`,
+`client.flags`, `client.logging`, `client.audit`, and `client.jobs`.
+Management/CRUD lives directly on each product client — `client.config.new/get/list/delete`,
+the `client.flags.newBooleanFlag` builders, and `client.logging.loggers` /
+`client.logging.logGroups`. Each product can also be used via a standalone
+client (`AuditClient`, `JobsClient`). TypeScript has a single Promise-based
+client — there is no separate management client.
 
-**File:** [`config_management_showcase.ts`](config_management_showcase.ts)
+Config/Flags/Logging keep a **management** + **runtime** showcase pair (the two
+sides — CRUD vs. evaluation — are genuinely different). Audit and Jobs have **one**
+showcase each — they have no runtime/management split (one client, full surface).
 
-Demonstrates the management plane for Smpl Config:
+| Product     | Management                                                                  | Runtime                       | Setup                     |
+| ----------- | --------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
+| **Flags**   | `flags_management_showcase.ts`                                              | `flags_runtime_showcase.ts`   | `flags_runtime_setup.ts`  |
+| **Config**  | `config_management_showcase.ts`                                             | `config_runtime_showcase.ts`  | `config_runtime_setup.ts` |
+| **Logging** | `logging_management_showcase.ts`                                            | `logging_runtime_showcase.ts` | _(none)_                  |
+| **Audit**   | `audit_showcase.ts` — single; events, discovery, categories, and forwarders |                               | _(none)_                  |
+| **Jobs**    | `jobs_showcase.ts` — single; job CRUD, runs                                 |                               | _(none)_                  |
 
-- Client initialization (`SmplClient`)
-- Factory method: `client.config.new()` for unsaved configs
-- Direct mutation of items, environments, and metadata
-- Persist via `save()` (POST if new, PUT if existing)
-- Fetch, list, and delete configs by id
-- Parent-child config hierarchy
+**Management showcases** demonstrate the programmatic CRUD API directly on the
+product client: creating resources with `new*()` + `save()`, fetching with
+`get(id)`, listing, mutating, and deleting. No `install()` needed — management
+methods are stateless HTTP calls.
 
-```bash
-npx tsx examples/config_management_showcase.ts
-```
+**Runtime showcases** demonstrate the developer experience: code-first
+declarations (`client.config.bind` / the `client.flags.*Flag` handles /
+`client.logging.install()`), local evaluation, live updates via WebSocket, and
+change listeners. Config and Flags auto-connect lazily on first runtime use;
+Logging keeps an explicit `await client.logging.install()`. Each runtime
+showcase imports its setup helper to create server-side state, then cleans up
+after itself.
 
-### Runtime API
-
-**File:** [`config_runtime_showcase.ts`](config_runtime_showcase.ts)
-
-Demonstrates the runtime experience for Smpl Config:
-
-- Value resolution: `client.config.get()` for flat dict
-- Typed resolution: `get()` with a model class
-- Live proxy: `client.config.subscribe()` for auto-updating access
-- Change listeners at three levels: global, config-scoped, item-scoped
-- Manual refresh: `client.config.refresh()`
-
-```bash
-npx tsx examples/config_runtime_showcase.ts
-```
-
-## Flags Showcase
-
-### Management API
-
-**File:** [`flags_management_showcase.ts`](flags_management_showcase.ts)
-
-Demonstrates the management plane for Smpl Flags:
-
-- Creating flags (BOOLEAN, STRING, NUMERIC, JSON) via FlagType
-- Rule builder: fluent API for constructing JSON Logic rules
-- Configuring values, environments, and rules
-- Updating flag definitions
-- Listing, inspecting, and deleting flags
-- Managing context types
+## Running
 
 ```bash
+# Single-client products (Audit, Jobs — full surface, no runtime/management split)
+npx tsx examples/audit_showcase.ts
+npx tsx examples/jobs_showcase.ts
+
+# Management / CRUD (directly on client.config / client.flags / client.logging)
 npx tsx examples/flags_management_showcase.ts
-```
-
-### Runtime API
-
-**File:** [`flags_runtime_showcase.ts`](flags_runtime_showcase.ts)
-
-Demonstrates the runtime evaluation for Smpl Flags:
-
-- Typed flag declarations with code-level defaults
-- Context providers and typed context entities
-- Local JSON Logic evaluation (no network per call)
-- Resolution caching and cache stats
-- Real-time updates via WebSocket and change listeners
-- Environment comparison
-- Explicit context overrides
-
-```bash
-npx tsx examples/flags_runtime_showcase.ts
-```
-
-## Logging Showcase
-
-### Management API
-
-**File:** [`logging_management_showcase.ts`](logging_management_showcase.ts)
-
-Demonstrates the management plane for Smpl Logging:
-
-- Logger CRUD: `new()` → `setLevel()` → `setEnvironmentLevel()` → `save()`
-- Fetch, mutate, list, and delete loggers by id
-- Level clearing: `clearLevel()`, `clearEnvironmentLevel()`, `clearAllEnvironmentLevels()`
-- Log Group CRUD: `newGroup()` → `setLevel()` → `save()`
-- Fetch, mutate, list, and delete log groups
-- Assigning loggers to groups
-
-```bash
+npx tsx examples/config_management_showcase.ts
 npx tsx examples/logging_management_showcase.ts
-```
 
-### Runtime API
-
-**File:** [`logging_runtime_showcase.ts`](logging_runtime_showcase.ts)
-
-Demonstrates the runtime experience for Smpl Logging:
-
-- Registering change listeners before `start()` (global and scoped)
-- Starting the logging runtime: `client.logging.start()`
-- Management methods work without `start()`
-- Global onChange listener: fires for any logger change
-- Scoped onChange listener: fires only for a specific logger id
-- Live WebSocket-driven updates
-
-```bash
+# Runtime (imports its setup helper automatically)
+npx tsx examples/flags_runtime_showcase.ts
+npx tsx examples/config_runtime_showcase.ts
 npx tsx examples/logging_runtime_showcase.ts
 ```
 
-## Audit Showcase
-
-### Runtime API
-
-**File:** [`audit_runtime_showcase.ts`](audit_runtime_showcase.ts)
-
-Demonstrates the runtime experience for Smpl Audit:
-
-- Fire-and-forget `client.audit.events.record(...)` — returns immediately, posted on a background buffer worker (ADR-047 §2.6)
-- Optional `occurredAt` and `data` payload (snapshots nest inside `data`, e.g. `data.snapshot`)
-- Caller-supplied `idempotencyKey` for safe retries — server dedupes on `account_id + idempotency_key`
-- `flush(timeoutMs)` to drain the buffer before reading
-- Synchronous `list({...})` with server-side filters (`eventType`, `resourceType`, `resourceId`, `actorType`, `actorId`, `occurredAtRange`) and cursor pagination (`pageSize` / `pageAfter` / `nextCursor`)
-- Single-event read via `get(eventId)`
-
-> Audit has no management API — events are created at runtime and read via list/get. There is no separate management showcase.
-
-```bash
-npx tsx examples/audit_runtime_showcase.ts
-```
+Each script creates temporary resources, exercises all SDK features, then cleans up after itself.

@@ -56,13 +56,13 @@ export class MetricsReporter {
   constructor(options: {
     apiKey: string;
     environment: string;
-    service: string;
+    service: string | null;
     flushInterval?: number;
     appBaseUrl?: string;
   }) {
     this._apiKey = options.apiKey;
     this._environment = options.environment;
-    this._service = options.service;
+    this._service = options.service ?? "";
     this._flushInterval = options.flushInterval ?? 60;
     this._appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
   }

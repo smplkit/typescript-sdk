@@ -1,10 +1,36 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LoggingClient, LoggerRegistrationBuffer } from "../../../src/logging/client.js";
-import { SmplError } from "../../../src/errors.js";
+/**
+ * Tests for the fused LoggingClient — the management sub-clients
+ * (LoggersClient / LogGroupsClient), the logger-discovery buffer, and the
+ * live surface (install / registerAdapter / onChange / refresh / close /
+ * WebSocket handlers).
+ *
+ * HTTP is mocked by stubbing the global `fetch`; the wired clients borrow a
+ * transport built from `openapi-fetch` driven by that stub. The shared
+ * WebSocket is a hand-rolled mock that records handler registrations and can
+ * replay events.
+ */
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import createClient from "openapi-fetch";
+import {
+  LoggingClient,
+  LoggerRegistrationBuffer,
+  type LoggingParent,
+} from "../../../src/logging/client.js";
+import { Logger, LogGroup } from "../../../src/logging/models.js";
+import { LoggerSource, LogLevel } from "../../../src/logging/types.js";
+import {
+  SmplError,
+  SmplNotFoundError,
+  SmplValidationError,
+  SmplConnectionError,
+  SmplTimeoutError,
+  SmplNotInstalledError,
+} from "../../../src/errors.js";
+import type { LoggingAdapter } from "../../../src/logging/adapters/base.js";
+import type { SharedWebSocket } from "../../../src/ws.js";
 
 const mockFetch = vi.fn();
 
@@ -16,15 +42,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const API_KEY = "sk_test";
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function jsonResponse(body: object, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function textResponse(body: string, status: number): Response {
+  return new Response(body, { status });
+}
+
+function makeTransport(): any {
+  return createClient<import("../../../src/generated/logging.d.ts").paths>({
+    baseUrl: "https://logging.smplkit.com",
+    headers: { Authorization: "Bearer sk_test", Accept: "application/json" },
+  });
+}
 
 type WsCallback = (data: Record<string, unknown>) => void;
 
 interface MockSharedWs {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+  start: ReturnType<typeof vi.fn>;
   connectionStatus: string;
-  _listeners: Record<string, WsCallback[]>;
   _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
@@ -36,12 +83,15 @@ function createMockSharedWs(): MockSharedWs {
       listeners[event].push(cb);
     }),
     off: vi.fn((event: string, cb: WsCallback) => {
-      if (listeners[event]) {
-        listeners[event] = listeners[event].filter((l) => l !== cb);
+      const arr = listeners[event];
+      if (arr) {
+        const i = arr.indexOf(cb);
+        if (i !== -1) arr.splice(i, 1);
       }
     }),
+    stop: vi.fn(),
+    start: vi.fn(),
     connectionStatus: "connected",
-    _listeners: listeners,
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
     },
@@ -49,2608 +99,1214 @@ function createMockSharedWs(): MockSharedWs {
 }
 
 let lastMockWs: MockSharedWs;
+let lastEnsureStarted: ReturnType<typeof vi.fn>;
+let lastEnsureWs: ReturnType<typeof vi.fn>;
 
-function makeClient(): LoggingClient {
+function makeParent(overrides: Partial<LoggingParent> = {}): LoggingParent {
   lastMockWs = createMockSharedWs();
-  return new LoggingClient(API_KEY, () => lastMockWs as never, 30000);
+  lastEnsureStarted = vi.fn();
+  lastEnsureWs = vi.fn(() => lastMockWs as unknown as SharedWebSocket);
+  return {
+    _environment: "production",
+    _service: "svc",
+    _ensureStarted: lastEnsureStarted,
+    _ensureWs: lastEnsureWs,
+    ...overrides,
+  };
 }
 
-function jsonResponse(body: object, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
+/** Wired client (borrows a parent transport + parent WebSocket). */
+function makeWiredClient(parentOverrides: Partial<LoggingParent> = {}): LoggingClient {
+  return new LoggingClient({
+    parent: makeParent(parentOverrides),
+    transport: makeTransport(),
+    metrics: null,
   });
 }
 
-// ===========================================================================
-// Runtime: start() and onChange()
-// ===========================================================================
-
-describe("LoggingClient — runtime", () => {
-  /**
-   * Helper to make start() work with the expanded pipeline.
-   * Registers an empty mock adapter and stubs fetch for list/listGroups.
-   */
-  function prepareForStart(client: LoggingClient): void {
-    // Register a no-op adapter to skip auto-loading
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    // Mock the HTTP calls made during start (list + listGroups).
-    // Use mockImplementation to create fresh Response objects per call.
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-  }
-
-  describe("start()", () => {
-    it("should be idempotent", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-
-      await client.start();
-      await client.start();
-
-      // _ensureWs should only be called once (5 ws.on calls: logger_changed/deleted, group_changed/deleted, loggers_changed)
-      expect(lastMockWs.on).toHaveBeenCalledTimes(5);
-    });
-
-    it("should wire a WebSocket listener for logger_changed", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
-    });
-
-    it("should wire a WebSocket listener for logger_deleted", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      expect(lastMockWs.on).toHaveBeenCalledWith("logger_deleted", expect.any(Function));
-    });
-
-    it("should log console.warn when bulk logger registration fails", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const client = makeClient();
-      client.registerAdapter({
-        name: "failing-adapter",
-        discover: () => [{ name: "bad.logger", level: "INFO" }],
-        applyLevel: () => {},
-        installHook: () => {},
-        uninstallHook: () => {},
-      });
-      // bulk call returns 400; list + listGroups return empty arrays
-      let callCount = 0;
-      mockFetch.mockImplementation(() => {
-        callCount++;
-        // First call: bulk register (fails)
-        if (callCount === 1) {
-          return Promise.resolve(jsonResponse({ errors: [{ detail: "Invalid" }] }, 400));
-        }
-        // Remaining calls: list + listGroups
-        return Promise.resolve(jsonResponse({ data: [] }));
-      });
-
-      await client.start();
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[smplkit] Logger bulk registration failed"),
-      );
-      warnSpy.mockRestore();
-    });
-
-    it("should send bulk payload with level and resolved_level for each discovered logger", async () => {
-      const client = makeClient();
-      client.registerAdapter({
-        name: "test-adapter",
-        discover: () => [
-          { name: "app.server", level: "INFO" },
-          { name: "app.db", level: "WARN" },
-        ],
-        applyLevel: () => {},
-        installHook: () => {},
-        uninstallHook: () => {},
-      });
-
-      // First call: bulk register (succeeds); remaining: list + listGroups
-      let callCount = 0;
-      mockFetch.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return Promise.resolve(jsonResponse({ registered: 2 }));
-        }
-        return Promise.resolve(jsonResponse({ data: [] }));
-      });
-
-      await client.start();
-
-      const bulkRequest: Request = mockFetch.mock.calls[0][0];
-      expect(bulkRequest.method).toBe("POST");
-      expect(bulkRequest.url).toContain("/api/v1/loggers/bulk");
-
-      const body = JSON.parse(await bulkRequest.text());
-      expect(body.loggers).toHaveLength(2);
-
-      const serverLogger = body.loggers.find((l: { id: string }) => l.id === "app.server");
-      expect(serverLogger).toBeDefined();
-      expect(serverLogger.level).toBe("INFO");
-      expect(serverLogger.resolved_level).toBe("INFO");
-
-      const dbLogger = body.loggers.find((l: { id: string }) => l.id === "app.db");
-      expect(dbLogger).toBeDefined();
-      expect(dbLogger.level).toBe("WARN");
-      expect(dbLogger.resolved_level).toBe("WARN");
-    });
-
-    it("should include service and environment in bulk payload when parent is set", async () => {
-      const ws = createMockSharedWs();
-      const client = new LoggingClient(API_KEY, () => ws as never, 30000);
-      (client as any)._parent = {
-        _environment: "production",
-        _service: "api-gateway",
-        _metrics: null,
-      };
-      client.registerAdapter({
-        name: "test-adapter",
-        discover: () => [{ name: "my.logger", level: "DEBUG" }],
-        applyLevel: () => {},
-        installHook: () => {},
-        uninstallHook: () => {},
-      });
-
-      let callCount = 0;
-      mockFetch.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return Promise.resolve(jsonResponse({ registered: 1 }));
-        }
-        return Promise.resolve(jsonResponse({ data: [] }));
-      });
-
-      await client.start();
-
-      const bulkRequest: Request = mockFetch.mock.calls[0][0];
-      const body = JSON.parse(await bulkRequest.text());
-      expect(body.loggers[0].service).toBe("api-gateway");
-      expect(body.loggers[0].environment).toBe("production");
-    });
-
-    it("should skip bulk call when no loggers are discovered", async () => {
-      const client = makeClient();
-      prepareForStart(client); // registers noop adapter with empty discover()
-      // Only list + listGroups calls should happen
-      mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-
-      await client.start();
-
-      // No bulk call — only list and listGroups
-      const calls = mockFetch.mock.calls as Array<[Request]>;
-      const bulkCalls = calls.filter(([req]) => req.url?.includes("/api/v1/loggers/bulk"));
-      expect(bulkCalls).toHaveLength(0);
-    });
-  });
-
-  /**
-   * Set up a client whose registered adapter discovers a specific set of
-   * logger names — without that, the resolution path has nothing to apply
-   * to and listeners never fire (per the listener-fanout contract).
-   */
-  function prepareForStartWith(client: LoggingClient, names: string[]): void {
-    client.registerAdapter({
-      name: "test-adapter",
-      discover: () => names.map((name) => ({ name, level: "INFO" })),
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-  }
-
-  describe("onChange()", () => {
-    it("should register a global listener", async () => {
-      const client = makeClient();
-      prepareForStartWith(client, ["test.logger"]);
-      await client.start();
-
-      // After start with empty server response, test.logger resolves to the
-      // INFO fallback. Scoped fetch reveals a server-side level of WARN —
-      // the resolved level moves INFO → WARN and the listener fires.
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            id: "test.logger",
-            type: "logger",
-            attributes: {
-              name: "Test",
-              level: "WARN",
-              group: null,
-              managed: true,
-              environments: {},
-              created_at: null,
-              updated_at: null,
-            },
-          },
-        }),
-      );
-      const cb = vi.fn();
-      client.onChange(cb);
-
-      lastMockWs._emit("logger_changed", { id: "test.logger" });
-      await new Promise((r) => setTimeout(r, 10));
-
-      expect(cb).toHaveBeenCalledWith({
-        id: "test.logger",
-        level: "WARN",
-        source: "websocket",
-      });
-    });
-
-    it("should register an id-scoped listener", async () => {
-      const client = makeClient();
-      prepareForStartWith(client, ["test.logger", "other.logger"]);
-      await client.start();
-
-      // Scoped re-fetch returns single logger with level DEBUG
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            id: "test.logger",
-            type: "logger",
-            attributes: {
-              name: "Test",
-              level: "DEBUG",
-              group: null,
-              managed: true,
-              environments: {},
-              created_at: null,
-              updated_at: null,
-            },
-          },
-        }),
-      );
-      // other.logger fetch returns null (not found)
-      mockFetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
-
-      const cb = vi.fn();
-      client.onChange("test.logger", cb);
-
-      lastMockWs._emit("logger_changed", { id: "test.logger" });
-      lastMockWs._emit("logger_changed", { id: "other.logger" });
-      await new Promise((r) => setTimeout(r, 10));
-
-      expect(cb).toHaveBeenCalledTimes(1);
-      expect(cb).toHaveBeenCalledWith({
-        id: "test.logger",
-        level: "DEBUG",
-        source: "websocket",
-      });
-    });
-
-    it("should throw when id-scoped onChange is called without a callback", () => {
-      const client = makeClient();
-      expect(() => client.onChange("my-id", undefined as never)).toThrow(SmplError);
-    });
-
-    it("should wire a WebSocket listener for group_changed and group_deleted", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      expect(lastMockWs.on).toHaveBeenCalledWith("group_changed", expect.any(Function));
-      expect(lastMockWs.on).toHaveBeenCalledWith("group_deleted", expect.any(Function));
-    });
-
-    it("should trigger re-fetch when group_changed fires", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      const initialCallCount = mockFetch.mock.calls.length;
-      // Simulate a group_changed event
-      lastMockWs._emit("group_changed", { id: "my-group" });
-
-      // Allow the async promise to settle
-      await new Promise((r) => setTimeout(r, 10));
-      // At least 2 more calls (list + listGroups) should have been made
-      expect(mockFetch.mock.calls.length).toBeGreaterThan(initialCallCount);
-    });
-
-    it("should handle fetch error in group event handler without throwing", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      // Make subsequent fetches fail
-      mockFetch.mockRejectedValue(new Error("network error"));
-      // Should not throw — errors are swallowed in the group handler
-      lastMockWs._emit("group_changed", { id: "my-group" });
-      await new Promise((r) => setTimeout(r, 10));
-    });
-
-    it("should handle fetch error in logger_changed handler without throwing", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      // Make subsequent fetches fail
-      mockFetch.mockRejectedValue(new Error("network error"));
-      // Should not throw — errors are swallowed; no level in payload
-      lastMockWs._emit("logger_changed", { id: "test.logger" });
-      await new Promise((r) => setTimeout(r, 10));
-    });
-  });
-
-  describe("_close()", () => {
-    it("should unregister from the WebSocket", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-
-      client._close();
-
-      expect(lastMockWs.off).toHaveBeenCalledWith("logger_changed", expect.any(Function));
-    });
-
-    it("should allow start() again after close", async () => {
-      const client = makeClient();
-      prepareForStart(client);
-      await client.start();
-      client._close();
-
-      // Reset mock to track new calls
-      lastMockWs.on.mockClear();
-      mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-      // Re-register adapter since _close resets state but _explicitAdapters stays true
-      await client.start();
-
-      expect(lastMockWs.on).toHaveBeenCalledTimes(5);
-    });
-  });
-});
-
-// ===========================================================================
-// Listener error swallowing
-// ===========================================================================
-
-describe("LoggingClient — listener error swallowing", () => {
-  function prepareForStart(client: LoggingClient): void {
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-  }
-
-  function prepareForStartWith(client: LoggingClient, names: string[]): void {
-    client.registerAdapter({
-      name: "test-adapter",
-      discover: () => names.map((name) => ({ name, level: "INFO" })),
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-  }
-
-  it("should swallow errors thrown by global listeners", async () => {
-    const client = makeClient();
-    prepareForStartWith(client, ["test"]);
-    const throwingCb = vi.fn(() => {
-      throw new Error("listener boom");
-    });
-    const goodCb = vi.fn();
-
-    client.onChange(throwingCb);
-    client.onChange(goodCb);
-
-    await client.start();
-
-    // Scoped fetch returns logger with level INFO (different from fallback → listener fires)
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "test",
-          type: "logger",
-          attributes: {
-            name: "Test",
-            level: "WARN",
-            group: null,
-            managed: true,
-            environments: {},
-            created_at: null,
-            updated_at: null,
-          },
-        },
-      }),
-    );
-    lastMockWs._emit("logger_changed", { id: "test" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("should swallow errors thrown by id-scoped listeners", async () => {
-    const client = makeClient();
-    prepareForStartWith(client, ["test"]);
-    const throwingCb = vi.fn(() => {
-      throw new Error("id listener boom");
-    });
-    const goodCb = vi.fn();
-
-    client.onChange("test", throwingCb);
-    client.onChange("test", goodCb);
-
-    await client.start();
-
-    // Scoped fetch returns logger with level DEBUG (different from fallback → listener fires)
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "test",
-          type: "logger",
-          attributes: {
-            name: "Test",
-            level: "DEBUG",
-            group: null,
-            managed: true,
-            environments: {},
-            created_at: null,
-            updated_at: null,
-          },
-        },
-      }),
-    );
-    lastMockWs._emit("logger_changed", { id: "test" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("should ignore events without an id field", async () => {
-    const client = makeClient();
-    prepareForStart(client);
-    const cb = vi.fn();
-    client.onChange(cb);
-
-    await client.start();
-
-    lastMockWs._emit("logger_changed", { level: "INFO" });
-
-    expect(cb).not.toHaveBeenCalled();
-  });
-});
-
-// ===========================================================================
-// WebSocket event behaviors: scoped fetch, diff-based, deleted events
-// ===========================================================================
-
-describe("LoggingClient — WebSocket event behaviors", () => {
-  /**
-   * Build a client whose adapter discovers `names`. Listener fanout pairs
-   * 1:1 with `adapter.applyLevel` calls, so a logger has to be adapter-
-   * known for a listener to fire on it.
-   */
-  function prepareClient(names: string[] = []): LoggingClient {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "test-adapter",
-      discover: () => names.map((name) => ({ name, level: "INFO" })),
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    return client;
-  }
-
-  function makeSingleLoggerResponse(id: string, level: string | null) {
-    return jsonResponse({
-      data: {
-        id,
-        type: "logger",
-        attributes: {
-          name: id,
-          level,
-          group: null,
-          managed: false,
-          environments: {},
-          created_at: null,
-          updated_at: null,
-        },
-      },
-    });
-  }
-
-  function makeSingleGroupResponse(id: string, level: string | null) {
-    return jsonResponse({
-      data: {
-        id,
-        type: "log_group",
-        attributes: {
-          name: id,
-          level,
-          parent_id: null,
-          environments: {},
-          created_at: null,
-          updated_at: null,
-        },
-      },
-    });
-  }
-
-  // -----------------------------------------------------------------------
-  // logger_changed
-  // -----------------------------------------------------------------------
-
-  it("logger_changed: scoped fetch fires listener when level changed", async () => {
-    const client = prepareClient(["sql"]);
-    // start() fetches empty list → no entry for "sql" yet, resolves to INFO fallback
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const cb = vi.fn();
-    client.onChange(cb);
-    await client.start();
-
-    // Scoped fetch returns logger with level WARN (different from INFO fallback)
-    mockFetch.mockResolvedValueOnce(makeSingleLoggerResponse("sql", "WARN"));
-    lastMockWs._emit("logger_changed", { id: "sql" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(cb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "WARN", source: "websocket" }),
-    );
-  });
-
-  it("logger_changed: scoped fetch does NOT fire listener when level unchanged", async () => {
-    const client = prepareClient(["sql"]);
-    // start() returns logger "sql" with level INFO
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      ),
-    );
-    const cb = vi.fn();
-    client.onChange(cb);
-    await client.start();
-
-    // Scoped fetch returns same level (INFO) — only the name moved.
-    // No effective-level delta, no listener fire.
-    mockFetch.mockResolvedValueOnce(makeSingleLoggerResponse("sql", "INFO"));
-    lastMockWs._emit("logger_changed", { id: "sql" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(cb).not.toHaveBeenCalled();
-  });
-
-  // -----------------------------------------------------------------------
-  // logger_deleted
-  // -----------------------------------------------------------------------
-
-  it("logger_deleted: deleted key fires nothing; dependents re-resolve and fire", async () => {
-    // app.foo.db inherits its level from app.foo via dot-ancestry. Deleting
-    // app.foo causes app.foo.db to re-resolve WARN → INFO. The deleted key
-    // app.foo itself fires nothing, even though it's adapter-known.
-    const client = prepareClient(["app.foo", "app.foo.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.foo",
-                type: "logger",
-                attributes: {
-                  name: "app.foo",
-                  level: "WARN",
-                  group: null,
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const globalCb = vi.fn();
-    const dbCb = vi.fn();
-    const fooCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("app.foo.db", dbCb);
-    client.onChange("app.foo", fooCb);
-    await client.start();
-
-    globalCb.mockClear();
-    dbCb.mockClear();
-    fooCb.mockClear();
-
-    const fetchCountBefore = mockFetch.mock.calls.length;
-    lastMockWs._emit("logger_deleted", { id: "app.foo" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    // The deleted key fires nothing — even though app.foo is adapter-known
-    // and its resolved level moved WARN → INFO, deletion is not a level-
-    // change notification.
-    expect(fooCb).not.toHaveBeenCalled();
-
-    // app.foo.db's effective level moved WARN → INFO via the now-deleted
-    // ancestor — it fires once.
-    expect(dbCb).toHaveBeenCalledTimes(1);
-    expect(dbCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "app.foo.db", level: "INFO", source: "websocket" }),
-    );
-    expect(dbCb.mock.calls[0]![0]).not.toHaveProperty("deleted");
-
-    // Global fires exactly once with the dependent's payload — no summary
-    // event, no fire for the deleted key.
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "app.foo.db", level: "INFO" }),
-    );
-
-    // No HTTP fetch — `logger_deleted` evicts from cache without re-fetching.
-    expect(mockFetch.mock.calls.length).toBe(fetchCountBefore);
-  });
-
-  it("logger_deleted: deleted key with no dependents fires nothing", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const cb = vi.fn();
-    const keyedCb = vi.fn();
-    client.onChange(cb);
-    client.onChange("sql", keyedCb);
-    await client.start();
-
-    lastMockWs._emit("logger_deleted", { id: "sql" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(cb).not.toHaveBeenCalled();
-    expect(keyedCb).not.toHaveBeenCalled();
-  });
-
-  it("logger_deleted: swallows errors from listeners during dependent re-resolution", async () => {
-    // app.foo.db inherits from app.foo. Deleting app.foo cascades to
-    // app.foo.db.
-    const client = prepareClient(["app.foo.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.foo",
-                type: "logger",
-                attributes: {
-                  name: "app.foo",
-                  level: "WARN",
-                  group: null,
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const throwingCb = vi.fn(() => {
-      throw new Error("global throws on dependent re-resolution");
-    });
-    const goodCb = vi.fn();
-    client.onChange(throwingCb);
-    client.onChange(goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    lastMockWs._emit("logger_deleted", { id: "app.foo" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    // app.foo.db re-resolves WARN → INFO when its ancestor is gone; both
-    // global listeners fire and the thrown error doesn't break the second.
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("logger_deleted: per-key listener errors are swallowed during dependent re-resolution", async () => {
-    const client = prepareClient(["app.foo.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.foo",
-                type: "logger",
-                attributes: {
-                  name: "app.foo",
-                  level: "WARN",
-                  group: null,
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const throwingCb = vi.fn(() => {
-      throw new Error("key throws on dependent re-resolution");
-    });
-    const goodCb = vi.fn();
-    client.onChange("app.foo.db", throwingCb);
-    client.onChange("app.foo.db", goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    lastMockWs._emit("logger_deleted", { id: "app.foo" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  // -----------------------------------------------------------------------
-  // group_changed
-  // -----------------------------------------------------------------------
-
-  it("group_changed: scoped fetch fires re-apply when level changed", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Scoped group fetch returns changed level
-    mockFetch.mockResolvedValueOnce(makeSingleGroupResponse("db-group", "ERROR"));
-    // Re-apply fetches loggers
-    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("group_changed", { id: "db-group" });
-    await new Promise((r) => setTimeout(r, 20));
-
-    // Should have made additional fetch calls for the scoped group + logger re-apply
-    expect(mockFetch.mock.calls.length).toBeGreaterThan(2);
-  });
-
-  it("logger_changed: does not crash if _fetchSingleLogger rejects (outer catch)", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Spy on _applyLevels to throw
-    vi.spyOn(client as never, "_applyLevels" as never).mockImplementationOnce((() => {
-      throw new Error("applyLevels error");
-    }) as never);
-
-    // Scoped fetch returns a logger with changed level
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "sql",
-          type: "logger",
-          attributes: {
-            name: "sql",
-            level: "ERROR",
-            group: null,
-            managed: false,
-            environments: {},
-            created_at: null,
-            updated_at: null,
-          },
-        },
-      }),
-    );
-
-    // Should not throw
-    lastMockWs._emit("logger_changed", { id: "sql" });
-    await new Promise((r) => setTimeout(r, 20));
-  });
-
-  it("group_changed: does not crash if outer catch fires", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Spy on _groupsCache setter to throw after change is detected
-    type GroupEntry = { level: string | null; group: string | null; environments: unknown };
-    const origCache = (client as unknown as { _groupsCache: Record<string, GroupEntry> })
-      ._groupsCache;
-    (client as unknown as { _groupsCache: Record<string, GroupEntry> })._groupsCache = new Proxy(
-      origCache,
-      {
-        set: (_t, _k, _v) => {
-          throw new Error("groupsCache set error");
-        },
-      },
-    );
-
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "db-group",
-          type: "log_group",
-          attributes: {
-            name: "DB",
-            level: "ERROR",
-            parent_id: null,
-            environments: {},
-            created_at: null,
-            updated_at: null,
-          },
-        },
-      }),
-    );
-
-    // Should not throw
-    lastMockWs._emit("group_changed", { id: "db-group" });
-    await new Promise((r) => setTimeout(r, 20));
-  });
-
-  it("group_changed: no re-apply when level unchanged", async () => {
-    const client = prepareClient();
-    // Initial: group exists with level WARN
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Manually populate group store
-    (
-      client as unknown as {
-        _groupsCache: Record<
-          string,
-          { level: string | null; group: string | null; environments: unknown }
-        >;
-      }
-    )._groupsCache["db-group"] = { level: "WARN", group: null, environments: null };
-
-    const fetchCountBefore = mockFetch.mock.calls.length;
-    // Scoped group fetch returns same level
-    mockFetch.mockResolvedValueOnce(makeSingleGroupResponse("db-group", "WARN"));
-    lastMockWs._emit("group_changed", { id: "db-group" });
-    await new Promise((r) => setTimeout(r, 20));
-
-    // Only one additional fetch (for the group itself) — no logger re-apply
-    expect(mockFetch.mock.calls.length).toBe(fetchCountBefore + 1);
-  });
-
-  // -----------------------------------------------------------------------
-  // group_deleted
-  // -----------------------------------------------------------------------
-
-  it("group_deleted: deleted key fires nothing; dependents re-resolve and fire", async () => {
-    // app.db inherits its level from group "db" — when "db" is deleted,
-    // app.db re-resolves from WARN to INFO. The deleted group id itself
-    // fires nothing.
-    const client = prepareClient(["app.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "db",
-                type: "log_group",
-                attributes: {
-                  name: "db",
-                  level: "WARN",
-                  parent_id: null,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.db",
-                type: "logger",
-                attributes: {
-                  name: "app.db",
-                  level: null,
-                  group: "db",
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const globalCb = vi.fn();
-    const dbCb = vi.fn();
-    const groupCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("app.db", dbCb);
-    client.onChange("db", groupCb);
-    await client.start();
-
-    globalCb.mockClear();
-    dbCb.mockClear();
-    groupCb.mockClear();
-
-    const fetchCountBefore = mockFetch.mock.calls.length;
-    lastMockWs._emit("group_deleted", { id: "db" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    // The deleted group id never fires.
-    expect(groupCb).not.toHaveBeenCalled();
-    // app.db re-resolves WARN → INFO and fires once on both per-key and global.
-    expect(dbCb).toHaveBeenCalledTimes(1);
-    expect(dbCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "app.db", level: "INFO", source: "websocket" }),
-    );
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(expect.objectContaining({ id: "app.db", level: "INFO" }));
-    // Payload must not carry any `deleted` flag.
-    const event = dbCb.mock.calls[0]![0];
-    expect(event).not.toHaveProperty("deleted");
-    // No HTTP fetch — `group_deleted` evicts from cache without re-fetching.
-    expect(mockFetch.mock.calls.length).toBe(fetchCountBefore);
-  });
-
-  it("group_deleted: deleted group with no dependents fires nothing", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const cb = vi.fn();
-    const groupCb = vi.fn();
-    client.onChange(cb);
-    client.onChange("db-group", groupCb);
-    await client.start();
-
-    lastMockWs._emit("group_deleted", { id: "db-group" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(cb).not.toHaveBeenCalled();
-    expect(groupCb).not.toHaveBeenCalled();
-  });
-
-  it("group_deleted: swallows errors from listeners during dependent re-resolution", async () => {
-    const client = prepareClient(["app.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "db",
-                type: "log_group",
-                attributes: {
-                  name: "db",
-                  level: "WARN",
-                  parent_id: null,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.db",
-                type: "logger",
-                attributes: {
-                  name: "app.db",
-                  level: null,
-                  group: "db",
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const throwingCb = vi.fn(() => {
-      throw new Error("global throws on dependent re-resolution");
-    });
-    const goodCb = vi.fn();
-    client.onChange(throwingCb);
-    client.onChange(goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    lastMockWs._emit("group_deleted", { id: "db" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("group_deleted: swallows per-key listener errors during dependent re-resolution", async () => {
-    const client = prepareClient(["app.db"]);
-    mockFetch.mockImplementation((req: Request) => {
-      const url = req.url;
-      if (url.includes("/log_groups") && !url.includes("/log_groups/")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "db",
-                type: "log_group",
-                attributes: {
-                  name: "db",
-                  level: "WARN",
-                  parent_id: null,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
-        return Promise.resolve(
-          jsonResponse({
-            data: [
-              {
-                id: "app.db",
-                type: "logger",
-                attributes: {
-                  name: "app.db",
-                  level: null,
-                  group: "db",
-                  managed: true,
-                  environments: {},
-                  created_at: null,
-                  updated_at: null,
-                },
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-    const throwingCb = vi.fn(() => {
-      throw new Error("key throws on dependent re-resolution");
-    });
-    const goodCb = vi.fn();
-    client.onChange("app.db", throwingCb);
-    client.onChange("app.db", goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    lastMockWs._emit("group_deleted", { id: "db" });
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  // -----------------------------------------------------------------------
-  // loggers_changed
-  // -----------------------------------------------------------------------
-
-  it("loggers_changed: registers listener on shared WS", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    expect(lastMockWs.on).toHaveBeenCalledWith("loggers_changed", expect.any(Function));
-  });
-
-  it("loggers_changed: full refetch fires global once per changed id, per-key only for changed", async () => {
-    const client = prepareClient(["sql", "http"]);
-    // Initial: sql=INFO, http=DEBUG
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-            {
-              id: "http",
-              type: "logger",
-              attributes: {
-                name: "http",
-                level: "DEBUG",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      ),
-    );
-    const globalCb = vi.fn();
-    const sqlCb = vi.fn();
-    const httpCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("sql", sqlCb);
-    client.onChange("http", httpCb);
-    await client.start();
-
-    // loggers_changed triggers full list fetch — sql unchanged, http changed
-    mockFetch
-      .mockResolvedValueOnce(
-        // loggers list: sql=INFO (unchanged), http=WARN (changed)
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-            {
-              id: "http",
-              type: "logger",
-              attributes: {
-                name: "http",
-                level: "WARN",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] })); // groups list
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    // Only http moved → global fires exactly once with http's payload (no
-    // summary event, no fire for unchanged sql).
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "http", level: "WARN", source: "websocket" }),
-    );
-    expect(sqlCb).not.toHaveBeenCalled();
-    expect(httpCb).toHaveBeenCalledTimes(1);
-    expect(httpCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "http", level: "WARN", source: "websocket" }),
-    );
-  });
-
-  it("loggers_changed: global fires N times when N loggers change", async () => {
-    const client = prepareClient(["a", "b", "c"]);
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "a",
-              type: "logger",
-              attributes: {
-                name: "a",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-              },
-            },
-            {
-              id: "b",
-              type: "logger",
-              attributes: {
-                name: "b",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-              },
-            },
-            {
-              id: "c",
-              type: "logger",
-              attributes: {
-                name: "c",
-                level: "INFO",
-                group: null,
-                managed: true,
-                environments: {},
-              },
-            },
-          ],
-        }),
-      ),
-    );
-    const globalCb = vi.fn();
-    client.onChange(globalCb);
-    await client.start();
-    globalCb.mockClear();
-
-    // All three move INFO → ERROR.
-    mockFetch
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: ["a", "b", "c"].map((id) => ({
-            id,
-            type: "logger",
-            attributes: {
-              name: id,
-              level: "ERROR",
-              group: null,
-              managed: true,
-              environments: {},
-            },
-          })),
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(globalCb).toHaveBeenCalledTimes(3);
-    const ids = globalCb.mock.calls.map((c) => c[0].id).sort();
-    expect(ids).toEqual(["a", "b", "c"]);
-    for (const call of globalCb.mock.calls) {
-      expect(call[0]).toEqual(expect.objectContaining({ level: "ERROR", source: "websocket" }));
-    }
-  });
-
-  it("loggers_changed: detects deleted logger and fires listener when fallback differs", async () => {
-    // sql is adapter-known with WARN. Server drops sql from the list →
-    // it re-resolves via fallback to INFO. Listener fires WARN → INFO.
-    const client = prepareClient(["sql"]);
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "WARN",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      ),
-    );
-    const cb = vi.fn();
-    client.onChange(cb);
-    await client.start();
-    cb.mockClear();
-
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // sql gone
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(cb).toHaveBeenCalledTimes(1);
-    expect(cb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "INFO", source: "websocket" }),
-    );
-    expect(cb.mock.calls[0]![0]).not.toHaveProperty("deleted");
-  });
-
-  it("loggers_changed: does not crash if fetch throws", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Make subsequent fetches fail
-    mockFetch.mockRejectedValue(new Error("network error"));
-    // Should not throw
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-  });
-
-  it("loggers_changed: swallows errors thrown by global listeners", async () => {
-    const client = prepareClient(["sql"]);
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const throwingCb = vi.fn(() => {
-      throw new Error("listener boom");
-    });
-    const goodCb = vi.fn();
-    client.onChange(throwingCb);
-    client.onChange(goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    // Fetch returns logger with level WARN — different from INFO fallback.
-    mockFetch
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "WARN",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("loggers_changed: swallows errors thrown by per-key listeners", async () => {
-    const client = prepareClient(["sql"]);
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    const throwingCb = vi.fn(() => {
-      throw new Error("key listener boom");
-    });
-    const goodCb = vi.fn();
-    client.onChange("sql", throwingCb);
-    client.onChange("sql", goodCb);
-    await client.start();
-    throwingCb.mockClear();
-    goodCb.mockClear();
-
-    mockFetch
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "WARN",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(throwingCb).toHaveBeenCalledTimes(1);
-    expect(goodCb).toHaveBeenCalledTimes(1);
-  });
-
-  it("loggers_changed: no listeners fire when nothing changed", async () => {
-    const client = prepareClient();
-    mockFetch.mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: false,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      ),
-    );
-    const cb = vi.fn();
-    client.onChange(cb);
-    await client.start();
-
-    // Same content
-    mockFetch
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: "INFO",
-                group: null,
-                managed: false,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    lastMockWs._emit("loggers_changed", {});
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(cb).not.toHaveBeenCalled();
-  });
-});
-
-// ===========================================================================
-// LoggingClient.refresh() — manual level re-fetch + apply + diff-and-fire
-// ===========================================================================
-
-describe("LoggingClient — refresh()", () => {
-  function prepareClient(adapter?: {
-    discover?: () => Array<{ name: string; level: string }>;
-    applyLevel?: (name: string, level: string) => void;
-  }): { client: LoggingClient; applyLevel: ReturnType<typeof vi.fn> } {
-    const client = makeClient();
-    const applyLevel = vi.fn(adapter?.applyLevel ?? (() => {}));
-    client.registerAdapter({
-      name: "noop",
-      discover: adapter?.discover ?? (() => []),
-      applyLevel,
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    return { client, applyLevel };
-  }
-
-  function loggerListResponse(loggers: Array<{ id: string; level: string | null }>): Response {
-    return jsonResponse({
-      data: loggers.map(({ id, level }) => ({
-        id,
-        type: "logger",
-        attributes: {
-          name: id,
-          level,
-          group: null,
-          managed: false,
-          environments: {},
-          created_at: null,
-          updated_at: null,
-        },
-      })),
-    });
-  }
-
-  function groupListResponse(groups: Array<{ id: string; level: string | null }> = []): Response {
-    return jsonResponse({
-      data: groups.map(({ id, level }) => ({
-        id,
-        type: "log_group",
-        attributes: {
-          name: id,
-          level,
-          parent_id: null,
-          environments: {},
-          created_at: null,
-          updated_at: null,
-        },
-      })),
-    });
-  }
-
-  it("throws SmplError when called before install()", async () => {
-    const { client } = prepareClient();
-    await expect(client.refresh()).rejects.toBeInstanceOf(SmplError);
-  });
-
-  it("re-applies levels onto adapters and fires listeners with source 'manual'", async () => {
-    // Adapter must discover "sql" — otherwise applyLevel is never called for it.
-    const { client, applyLevel } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    // Initial start: sql=INFO. The bulk-register POST happens first, then the
-    // paginated list calls. Provide three resolved responses in order.
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
-      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "INFO" }]))
-      .mockResolvedValueOnce(groupListResponse());
-    const globalCb = vi.fn();
-    const sqlCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("sql", sqlCb);
-    await client.start();
-
-    applyLevel.mockClear();
-
-    // refresh() picks up sql=WARN
-    mockFetch
-      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "WARN" }]))
-      .mockResolvedValueOnce(groupListResponse());
-
-    await client.refresh();
-
-    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "WARN", source: "manual" }),
-    );
-    expect(sqlCb).toHaveBeenCalledTimes(1);
-    expect(sqlCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "WARN", source: "manual" }),
-    );
-  });
-
-  it("fires global once per changed id and per-key only for changed ids", async () => {
-    const { client } = prepareClient({
-      discover: () => [
-        { name: "sql", level: "INFO" },
-        { name: "http", level: "INFO" },
-      ],
-    });
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
-      .mockResolvedValueOnce(
-        loggerListResponse([
-          { id: "sql", level: "INFO" },
-          { id: "http", level: "DEBUG" },
-        ]),
-      )
-      .mockResolvedValueOnce(groupListResponse());
-    const globalCb = vi.fn();
-    const sqlCb = vi.fn();
-    const httpCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("sql", sqlCb);
-    client.onChange("http", httpCb);
-    await client.start();
-
-    // sql unchanged (INFO), http -> WARN
-    mockFetch
-      .mockResolvedValueOnce(
-        loggerListResponse([
-          { id: "sql", level: "INFO" },
-          { id: "http", level: "WARN" },
-        ]),
-      )
-      .mockResolvedValueOnce(groupListResponse());
-
-    await client.refresh();
-
-    // Only http changed → global fires once (per-id, not a summary).
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "http", level: "WARN", source: "manual" }),
-    );
-    expect(sqlCb).not.toHaveBeenCalled();
-    expect(httpCb).toHaveBeenCalledTimes(1);
-    expect(httpCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "http", level: "WARN", source: "manual" }),
-    );
-  });
-
-  it("detects deleted loggers and fires for them when fallback differs", async () => {
-    const { client } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
-      .mockResolvedValueOnce(loggerListResponse([{ id: "sql", level: "WARN" }]))
-      .mockResolvedValueOnce(groupListResponse());
-    const globalCb = vi.fn();
-    const sqlCb = vi.fn();
-    client.onChange(globalCb);
-    client.onChange("sql", sqlCb);
-    await client.start();
-    globalCb.mockClear();
-    sqlCb.mockClear();
-
-    // refresh: sql disappears server-side → adapter-known sql re-resolves
-    // to the INFO fallback. Fires WARN → INFO, with no `deleted` flag.
-    mockFetch
-      .mockResolvedValueOnce(loggerListResponse([]))
-      .mockResolvedValueOnce(groupListResponse());
-
-    await client.refresh();
-
-    expect(globalCb).toHaveBeenCalledTimes(1);
-    expect(globalCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "INFO", source: "manual" }),
-    );
-    expect(sqlCb).toHaveBeenCalledTimes(1);
-    expect(sqlCb.mock.calls[0]![0]).not.toHaveProperty("deleted");
-  });
-
-  it("does not fire listeners when nothing changed", async () => {
-    const { client } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    const list = () => loggerListResponse([{ id: "sql", level: "INFO" }]);
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] }))
-      .mockResolvedValueOnce(list())
-      .mockResolvedValueOnce(groupListResponse());
-    const globalCb = vi.fn();
-    client.onChange(globalCb);
-    await client.start();
-    globalCb.mockClear();
-
-    mockFetch.mockResolvedValueOnce(list()).mockResolvedValueOnce(groupListResponse());
-
-    await client.refresh();
-
-    expect(globalCb).not.toHaveBeenCalled();
-  });
-
-  it("propagates fetch errors instead of swallowing them", async () => {
-    const { client } = prepareClient();
-    mockFetch
-      .mockResolvedValueOnce(loggerListResponse([]))
-      .mockResolvedValueOnce(groupListResponse());
-    await client.start();
-
-    mockFetch.mockReset();
-    mockFetch.mockRejectedValue(new Error("boom"));
-
-    await expect(client.refresh()).rejects.toThrow("boom");
-  });
-
-  // -------------------------------------------------------------------------
-  // End-to-end: resolution wiring through the runtime client
-  // -------------------------------------------------------------------------
-
-  it("applies inherited group level to adapter-known logger on install", async () => {
-    const { client, applyLevel } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    // Logger has level=null and group="db"; group has level=WARN.
-    // Old buggy code skipped null-level loggers entirely — verify the
-    // inherited level lands.
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] })) // bulk register
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: null,
-                group: "db",
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db",
-              type: "log_group",
-              attributes: {
-                name: "db",
-                level: "WARN",
-                parent_id: null,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      );
-
-    await client.start();
-
-    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
-  });
-
-  it("applies dot-notation ancestor level to adapter-known logger on install", async () => {
-    const { client, applyLevel } = prepareClient({
-      discover: () => [{ name: "com.acme.payments", level: "INFO" }],
-    });
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "com.acme",
-              type: "logger",
-              attributes: {
-                name: "com.acme",
-                level: "ERROR",
-                group: null,
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ data: [] }));
-
-    await client.start();
-
-    expect(applyLevel).toHaveBeenCalledWith("com.acme.payments", "ERROR");
-  });
-
-  it("reapplies adapter level when a group's level changes via WS", async () => {
-    const { client, applyLevel } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    // Initial: sql inherits WARN from group "db".
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: null,
-                group: "db",
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db",
-              type: "log_group",
-              attributes: {
-                name: "db",
-                level: "WARN",
-                parent_id: null,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      );
-
-    await client.start();
-    expect(applyLevel).toHaveBeenCalledWith("sql", "WARN");
-
-    applyLevel.mockClear();
-
-    // group_changed WS event: db now resolves to ERROR. sql's resolved
-    // level should track without sql itself being touched.
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          id: "db",
-          type: "log_group",
-          attributes: {
-            name: "db",
-            level: "ERROR",
-            parent_id: null,
-            environments: {},
-            created_at: null,
-            updated_at: null,
-          },
-        },
-      }),
-    );
-    const sqlCb = vi.fn();
-    client.onChange("sql", sqlCb);
-
-    lastMockWs._emit("group_changed", { id: "db" });
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(applyLevel).toHaveBeenCalledWith("sql", "ERROR");
-    // The sql listener fires because its *resolved* level changed, even
-    // though sql's own raw level field never moved.
-    expect(sqlCb).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "sql", level: "ERROR", source: "websocket" }),
-    );
-  });
-
-  it("reapplies adapter level when a group is deleted via WS", async () => {
-    const { client, applyLevel } = prepareClient({
-      discover: () => [{ name: "sql", level: "INFO" }],
-    });
-    // Initial: sql inherits WARN from group "db".
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ data: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "sql",
-              type: "logger",
-              attributes: {
-                name: "sql",
-                level: null,
-                group: "db",
-                managed: true,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [
-            {
-              id: "db",
-              type: "log_group",
-              attributes: {
-                name: "db",
-                level: "WARN",
-                parent_id: null,
-                environments: {},
-                created_at: null,
-                updated_at: null,
-              },
-            },
-          ],
-        }),
-      );
-
-    await client.start();
-    applyLevel.mockClear();
-
-    // group_deleted removes db. sql now has no resolution path → falls back to INFO.
-    lastMockWs._emit("group_deleted", { id: "db" });
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(applyLevel).toHaveBeenCalledWith("sql", "INFO");
-  });
-});
+function loggerResource(id: string, attrs: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    type: "logger",
+    attributes: {
+      name: id,
+      level: null,
+      group: null,
+      managed: true,
+      sources: [],
+      environments: {},
+      created_at: null,
+      updated_at: null,
+      ...attrs,
+    },
+  };
+}
+
+function logGroupResource(
+  id: string,
+  attrs: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    type: "log_group",
+    attributes: {
+      name: id,
+      level: null,
+      parent_id: null,
+      environments: {},
+      created_at: null,
+      updated_at: null,
+      ...attrs,
+    },
+  };
+}
+
+function makeAdapter(overrides?: Partial<LoggingAdapter>): LoggingAdapter {
+  return {
+    name: "mock",
+    discover: vi.fn(() => []),
+    applyLevel: vi.fn(),
+    installHook: vi.fn(),
+    uninstallHook: vi.fn(),
+    ...overrides,
+  };
+}
 
 // ===========================================================================
 // LoggerRegistrationBuffer
 // ===========================================================================
 
 describe("LoggerRegistrationBuffer", () => {
-  it("should add a new entry and report pendingCount", () => {
+  it("adds a new entry and reports pendingCount", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.server", "INFO", "INFO", null, null);
+    buf.add("sql", "DEBUG", "DEBUG", "svc", "production");
     expect(buf.pendingCount).toBe(1);
   });
 
-  it("should deduplicate entries with the same id", () => {
+  it("deduplicates entries with the same id", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.server", "INFO", "INFO", null, null);
-    buf.add("app.server", "WARN", "WARN", null, null);
+    buf.add("sql", "DEBUG", "DEBUG", "svc", "production");
+    buf.add("sql", "WARN", "WARN", "svc", "production");
     expect(buf.pendingCount).toBe(1);
   });
 
-  it("should add multiple distinct entries", () => {
+  it("adds multiple distinct entries", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.a", "INFO", "INFO", null, null);
-    buf.add("app.b", "WARN", "WARN", null, null);
-    buf.add("app.c", "ERROR", "ERROR", null, null);
-    expect(buf.pendingCount).toBe(3);
+    buf.add("a", "INFO", "INFO", null, null);
+    buf.add("b", "INFO", "INFO", null, null);
+    expect(buf.pendingCount).toBe(2);
   });
 
-  it("drain() should return all pending entries and reset to empty", () => {
+  it("drain() returns all pending entries and resets to empty", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.a", "INFO", "INFO", "my-service", "staging");
-    buf.add("app.b", "WARN", "WARN", null, null);
-
+    buf.add("a", "INFO", "INFO", "svc", "production");
     const batch = buf.drain();
-    expect(batch).toHaveLength(2);
+    expect(batch).toHaveLength(1);
     expect(batch[0]).toEqual({
-      id: "app.a",
+      id: "a",
       level: "INFO",
       resolved_level: "INFO",
-      service: "my-service",
-      environment: "staging",
+      service: "svc",
+      environment: "production",
     });
-    expect(batch[1]).toEqual({ id: "app.b", level: "WARN", resolved_level: "WARN" });
     expect(buf.pendingCount).toBe(0);
   });
 
-  it("drain() on empty buffer should return empty array", () => {
+  it("drain() on empty buffer returns empty array", () => {
     const buf = new LoggerRegistrationBuffer();
     expect(buf.drain()).toEqual([]);
   });
 
-  it("should omit service/environment when null", () => {
+  it("omits service/environment when null", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.x", "DEBUG", "DEBUG", null, null);
+    buf.add("a", "INFO", "INFO", null, null);
     const [item] = buf.drain();
-    expect(item).not.toHaveProperty("service");
-    expect(item).not.toHaveProperty("environment");
+    expect(item).toEqual({ id: "a", level: "INFO", resolved_level: "INFO" });
+    expect("service" in item).toBe(false);
+    expect("environment" in item).toBe(false);
   });
 
-  it("previously drained ids remain deduplicated", () => {
+  it("previously-drained ids remain deduplicated", () => {
     const buf = new LoggerRegistrationBuffer();
-    buf.add("app.x", "INFO", "INFO", null, null);
+    buf.add("a", "INFO", "INFO", null, null);
     buf.drain();
-    buf.add("app.x", "WARN", "WARN", null, null);
+    buf.add("a", "WARN", "WARN", null, null);
     expect(buf.pendingCount).toBe(0);
   });
 });
 
 // ===========================================================================
-// Post-startup logger discovery: _onAdapterNewLogger and _flushLoggerBuffer
+// LoggersClient — CRUD
 // ===========================================================================
 
-describe("LoggingClient — post-startup logger discovery", () => {
-  function prepareForStart(client: LoggingClient): void {
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+describe("LoggersClient", () => {
+  function makeClient(): LoggingClient {
+    return makeWiredClient();
   }
 
-  it("_onAdapterNewLogger should add to buffer (not create Logger via CRUD)", async () => {
-    const client = makeClient();
-
-    let capturedHook: ((name: string, level: string) => void) | null = null;
-    client.registerAdapter({
-      name: "test",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: (cb) => {
-        capturedHook = cb;
-      },
-      uninstallHook: () => {},
+  describe("new()", () => {
+    it("returns an unsaved Logger with defaults", () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql.engine");
+      expect(logger).toBeInstanceOf(Logger);
+      expect(logger.id).toBe("sql.engine");
+      expect(logger.name).toBe("sql.engine");
+      expect(logger.managed).toBe(true);
     });
 
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-    // After start(), the start-time discovery flush has already drained
-    // the buffer; pendingCount is 0.
-    expect((client as any)._loggerBuffer.pendingCount).toBe(0);
-
-    // Fire the hook as if a new logger was created in the framework.
-    // Should buffer for bulk-register, not POST individually or hit any
-    // CRUD endpoint. mockFetch was called during start() but no further.
-    const callsBefore = mockFetch.mock.calls.length;
-    capturedHook!("runtime.logger", "INFO");
-    expect(mockFetch.mock.calls.length).toBe(callsBefore);
-
-    // Buffer should now have 1 pending item
-    expect((client as any)._loggerBuffer.pendingCount).toBe(1);
-
-    client._close();
+    it("honours the managed option", () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql.engine", { managed: false });
+      expect(logger.managed).toBe(false);
+    });
   });
 
-  it("_onAdapterNewLogger swallows adapter.applyLevel errors after start", async () => {
-    const client = makeClient();
-
-    let capturedHook: ((name: string, level: string) => void) | null = null;
-    const adapter = {
-      name: "throwing",
-      discover: () => [],
-      applyLevel: vi.fn(() => {
-        throw new Error("adapter applyLevel boom");
-      }),
-      installHook: (cb: (name: string, level: string) => void) => {
-        capturedHook = cb;
-      },
-      uninstallHook: () => {},
-    };
-    client.registerAdapter(adapter);
-
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Fire the hook — adapter.applyLevel throws, hook must not propagate.
-    expect(() => capturedHook!("runtime.logger", "INFO")).not.toThrow();
-    expect(adapter.applyLevel).toHaveBeenCalledWith("runtime.logger", expect.any(String));
-
-    client._close();
-  });
-
-  it("_onAdapterNewLogger should not eagerly hit any HTTP endpoint", async () => {
-    const client = makeClient();
-
-    let capturedHook: ((name: string, level: string) => void) | null = null;
-    client.registerAdapter({
-      name: "test",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: (cb) => {
-        capturedHook = cb;
-      },
-      uninstallHook: () => {},
+  describe("list()", () => {
+    it("returns Logger models from the collection", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: [loggerResource("a"), loggerResource("b")] }),
+      );
+      const loggers = await client.loggers.list();
+      expect(loggers.map((l) => l.id)).toEqual(["a", "b"]);
+      expect(loggers[0]).toBeInstanceOf(Logger);
     });
 
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    const callsBefore = mockFetch.mock.calls.length;
-    capturedHook!("runtime.logger", "WARN");
-
-    // No further HTTP calls — discovery is buffered.
-    expect(mockFetch.mock.calls.length).toBe(callsBefore);
-
-    client._close();
-  });
-
-  it("_flushLoggerBuffer should POST to /api/v1/loggers/bulk", async () => {
-    const client = makeClient();
-    (client as any)._parent = { _environment: "prod", _service: "svc", _metrics: null };
-
-    let capturedHook: ((name: string, level: string) => void) | null = null;
-    client.registerAdapter({
-      name: "test",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: (cb) => {
-        capturedHook = cb;
-      },
-      uninstallHook: () => {},
+    it("forwards pagination query params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.loggers.list({ pageNumber: 2, pageSize: 50 });
+      const url = mockFetch.mock.calls[0][0].url as string;
+      expect(url).toMatch(/page(\[|%5B)number(\]|%5D)=2/);
+      expect(url).toMatch(/page(\[|%5B)size(\]|%5D)=50/);
     });
 
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
-
-    // Reset fetch mock to capture the flush call
-    mockFetch.mockClear();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
-
-    capturedHook!("new.logger", "DEBUG");
-    await (client as any)._flushLoggerBuffer();
-
-    const bulkRequest: Request = mockFetch.mock.calls[0][0];
-    expect(bulkRequest.method).toBe("POST");
-    expect(bulkRequest.url).toContain("/api/v1/loggers/bulk");
-
-    const body = JSON.parse(await bulkRequest.text());
-    expect(body.loggers).toHaveLength(1);
-    expect(body.loggers[0]).toMatchObject({
-      id: "new.logger",
-      level: "DEBUG",
-      resolved_level: "DEBUG",
-      service: "svc",
-      environment: "prod",
+    it("returns [] when the response has no body", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      expect(await client.loggers.list()).toEqual([]);
     });
 
-    client._close();
-  });
-
-  it("_flushLoggerBuffer should warn on error response", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const client = makeClient();
-    prepareForStart(client);
-    await client.start();
-
-    mockFetch.mockClear();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ detail: "bad" }] }, 400));
-
-    // Manually add to buffer and flush
-    (client as any)._loggerBuffer.add("x", "INFO", "INFO", null, null);
-    await (client as any)._flushLoggerBuffer();
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[smplkit] Logger bulk registration failed"),
-    );
-
-    warnSpy.mockRestore();
-    client._close();
-  });
-
-  it("_flushLoggerBuffer should warn on network error", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const client = makeClient();
-    prepareForStart(client);
-    await client.start();
-
-    mockFetch.mockClear();
-    mockFetch.mockRejectedValueOnce(new TypeError("connection refused"));
-
-    (client as any)._loggerBuffer.add("x", "INFO", "INFO", null, null);
-    await (client as any)._flushLoggerBuffer();
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[smplkit] Logger bulk registration failed"),
-    );
-
-    warnSpy.mockRestore();
-    client._close();
-  });
-
-  it("should trigger immediate flush at threshold of 50", async () => {
-    const client = makeClient();
-
-    let capturedHook: ((name: string, level: string) => void) | null = null;
-    client.registerAdapter({
-      name: "test",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: (cb) => {
-        capturedHook = cb;
-      },
-      uninstallHook: () => {},
+    it("surfaces server errors via SmplError", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("boom", 500));
+      await expect(client.loggers.list()).rejects.toThrow(SmplError);
     });
 
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-    await client.start();
+    it("maps sources that are not arrays to []", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: [loggerResource("a", { sources: "nope" })] }),
+      );
+      const [logger] = await client.loggers.list();
+      expect(logger.sources).toEqual([]);
+    });
+  });
 
-    // Reset fetch mock
-    mockFetch.mockClear();
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ registered: 50 })));
+  describe("get()", () => {
+    it("fetches a single logger by id", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: loggerResource("sql") }));
+      const logger = await client.loggers.get("sql");
+      expect(logger.id).toBe("sql");
+    });
 
-    const flushSpy = vi.spyOn(client as any, "_flushLoggerBuffer");
+    it("throws SmplNotFoundError when the body has no data", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
+      await expect(client.loggers.get("missing")).rejects.toThrow(SmplNotFoundError);
+    });
 
-    // Fire 49 hooks — should not trigger immediate flush
-    for (let i = 0; i < 49; i++) {
-      capturedHook!(`logger.${i}`, "INFO");
+    it("surfaces a 404 from the server", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("nope", 404));
+      await expect(client.loggers.get("missing")).rejects.toThrow(SmplNotFoundError);
+    });
+  });
+
+  describe("delete()", () => {
+    it("DELETEs the logger by id", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await client.loggers.delete("sql");
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.method).toBe("DELETE");
+      expect(req.url).toContain("/api/v1/loggers/sql");
+    });
+
+    it("treats a 200 as success", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({}, 200));
+      await expect(client.loggers.delete("sql")).resolves.toBeUndefined();
+    });
+
+    it("surfaces a non-204 error status", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("conflict", 409));
+      await expect(client.loggers.delete("sql")).rejects.toThrow(SmplError);
+    });
+  });
+
+  describe("_saveLogger() (via Logger.save)", () => {
+    it("PUTs the logger body and returns the refreshed model", async () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql");
+      logger.setLevel(LogLevel.WARN);
+      logger.setLevel(LogLevel.ERROR, { environment: "production" });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: loggerResource("sql", { level: "WARN" }) }),
+      );
+      await logger.save();
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.method).toBe("PUT");
+      const body = JSON.parse(await req.text());
+      expect(body.data.attributes.level).toBe("WARN");
+      expect(body.data.attributes.environments).toEqual({ production: { level: "ERROR" } });
+      expect(logger.level).toBe("WARN");
+    });
+
+    it("includes group and managed flags when set", async () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql");
+      logger.group = "db";
+      logger.managed = false;
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: loggerResource("sql") }));
+      await logger.save();
+      const body = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+      expect(body.data.attributes.group).toBe("db");
+      expect(body.data.attributes.managed).toBe(false);
+    });
+
+    it("throws when saving a logger with a null id", async () => {
+      const client = makeClient();
+      const logger = new Logger(client.loggers, { id: null, name: "anon" });
+      await expect(logger.save()).rejects.toThrow(/Cannot save a Logger with no id/);
+    });
+
+    it("throws SmplValidationError when the response has no data", async () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
+      await expect(logger.save()).rejects.toThrow(SmplValidationError);
+    });
+
+    it("surfaces a server error during save", async () => {
+      const client = makeClient();
+      const logger = client.loggers.new("sql");
+      mockFetch.mockResolvedValueOnce(textResponse("bad", 422));
+      await expect(logger.save()).rejects.toThrow(SmplValidationError);
+    });
+  });
+
+  describe("register() + flush() + pendingCount", () => {
+    it("buffers a single source and reports pendingCount", async () => {
+      const client = makeClient();
+      await client.loggers.register(
+        new LoggerSource("sql", { resolvedLevel: LogLevel.WARN, service: "svc" }),
+      );
+      expect(client.loggers.pendingCount).toBe(1);
+      expect(client._buffer.pendingCount).toBe(1);
+    });
+
+    it("buffers an array of sources", async () => {
+      const client = makeClient();
+      await client.loggers.register([
+        new LoggerSource("a", { resolvedLevel: LogLevel.INFO }),
+        new LoggerSource("b", { resolvedLevel: LogLevel.INFO }),
+      ]);
+      expect(client.loggers.pendingCount).toBe(2);
+    });
+
+    it("uses resolvedLevel as the level when no explicit level given", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
+      await client.loggers.register(
+        new LoggerSource("a", { resolvedLevel: LogLevel.WARN, service: "svc" }),
+        { flush: true },
+      );
+      const body = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+      expect(body.loggers[0].level).toBe("WARN");
+      expect(body.loggers[0].resolved_level).toBe("WARN");
+    });
+
+    it("flushes immediately when { flush: true }", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ registered: 1 }));
+      await client.loggers.register(new LoggerSource("a", { resolvedLevel: LogLevel.INFO }), {
+        flush: true,
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.url).toContain("/api/v1/loggers/bulk");
+      expect(client.loggers.pendingCount).toBe(0);
+    });
+
+    it("flush() is a no-op when the buffer is empty", async () => {
+      const client = makeClient();
+      await client.loggers.flush();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("flush() swallows a POST error", async () => {
+      const client = makeClient();
+      await client.loggers.register(new LoggerSource("a", { resolvedLevel: LogLevel.INFO }));
+      mockFetch.mockRejectedValueOnce(new Error("network"));
+      await expect(client.loggers.flush()).resolves.toBeUndefined();
+    });
+
+    it("auto-flushes when the buffer reaches the batch size of 50", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValue(jsonResponse({ registered: 50 }));
+      const sources = Array.from(
+        { length: 50 },
+        (_, i) => new LoggerSource(`logger-${i}`, { resolvedLevel: LogLevel.INFO }),
+      );
+      await client.loggers.register(sources);
+      // The void flush() fires asynchronously; allow it to run.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch.mock.calls[0][0].url).toContain("/api/v1/loggers/bulk");
+    });
+  });
+});
+
+// ===========================================================================
+// LogGroupsClient — CRUD
+// ===========================================================================
+
+describe("LogGroupsClient", () => {
+  function makeClient(): LoggingClient {
+    return makeWiredClient();
+  }
+
+  describe("new()", () => {
+    it("returns an unsaved LogGroup with a humanized default name", () => {
+      const client = makeClient();
+      const group = client.logGroups.new("database-loggers");
+      expect(group).toBeInstanceOf(LogGroup);
+      expect(group.id).toBe("database-loggers");
+      expect(group.name).toBe("Database Loggers");
+    });
+
+    it("honours explicit name and group options", () => {
+      const client = makeClient();
+      const group = client.logGroups.new("db", { name: "DB", group: "parent" });
+      expect(group.name).toBe("DB");
+      expect(group.group).toBe("parent");
+    });
+  });
+
+  describe("list()", () => {
+    it("returns LogGroup models", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: [logGroupResource("g1"), logGroupResource("g2")] }),
+      );
+      const groups = await client.logGroups.list();
+      expect(groups.map((g) => g.id)).toEqual(["g1", "g2"]);
+    });
+
+    it("forwards pagination params", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+      await client.logGroups.list({ pageNumber: 3, pageSize: 10 });
+      const url = mockFetch.mock.calls[0][0].url as string;
+      expect(url).toMatch(/page(\[|%5B)number(\]|%5D)=3/);
+      expect(url).toMatch(/page(\[|%5B)size(\]|%5D)=10/);
+    });
+
+    it("returns [] when the body is empty", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      expect(await client.logGroups.list()).toEqual([]);
+    });
+
+    it("maps parent_id to the group field", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: [logGroupResource("g1", { parent_id: "root", level: "WARN" })] }),
+      );
+      const [group] = await client.logGroups.list();
+      expect(group.group).toBe("root");
+      expect(group.level).toBe("WARN");
+    });
+
+    it("surfaces server errors", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("boom", 500));
+      await expect(client.logGroups.list()).rejects.toThrow(SmplError);
+    });
+  });
+
+  describe("get()", () => {
+    it("fetches a single group", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: logGroupResource("g1") }));
+      const group = await client.logGroups.get("g1");
+      expect(group.id).toBe("g1");
+    });
+
+    it("throws SmplNotFoundError when no data", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
+      await expect(client.logGroups.get("missing")).rejects.toThrow(SmplNotFoundError);
+    });
+  });
+
+  describe("delete()", () => {
+    it("DELETEs the group by id", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await client.logGroups.delete("g1");
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.method).toBe("DELETE");
+      expect(req.url).toContain("/api/v1/log_groups/g1");
+    });
+
+    it("surfaces a non-204 error", async () => {
+      const client = makeClient();
+      mockFetch.mockResolvedValueOnce(textResponse("conflict", 409));
+      await expect(client.logGroups.delete("g1")).rejects.toThrow(SmplError);
+    });
+  });
+
+  describe("_createGroup() (via LogGroup.save on a new group)", () => {
+    it("POSTs a create body and applies the result", async () => {
+      const client = makeClient();
+      const group = client.logGroups.new("db");
+      group.setLevel(LogLevel.WARN);
+      group.setLevel(LogLevel.ERROR, { environment: "production" });
+      group.group = "parent";
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: logGroupResource("db", { created_at: "2026-01-01T00:00:00Z" }) }),
+      );
+      await group.save();
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.method).toBe("POST");
+      expect(req.url).toContain("/api/v1/log_groups");
+      const body = JSON.parse(await req.text());
+      expect(body.data.id).toBe("db");
+      expect(body.data.attributes.level).toBe("WARN");
+      expect(body.data.attributes.parent_id).toBe("parent");
+      expect(body.data.attributes.environments).toEqual({ production: { level: "ERROR" } });
+      expect(group.createdAt).toBe("2026-01-01T00:00:00Z");
+    });
+
+    it("omits environments from the body when there are no overrides", async () => {
+      const client = makeClient();
+      const group = client.logGroups.new("db");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: logGroupResource("db") }));
+      await group.save();
+      const body = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+      expect("environments" in body.data.attributes).toBe(false);
+    });
+
+    it("throws SmplValidationError when the create response has no data", async () => {
+      const client = makeClient();
+      const group = client.logGroups.new("db");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
+      await expect(group.save()).rejects.toThrow(SmplValidationError);
+    });
+  });
+
+  describe("_updateGroup() (via LogGroup.save on an existing group)", () => {
+    it("PUTs an update body and applies the result", async () => {
+      const client = makeClient();
+      const group = new LogGroup(client.logGroups, {
+        id: "db",
+        name: "DB",
+        level: LogLevel.WARN,
+        createdAt: "2026-01-01T00:00:00Z",
+      });
+      group.name = "Database";
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          data: logGroupResource("db", {
+            name: "Database",
+            level: "WARN",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-02-01T00:00:00Z",
+          }),
+        }),
+      );
+      await group.save();
+      const req = mockFetch.mock.calls[0][0] as Request;
+      expect(req.method).toBe("PUT");
+      expect(req.url).toContain("/api/v1/log_groups/db");
+      expect(group.name).toBe("Database");
+      expect(group.updatedAt).toBe("2026-02-01T00:00:00Z");
+    });
+
+    it("throws when updating a group with a null id", async () => {
+      const client = makeClient();
+      const group = new LogGroup(client.logGroups, {
+        id: null,
+        name: "DB",
+        createdAt: "2026-01-01T00:00:00Z",
+      });
+      await expect(group.save()).rejects.toThrow(/Cannot update a LogGroup with no id/);
+    });
+
+    it("throws SmplValidationError when the update response has no data", async () => {
+      const client = makeClient();
+      const group = new LogGroup(client.logGroups, {
+        id: "db",
+        name: "DB",
+        createdAt: "2026-01-01T00:00:00Z",
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: null }));
+      await expect(group.save()).rejects.toThrow(SmplValidationError);
+    });
+  });
+});
+
+// ===========================================================================
+// Error wrapping
+// ===========================================================================
+
+describe("LoggingClient — fetch-error wrapping", () => {
+  it("wraps a TypeError as SmplConnectionError", async () => {
+    const client = makeWiredClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(client.loggers.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("wraps a generic Error as SmplConnectionError", async () => {
+    const client = makeWiredClient();
+    mockFetch.mockRejectedValueOnce(new Error("kaput"));
+    await expect(client.loggers.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("rethrows a typed SDK error unchanged", async () => {
+    const client = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(textResponse("nope", 404));
+    await expect(client.loggers.get("x")).rejects.toThrow(SmplNotFoundError);
+  });
+});
+
+// ===========================================================================
+// install() / registerAdapter / live-surface gating
+// ===========================================================================
+
+describe("LoggingClient — install() and the live-surface gate", () => {
+  it("install() is idempotent and wires all five WS handlers", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    await client.install(); // no-op second call
+    expect(lastEnsureStarted).toHaveBeenCalled();
+    for (const evt of [
+      "logger_changed",
+      "logger_deleted",
+      "group_changed",
+      "group_deleted",
+      "loggers_changed",
+    ]) {
+      expect(lastMockWs.on).toHaveBeenCalledWith(evt, expect.any(Function));
     }
-    expect(flushSpy).not.toHaveBeenCalled();
-
-    // 50th logger triggers immediate flush
-    capturedHook!("logger.49", "INFO");
-    expect(flushSpy).toHaveBeenCalledTimes(1);
-
-    client._close();
-  });
-});
-
-// ===========================================================================
-// Timer: setInterval started and cleared
-// ===========================================================================
-
-describe("LoggingClient — flush timer lifecycle", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  it("onChange() throws SmplNotInstalledError before install()", () => {
+    const client = makeWiredClient();
+    expect(() => client.onChange(() => {})).toThrow(SmplNotInstalledError);
   });
 
-  it("should start a 30-second flush timer after start()", async () => {
-    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-
-    await client.start();
-
-    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000);
-    expect((client as any)._loggerFlushTimer).not.toBeNull();
-
-    client._close();
+  it("refresh() throws SmplNotInstalledError before install()", async () => {
+    const client = makeWiredClient();
+    await expect(client.refresh()).rejects.toThrow(SmplNotInstalledError);
   });
 
-  it("should clear the flush timer on _close()", async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-
-    await client.start();
-    const timer = (client as any)._loggerFlushTimer;
-    client._close();
-
-    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
-    expect((client as any)._loggerFlushTimer).toBeNull();
-  });
-
-  it("should call _flushLoggerBuffer when timer fires", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-
-    await client.start();
-    const flushSpy = vi.spyOn(client as any, "_flushLoggerBuffer");
-
-    // Advance time by 30 seconds to trigger the interval
-    await vi.advanceTimersByTimeAsync(30_000);
-
-    expect(flushSpy).toHaveBeenCalledTimes(1);
-
-    client._close();
-  });
-});
-
-// ===========================================================================
-// Internal model-client aliases & install()
-// ===========================================================================
-
-describe("LoggingClient — internal aliases & install()", () => {
-  it("install() should be an alias of start() and idempotent", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
-
+  it("registerAdapter() before install() is allowed and disables auto-load", async () => {
+    const client = makeWiredClient();
+    const adapter = makeAdapter();
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
     await client.install();
+    expect(adapter.discover).toHaveBeenCalled();
+    expect(adapter.installHook).toHaveBeenCalled();
+  });
+
+  it("registerAdapter() after install() throws a plain Error", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
     await client.install();
-
-    // Should wire WebSocket listeners exactly once across repeated install() calls.
-    expect(lastMockWs.on).toHaveBeenCalledTimes(5);
-  });
-});
-
-// ===========================================================================
-// Internal HTTP helpers — direct fallback paths
-// ===========================================================================
-
-describe("LoggingClient — _listLoggers/_listLogGroups direct HTTP fallback", () => {
-  it("delegates to the management plane when wired", async () => {
-    const client = makeClient();
-    const fakeMgmt = {
-      loggers: { list: vi.fn().mockResolvedValue([]) },
-      logGroups: { list: vi.fn().mockResolvedValue([]) },
-    };
-    client._resolveManagement = () => fakeMgmt as never;
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-
-    await client.start();
-
-    expect(fakeMgmt.loggers.list).toHaveBeenCalled();
-    expect(fakeMgmt.logGroups.list).toHaveBeenCalled();
+    expect(() => client.registerAdapter(makeAdapter())).toThrow(
+      "Cannot register adapters after install()",
+    );
   });
 
-  it("falls back to direct HTTP and surfaces errors via SmplError on _listLoggers failure", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
+  it("discovers loggers from adapters and applies fetched levels", async () => {
+    const client = makeWiredClient();
+    const adapter = makeAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
     });
-
-    let call = 0;
-    mockFetch.mockImplementation(() => {
-      call++;
-      // First HTTP call: list loggers — returns 500 to hit the error branch.
-      if (call === 1) return Promise.resolve(new Response("Server Error", { status: 500 }));
-      return Promise.resolve(jsonResponse({ data: [] }));
-    });
-
-    // start() catches the error from _listLoggers internally; no throw.
-    await client.start();
-    expect(call).toBeGreaterThanOrEqual(1);
-  });
-
-  it("falls back to direct HTTP and surfaces errors via SmplError on _listLogGroups failure", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-
-    let call = 0;
-    mockFetch.mockImplementation(() => {
-      call++;
-      // First HTTP call: list loggers — succeeds.
-      if (call === 1) return Promise.resolve(jsonResponse({ data: [] }));
-      // Second HTTP call: list log groups — fails.
-      return Promise.resolve(new Response("Server Error", { status: 500 }));
-    });
-
-    // start() catches the error internally; no throw.
-    await client.start();
-    expect(call).toBeGreaterThanOrEqual(2);
-  });
-
-  it("translates DOMException AbortError from custom fetch wrapper into SmplTimeoutError", async () => {
-    const ws = createMockSharedWs();
-    const client = new LoggingClient(API_KEY, () => ws as never, 1);
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-    mockFetch.mockRejectedValue(new DOMException("aborted", "AbortError"));
-
-    // start() swallows the timeout and continues.
-    await client.start();
-    // No assertion on outcome; coverage of the AbortError branch is the point.
-  });
-
-  it("pages through loggers when the first page is full (direct HTTP fallback)", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-
-    const PAGE_SIZE = 1000;
-    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-      id: `logger-${i}`,
-      type: "logger",
-      attributes: { name: `logger-${i}`, level: "INFO" },
-    }));
-    const secondPage = [
-      { id: "logger-last", type: "logger", attributes: { name: "logger-last", level: "DEBUG" } },
-    ];
-
-    let loggerCallCount = 0;
+    client.registerAdapter(adapter);
     mockFetch.mockImplementation((req: Request) => {
       const url = req.url;
-      if (url.includes("/api/v1/loggers") && !url.includes("/log_groups")) {
-        loggerCallCount++;
-        if (loggerCallCount === 1) return Promise.resolve(jsonResponse({ data: firstPage }));
-        if (loggerCallCount === 2) return Promise.resolve(jsonResponse({ data: secondPage }));
+      if (url.includes("/loggers/bulk")) {
+        return Promise.resolve(jsonResponse({ registered: 1 }));
+      }
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({ data: [loggerResource("my-app", { level: "WARN" })] }),
+        );
       }
       return Promise.resolve(jsonResponse({ data: [] }));
     });
-
-    await client.start();
-
-    expect(loggerCallCount).toBe(2);
+    await client.install();
+    expect(adapter.applyLevel).toHaveBeenCalledWith("my-app", "WARN");
   });
 
-  it("pages through log_groups when the first page is full (direct HTTP fallback)", async () => {
-    const client = makeClient();
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
+  it("applies an environment-specific override during install", async () => {
+    const client = makeWiredClient();
+    const adapter = makeAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
     });
-
-    const PAGE_SIZE = 1000;
-    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-      id: `group-${i}`,
-      type: "log_group",
-      attributes: { name: `group-${i}`, level: "INFO" },
-    }));
-    const secondPage = [
-      { id: "group-last", type: "log_group", attributes: { name: "group-last", level: "DEBUG" } },
-    ];
-
-    let groupCallCount = 0;
+    client.registerAdapter(adapter);
     mockFetch.mockImplementation((req: Request) => {
       const url = req.url;
-      if (url.includes("/api/v1/log_groups")) {
-        groupCallCount++;
-        if (groupCallCount === 1) return Promise.resolve(jsonResponse({ data: firstPage }));
-        if (groupCallCount === 2) return Promise.resolve(jsonResponse({ data: secondPage }));
+      if (url.includes("/loggers/bulk")) return Promise.resolve(jsonResponse({ registered: 1 }));
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: [
+              loggerResource("my-app", {
+                level: "INFO",
+                environments: { production: { level: "ERROR" } },
+              }),
+            ],
+          }),
+        );
       }
       return Promise.resolve(jsonResponse({ data: [] }));
     });
-
-    await client.start();
-
-    expect(groupCallCount).toBe(2);
+    await client.install();
+    expect(adapter.applyLevel).toHaveBeenCalledWith("my-app", "ERROR");
   });
 
-  it("pages through loggers via the management plane when wired", async () => {
-    const client = makeClient();
-    const PAGE_SIZE = 1000;
-    const fakeMgmt = {
-      loggers: {
-        list: vi
-          .fn()
-          .mockResolvedValueOnce(
-            Array.from({ length: PAGE_SIZE }, (_, i) => ({
-              id: `logger-${i}`,
-              level: "INFO",
-              environments: null,
-            })),
-          )
-          .mockResolvedValueOnce([{ id: "logger-last", level: "DEBUG", environments: null }]),
-      },
-      logGroups: {
-        list: vi.fn().mockResolvedValueOnce([]),
-      },
-    };
-    client._resolveManagement = () => fakeMgmt as never;
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
-
-    await client.start();
-
-    expect(fakeMgmt.loggers.list).toHaveBeenCalledTimes(2);
-    expect(fakeMgmt.loggers.list).toHaveBeenNthCalledWith(1, {
-      pageNumber: 1,
-      pageSize: PAGE_SIZE,
-    });
-    expect(fakeMgmt.loggers.list).toHaveBeenNthCalledWith(2, {
-      pageNumber: 2,
-      pageSize: PAGE_SIZE,
-    });
+  it("swallows adapter discover() errors", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(
+      makeAdapter({
+        discover: vi.fn(() => {
+          throw new Error("discover boom");
+        }),
+      }),
+    );
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await expect(client.install()).resolves.toBeUndefined();
   });
 
-  it("pages through log_groups via the management plane when wired", async () => {
-    const client = makeClient();
-    const PAGE_SIZE = 1000;
-    const fakeMgmt = {
-      loggers: { list: vi.fn().mockResolvedValueOnce([]) },
-      logGroups: {
-        list: vi
-          .fn()
-          .mockResolvedValueOnce(
-            Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `group-${i}`, level: "INFO" })),
-          )
-          .mockResolvedValueOnce([{ id: "group-last", level: "DEBUG" }]),
-      },
-    };
-    client._resolveManagement = () => fakeMgmt as never;
-    client.registerAdapter({
-      name: "noop",
-      discover: () => [],
-      applyLevel: () => {},
-      installHook: () => {},
-      uninstallHook: () => {},
-    });
+  it("swallows adapter installHook() errors", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(
+      makeAdapter({
+        installHook: vi.fn(() => {
+          throw new Error("hook boom");
+        }),
+      }),
+    );
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await expect(client.install()).resolves.toBeUndefined();
+  });
 
-    await client.start();
+  it("swallows adapter applyLevel() errors during install", async () => {
+    const client = makeWiredClient();
+    const adapter = makeAdapter({
+      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
+      applyLevel: vi.fn(() => {
+        throw new Error("apply boom");
+      }),
+    });
+    client.registerAdapter(adapter);
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/loggers/bulk")) return Promise.resolve(jsonResponse({ registered: 1 }));
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(
+          jsonResponse({ data: [loggerResource("my-app", { level: "WARN" })] }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    await expect(client.install()).resolves.toBeUndefined();
+    expect(adapter.applyLevel).toHaveBeenCalled();
+  });
 
-    expect(fakeMgmt.logGroups.list).toHaveBeenCalledTimes(2);
-    expect(fakeMgmt.logGroups.list).toHaveBeenNthCalledWith(1, {
-      pageNumber: 1,
-      pageSize: PAGE_SIZE,
-    });
-    expect(fakeMgmt.logGroups.list).toHaveBeenNthCalledWith(2, {
-      pageNumber: 2,
-      pageSize: PAGE_SIZE,
-    });
+  it("continues when the server is unreachable during install", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockRejectedValue(new TypeError("network error"));
+    await expect(client.install()).resolves.toBeUndefined();
+    // WS handlers are still wired.
+    expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
+  });
+
+  it("records a discovery metric when loggers are discovered", async () => {
+    const metrics = { record: vi.fn(), recordGauge: vi.fn() } as any;
+    const client = new LoggingClient({ parent: makeParent(), transport: makeTransport(), metrics });
+    client.registerAdapter(
+      makeAdapter({ discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]) }),
+    );
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(metrics.record).toHaveBeenCalledWith("logging.loggers_discovered", 1, "loggers");
+  });
+
+  it("auto-loads built-in adapters when none are registered", async () => {
+    // winston + pino are devDependencies, so autoLoadAdapters succeeds and
+    // returns real adapters; install() must complete and wire the WS.
+    const client = makeWiredClient();
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
   });
 });
 
-describe("LoggingClient — extraHeaders", () => {
-  it("extraHeaders are present on every request, SDK headers win on collision", async () => {
+// ===========================================================================
+// _onNewLogger — runtime discovery hook
+// ===========================================================================
+
+describe("LoggingClient — runtime logger discovery (_onNewLogger)", () => {
+  it("buffers a newly-seen logger from the adapter hook and applies its level", async () => {
+    const client = makeWiredClient();
+    let hookCb: ((name: string, level: string) => void) | null = null;
+    const adapter = makeAdapter({
+      installHook: vi.fn((cb: (name: string, level: string) => void) => {
+        hookCb = cb;
+      }),
+    });
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+
+    expect(hookCb).not.toBeNull();
+    hookCb!("runtime.logger", "DEBUG");
+    expect(client._buffer.pendingCount).toBe(1);
+    // Already connected → an immediate applyLevel happens (resolves to INFO).
+    expect(adapter.applyLevel).toHaveBeenCalledWith("runtime.logger", "INFO");
+  });
+
+  it("swallows applyLevel errors on a runtime-discovered logger", async () => {
+    const client = makeWiredClient();
+    let hookCb: ((name: string, level: string) => void) | null = null;
+    const adapter = makeAdapter({
+      installHook: vi.fn((cb: (name: string, level: string) => void) => {
+        hookCb = cb;
+      }),
+      applyLevel: vi.fn(() => {
+        throw new Error("apply boom");
+      }),
+    });
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(() => hookCb!("runtime.logger", "DEBUG")).not.toThrow();
+  });
+
+  it("triggers an immediate flush when runtime discovery crosses the batch threshold", async () => {
+    const client = makeWiredClient();
+    let hookCb: ((name: string, level: string) => void) | null = null;
+    const adapter = makeAdapter({
+      installHook: vi.fn((cb: (name: string, level: string) => void) => {
+        hookCb = cb;
+      }),
+    });
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValue(jsonResponse({ registered: 50 }));
+
+    for (let i = 0; i < 50; i++) hookCb!(`runtime.logger.${i}`, "INFO");
+    await new Promise((r) => setTimeout(r, 10));
+    const bulkCalls = mockFetch.mock.calls.filter((c) =>
+      (c[0] as Request).url.includes("/loggers/bulk"),
+    );
+    expect(bulkCalls.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ===========================================================================
+// onChange validation + refresh
+// ===========================================================================
+
+describe("LoggingClient — onChange() / refresh()", () => {
+  async function installed(): Promise<LoggingClient> {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter({ discover: () => [{ name: "sql", level: "INFO" }] }));
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    mockFetch.mockReset();
+    return client;
+  }
+
+  it("registers a global listener", async () => {
+    const client = await installed();
+    expect(() => client.onChange(() => {})).not.toThrow();
+  });
+
+  it("registers a key-scoped listener", async () => {
+    const client = await installed();
+    expect(() => client.onChange("sql", () => {})).not.toThrow();
+  });
+
+  it("appends to an existing key-scoped listener bucket", async () => {
+    const client = await installed();
+    client.onChange("sql", () => {});
+    expect(() => client.onChange("sql", () => {})).not.toThrow();
+  });
+
+  it("throws when a key-scoped onChange is missing its callback", async () => {
+    const client = await installed();
+    expect(() => client.onChange("sql")).toThrow(SmplError);
+  });
+
+  it("refresh() re-fetches and fires 'manual' deltas", async () => {
+    const client = await installed();
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockImplementation((req: Request) => {
+      if (req.url.includes("/loggers") && !req.url.endsWith("/log_groups")) {
+        return Promise.resolve(jsonResponse({ data: [loggerResource("sql", { level: "DEBUG" })] }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    await client.refresh();
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb.mock.calls[0][0].source).toBe("manual");
+    expect(cb.mock.calls[0][0].level).toBe("DEBUG");
+  });
+
+  it("refresh() propagates fetch errors (does not swallow)", async () => {
+    const client = await installed();
+    mockFetch.mockResolvedValue(textResponse("boom", 500));
+    await expect(client.refresh()).rejects.toThrow(SmplError);
+  });
+});
+
+// ===========================================================================
+// WebSocket handlers
+// ===========================================================================
+
+describe("LoggingClient — WebSocket handlers", () => {
+  async function installedWithLoggers(names: string[]): Promise<LoggingClient> {
+    const client = makeWiredClient();
+    client.registerAdapter({
+      name: "t",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
+      applyLevel: vi.fn(),
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    mockFetch.mockReset();
+    return client;
+  }
+
+  it("logger_changed: refetches and fires when the level changed", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: loggerResource("sql", { level: "DEBUG" }) }),
+    );
+    lastMockWs._emit("logger_changed", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", level: "DEBUG" }));
+  });
+
+  it("logger_changed: ignores an event with no id", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    lastMockWs._emit("logger_changed", {});
+    await new Promise((r) => setTimeout(r, 10));
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("logger_changed: a null scoped fetch evicts the logger from the cache", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    // 404 on the scoped fetch → _fetchSingleLogger returns null → eviction.
+    mockFetch.mockResolvedValueOnce(textResponse("nope", 404));
+    lastMockWs._emit("logger_changed", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("logger_deleted: evicts the cache; the deleted id fires nothing", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    const sqlCb = vi.fn();
+    client.onChange(cb);
+    client.onChange("sql", sqlCb);
+    lastMockWs._emit("logger_deleted", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sqlCb).not.toHaveBeenCalled();
+  });
+
+  it("logger_deleted: ignores an event with no id", async () => {
+    await installedWithLoggers(["sql"]);
+    lastMockWs._emit("logger_deleted", {});
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("group_changed: refetches and re-applies without throwing", async () => {
+    const client = await installedWithLoggers(["app.db"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: logGroupResource("app", { level: "ERROR" }) }),
+    );
+    lastMockWs._emit("group_changed", { id: "app" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("group_changed: ignores an event with no id", async () => {
+    await installedWithLoggers(["app.db"]);
+    lastMockWs._emit("group_changed", {});
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("group_changed: a null scoped fetch evicts the group from the cache", async () => {
+    await installedWithLoggers(["app.db"]);
+    mockFetch.mockResolvedValueOnce(textResponse("nope", 404));
+    lastMockWs._emit("group_changed", { id: "app" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("group_deleted: evicts the group cache; deleted id fires nothing", async () => {
+    const client = await installedWithLoggers(["app.db"]);
+    const groupCb = vi.fn();
+    client.onChange("app", groupCb);
+    lastMockWs._emit("group_deleted", { id: "app" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(groupCb).not.toHaveBeenCalled();
+  });
+
+  it("group_deleted: ignores an event with no id", async () => {
+    await installedWithLoggers(["app.db"]);
+    lastMockWs._emit("group_deleted", {});
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("loggers_changed: triggers a full re-resolution and fires deltas", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockImplementation((req: Request) => {
+      if (req.url.includes("/loggers") && !req.url.endsWith("/log_groups")) {
+        return Promise.resolve(jsonResponse({ data: [loggerResource("sql", { level: "WARN" })] }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    lastMockWs._emit("loggers_changed", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", level: "WARN" }));
+  });
+
+  it("loggers_changed: swallows fetch errors", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockResolvedValue(textResponse("boom", 500));
+    lastMockWs._emit("loggers_changed", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("swallows errors thrown by a global listener", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    client.onChange(() => {
+      throw new Error("listener boom");
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: loggerResource("sql", { level: "DEBUG" }) }),
+    );
+    lastMockWs._emit("logger_changed", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("swallows errors thrown by a key-scoped listener", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    client.onChange("sql", () => {
+      throw new Error("key listener boom");
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: loggerResource("sql", { level: "DEBUG" }) }),
+    );
+    lastMockWs._emit("logger_changed", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+});
+
+// ===========================================================================
+// Paging in _listLoggers / _listLogGroups (via install)
+// ===========================================================================
+
+describe("LoggingClient — paging on install", () => {
+  it("pages loggers and groups until a short page is returned", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    const PAGE = 1000;
+    const fullLoggers = Array.from({ length: PAGE }, (_, i) => loggerResource(`l-${i}`));
+    const fullGroups = Array.from({ length: PAGE }, (_, i) => logGroupResource(`g-${i}`));
+    let loggerPage = 0;
+    let groupPage = 0;
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/log_groups")) {
+        groupPage++;
+        return Promise.resolve(
+          jsonResponse({ data: groupPage === 1 ? fullGroups : [logGroupResource("g-last")] }),
+        );
+      }
+      if (url.includes("/loggers") && !url.includes("/bulk")) {
+        loggerPage++;
+        return Promise.resolve(
+          jsonResponse({ data: loggerPage === 1 ? fullLoggers : [loggerResource("l-last")] }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    await client.install();
+    expect(loggerPage).toBe(2);
+    expect(groupPage).toBe(2);
+  });
+});
+
+// ===========================================================================
+// close()
+// ===========================================================================
+
+describe("LoggingClient — close()", () => {
+  it("unregisters all five WS handlers and uninstalls adapter hooks", async () => {
+    const client = makeWiredClient();
+    const adapter = makeAdapter();
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    client.close();
+    expect(adapter.uninstallHook).toHaveBeenCalledTimes(1);
+    for (const evt of [
+      "logger_changed",
+      "logger_deleted",
+      "group_changed",
+      "group_deleted",
+      "loggers_changed",
+    ]) {
+      expect(lastMockWs.off).toHaveBeenCalledWith(evt, expect.any(Function));
+    }
+  });
+
+  it("does not stop the parent's WebSocket (wired client borrows it)", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    client.close();
+    expect(lastMockWs.stop).not.toHaveBeenCalled();
+  });
+
+  it("swallows adapter uninstallHook() errors", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(
+      makeAdapter({
+        uninstallHook: vi.fn(() => {
+          throw new Error("unhook boom");
+        }),
+      }),
+    );
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(() => client.close()).not.toThrow();
+  });
+
+  it("is a no-op when called before install()", () => {
+    const client = makeWiredClient();
+    expect(() => client.close()).not.toThrow();
+  });
+
+  it("allows install() again after close()", async () => {
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    client.close();
+    await expect(client.install()).resolves.toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// Standalone construction (owns its transport + WebSocket)
+// ===========================================================================
+
+describe("LoggingClient — standalone construction", () => {
+  it("builds its own transport from an apiKey and sends a Bearer token", async () => {
     const seen: Request[] = [];
     mockFetch.mockImplementation(async (req: Request) => {
       seen.push(req);
-      return new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return jsonResponse({ data: [] });
     });
-
-    const ws = { on: vi.fn(), off: vi.fn(), connectionStatus: "connected" };
-    const client = new LoggingClient("sk_api_test", () => ws as never, undefined, undefined, {
-      "X-Custom": "hello",
-      Authorization: "should-be-overridden",
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+      baseUrl: "https://logging.example.com/",
+      extraHeaders: { "X-Test": "v" },
     });
-    await client.start();
+    await client.loggers.list();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toContain("logging.example.com");
+    expect(seen[0].headers.get("authorization")).toBe("Bearer sk_standalone");
+    expect(seen[0].headers.get("x-test")).toBe("v");
+  });
 
-    expect(seen.length).toBeGreaterThan(0);
-    expect(seen[0]!.headers.get("x-custom")).toBe("hello");
-    expect(seen[0]!.headers.get("authorization")).toBe("Bearer sk_api_test");
+  it("maps a request timeout (AbortError) to SmplTimeoutError", async () => {
+    mockFetch.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+      baseUrl: "https://logging.example.com",
+      timeout: 5,
+    });
+    await expect(client.loggers.list()).rejects.toThrow(SmplTimeoutError);
+  });
+
+  it("rethrows non-abort fetch errors from the timeout wrapper", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("network down"));
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+      baseUrl: "https://logging.example.com",
+    });
+    await expect(client.loggers.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("opens and owns its own WebSocket on install, and stops it on close", async () => {
+    const fakeWs = createMockSharedWs();
+    const startSpy = fakeWs.start;
+    const stopSpy = fakeWs.stop;
+    const SharedWsModule = await import("../../../src/ws.js");
+    const ctorSpy = vi
+      .spyOn(SharedWsModule, "SharedWebSocket")
+      .mockImplementation(() => fakeWs as unknown as SharedWebSocket);
+
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+      baseUrl: "https://logging.example.com",
+    });
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(ctorSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+
+    client.close();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
   });
 });

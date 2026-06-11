@@ -1,21 +1,31 @@
 /**
- * Smpl Jobs management surface — `mgmt.jobs.*`.
+ * Smpl Jobs SDK client (`client.jobs` on SmplClient, or standalone `JobsClient`).
  *
- * Unlike Config/Flags/Logging, Jobs has no live "phone-home" agent — no
- * environment registration, no WebSocket — so its entire surface lives on
- * the management client. Defining a job, triggering a run, and reading run
- * history are all plain request/response calls here:
+ * Unlike Config/Flags/Logging, Jobs installs no in-process machinery — no
+ * environment registration, no WebSocket, no logger monkey-patching. It is a
+ * product you *use*, not infrastructure you *install*, so it has no
+ * runtime/management split: a single {@link JobsClient} exposes the full
+ * surface, reachable two ways:
  *
- *   mgmt.jobs.{new,get,list,delete,run,usage}
- *   mgmt.jobs.runs.{list,get,cancel,rerun}
- *   Job.{save,delete}
+ * - `client.jobs.*` on {@link SmplClient}
+ * - directly — `new JobsClient({ apiKey })` — for callers that only need jobs.
  *
- * New jobs-management capabilities should be added here.
+ * A {@link Job} is an active record: build it with {@link JobsClient.new},
+ * set fields, and call `save()` (create when new, full-replace update when it
+ * already exists) or `delete()`. Runs are read-only views; run actions live on
+ * `jobs.runs`.
+ *
+ * Every call delegates HTTP to the auto-generated openapi-fetch client over
+ * `../generated/jobs.d.ts`; this wrapper only shapes models and raises SDK
+ * exceptions.
  */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
 import type { components, paths } from "../generated/jobs.d.ts";
 import { SmplError, SmplConnectionError, throwForStatus } from "../errors.js";
+import { resolveManagementConfig, serviceUrl } from "../config.js";
 import {
   HttpConfig,
   HttpMethod,
@@ -26,13 +36,15 @@ import {
   type JobModelClient,
   type ListJobsParams,
   type ListRunsParams,
-} from "../jobs/types.js";
+} from "./types.js";
 
 type JobsHttp = ReturnType<typeof createClient<paths>>;
 type GenJobHttpConfiguration = components["schemas"]["JobHttpConfiguration"];
 type GenJob = components["schemas"]["Job"];
 type GenJobCreateRequest = components["schemas"]["JobCreateRequest"];
 type GenJobRequest = components["schemas"]["JobRequest"];
+
+const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
 /** @internal */
 async function checkError(response: Response, error?: unknown): Promise<never> {
@@ -139,20 +151,11 @@ function _runFromResource(resource: { id: string; attributes: Record<string, unk
   return new Run(resource.attributes, resource.id);
 }
 
-/**
- * `mgmt.jobs.runs.*` — read-only run history plus the cancel / rerun run
- * actions.
- */
+/** Run history and run actions (`jobs.runs`). */
 export class RunsClient {
   /** @internal */
   constructor(private readonly _http: JobsHttp) {}
 
-  /**
-   * List runs for the authenticated account, newest first. Cursor paginated
-   * (ADR-014): pass {@link ListRunsParams.pageSize} and the
-   * {@link ListRunsParams.after} cursor from the prior page. Pass
-   * {@link ListRunsParams.job} to scope to a single job's history.
-   */
   async list(params: ListRunsParams = {}): Promise<Run[]> {
     const query: Record<string, string | number> = {};
     if (params.job !== undefined) query["filter[job]"] = params.job;
@@ -174,17 +177,14 @@ export class RunsClient {
     );
   }
 
-  /** Fetch a single run by id. */
   async get(runId: string): Promise<Run> {
     return this._runAction("GET", "/api/v1/runs/{run_id}", runId);
   }
 
-  /** Cancel a pending run. */
   async cancel(runId: string): Promise<Run> {
     return this._runAction("POST", "/api/v1/runs/{run_id}/actions/cancel", runId);
   }
 
-  /** Re-run a prior run, spawning a new `RERUN` run. */
   async rerun(runId: string): Promise<Run> {
     return this._runAction("POST", "/api/v1/runs/{run_id}/actions/rerun", runId);
   }
@@ -215,33 +215,89 @@ export class RunsClient {
   }
 }
 
+/** Configuration options for the {@link JobsClient}. */
+export interface JobsClientOptions {
+  /** API key. When omitted, resolved from `SMPLKIT_API_KEY` or `~/.smplkit`. */
+  apiKey?: string;
+  /**
+   * Full jobs-service base URL. Usually resolved from `baseDomain`/`scheme`;
+   * supplied directly by the top-level clients which have already computed it.
+   */
+  baseUrl?: string;
+  /** Named `~/.smplkit` profile section. */
+  profile?: string;
+  /** Base domain for API requests (default `"smplkit.com"`). */
+  baseDomain?: string;
+  /** URL scheme (default `"https"`). */
+  scheme?: string;
+  /** Enable SDK debug logging. */
+  debug?: boolean;
+  /** Extra headers attached to every request. */
+  extraHeaders?: Record<string, string>;
+  /**
+   * Internal — a pre-built jobs transport supplied by a top-level client so
+   * the jobs surface shares one connection pool. Not for direct use.
+   * @internal
+   */
+  transport?: JobsHttp;
+}
+
 /**
- * `mgmt.jobs.*` — the management surface for Smpl Jobs: active-record job
- * CRUD, the run-now action, run history (`runs`), and usage.
+ * Smpl Jobs client.
+ *
+ * Reachable as `client.jobs` ({@link SmplClient}) or constructed directly:
+ *
+ * @example
+ * ```typescript
+ * import { JobsClient } from "@smplkit/sdk";
+ *
+ * const jobs = new JobsClient();
+ * for (const job of await jobs.list()) {
+ *   console.log(job.id);
+ * }
+ * ```
+ *
+ * The full surface — active-record job CRUD (`new` / `get` / `list` /
+ * `delete`), the run-now action (`run`), run history and run actions
+ * (`runs`), and usage (`usage`) — lives on this one class. Jobs installs no
+ * in-process machinery, so there is no live connection and no install step.
  */
-export class ManagementJobsClient implements JobModelClient {
+export class JobsClient implements JobModelClient {
+  /** @internal */
+  private readonly _http: JobsHttp;
+  /** @internal */
+  private readonly _ownsTransport: boolean;
+
   /** Run history and run actions. */
   readonly runs: RunsClient;
 
-  /** @internal */
-  constructor(private readonly _http: JobsHttp) {
-    this.runs = new RunsClient(_http);
+  constructor(options: JobsClientOptions = {}) {
+    if (options.transport !== undefined) {
+      this._http = options.transport;
+      this._ownsTransport = false;
+    } else {
+      const cfg = resolveManagementConfig(options);
+      const jobsUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "jobs", cfg.baseDomain);
+      this._http = createClient<paths>({
+        baseUrl: jobsUrl.replace(/\/+$/, ""),
+        headers: {
+          ...(options.extraHeaders ?? {}),
+          Authorization: `Bearer ${cfg.apiKey}`,
+          Accept: JSONAPI_CONTENT_TYPE,
+          "Content-Type": JSONAPI_CONTENT_TYPE,
+        },
+      });
+      this._ownsTransport = true;
+    }
+    this.runs = new RunsClient(this._http);
   }
 
   /**
-   * Construct an unsaved {@link Job}. Call {@link Job.save} to create it.
+   * Return an unsaved {@link Job}. Call `.save()` to create it.
    *
-   * @param id            Caller-supplied unique identifier for the job.
-   *                      Unique within the account and immutable; the service
-   *                      returns 409 if another live job already uses this id.
-   * @param fields.name   Human-readable name for the job.
-   * @param fields.schedule        An ISO-8601 datetime, a 5-field UTC cron
-   *                               expression, or the literal `"now"`.
-   * @param fields.configuration   The HTTP request the job performs.
-   * @param fields.enabled         Whether the job schedules runs. Defaults true.
-   * @param fields.description     Optional free-text description.
-   * @param fields.concurrencyPolicy  How overlapping runs are handled.
-   *                                  Defaults to `"ALLOW"`.
+   * @param id - Caller-supplied unique identifier for the job. Unique within
+   *   the account and immutable; the service returns 409 if another live job
+   *   already uses this id.
    */
   new(
     id: string,
@@ -249,8 +305,8 @@ export class ManagementJobsClient implements JobModelClient {
       name: string;
       schedule: string;
       configuration: HttpConfig;
-      enabled?: boolean;
       description?: string | null;
+      enabled?: boolean;
       concurrencyPolicy?: string;
     },
   ): Job {
@@ -259,13 +315,12 @@ export class ManagementJobsClient implements JobModelClient {
       name: fields.name,
       schedule: fields.schedule,
       configuration: fields.configuration,
-      enabled: fields.enabled,
       description: fields.description,
+      enabled: fields.enabled,
       concurrencyPolicy: fields.concurrencyPolicy,
     });
   }
 
-  /** List jobs for the authenticated account. */
   async list(params: ListJobsParams = {}): Promise<Job[]> {
     const query: Record<string, string | number | boolean> = {};
     if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
@@ -287,15 +342,11 @@ export class ManagementJobsClient implements JobModelClient {
     );
   }
 
-  /**
-   * Fetch a single job by id. The returned instance is bound to this client
-   * so {@link Job.save} and {@link Job.delete} round-trip back here.
-   */
-  async get(jobId: string): Promise<Job> {
+  async get(id: string): Promise<Job> {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.GET("/api/v1/jobs/{job_id}", {
-        params: { path: { job_id: jobId } },
+        params: { path: { job_id: id } },
       });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
@@ -306,11 +357,10 @@ export class ManagementJobsClient implements JobModelClient {
     return _jobFromResource(data.data, this);
   }
 
-  /** Soft-delete a job by id. */
-  async delete(jobId: string): Promise<void> {
+  async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/jobs/{job_id}", {
-        params: { path: { job_id: jobId } },
+        params: { path: { job_id: id } },
       });
       if (result.response.status !== 204) await checkError(result.response, result.error);
     } catch (err) {
@@ -319,11 +369,11 @@ export class ManagementJobsClient implements JobModelClient {
   }
 
   /** Trigger one immediate `MANUAL` run of the job. */
-  async run(jobId: string): Promise<Run> {
+  async run(id: string): Promise<Run> {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.POST("/api/v1/jobs/{job_id}/actions/run", {
-        params: { path: { job_id: jobId } },
+        params: { path: { job_id: id } },
       });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
@@ -348,10 +398,7 @@ export class ManagementJobsClient implements JobModelClient {
     return new Usage(data.data.attributes);
   }
 
-  /**
-   * @internal Called by `Job.save()` on unsaved instances. The jobs service
-   * requires a caller-supplied `data.id` on create.
-   */
+  /** @internal — called by `Job.save()` for new resources. */
   async _createJob(job: Job): Promise<Job> {
     const body: GenJobCreateRequest = {
       data: { id: job.id, type: "job", attributes: _jobAttrs(job) },
@@ -368,11 +415,7 @@ export class ManagementJobsClient implements JobModelClient {
     return _jobFromResource(data.data, this);
   }
 
-  /**
-   * @internal Full-replace PUT. Called by `Job.save()` on instances that
-   * already have a `createdAt`. Header values must be re-supplied as
-   * plaintext; the GET path redacts them.
-   */
+  /** @internal — full-replace PUT. Called by `Job.save()` for existing resources. */
   async _updateJob(job: Job): Promise<Job> {
     const body: GenJobRequest = {
       data: { id: job.id, type: "job", attributes: _jobAttrs(job) },
@@ -392,8 +435,23 @@ export class ManagementJobsClient implements JobModelClient {
     return _jobFromResource(data.data, this);
   }
 
-  /** @internal Called by `Job.delete()`. */
+  /** @internal — called by `Job.delete()`. */
   async _deleteJob(id: string): Promise<void> {
     return this.delete(id);
+  }
+
+  /**
+   * Release HTTP resources — only when this client owns its transport.
+   *
+   * A jobs client wired by a top-level client shares that client's transport
+   * and must not close it here; the owning client's `close()` handles
+   * teardown.
+   */
+  close(): void {
+    // openapi-fetch holds no persistent connection to tear down (unlike
+    // Python's httpx transport), so an owned transport needs no explicit
+    // close. `_ownsTransport` records ownership so a wired client never
+    // attempts to release a borrowed transport.
+    void this._ownsTransport;
   }
 }

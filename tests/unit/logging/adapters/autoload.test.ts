@@ -1,10 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LoggingClient } from "../../../../src/logging/client.js";
-import type { LoggingAdapter } from "../../../../src/logging/adapters/base.js";
+/**
+ * Adapter auto-loading and the remaining live-surface edge paths of the
+ * fused LoggingClient: the periodic flush timer, the level-change metric in
+ * `_applyLevels`, the WebSocket-handler `.catch` branches, the single-resource
+ * fetcher fallbacks, and the standalone URL-derivation path.
+ */
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import createClient from "openapi-fetch";
+import { LoggingClient, type LoggingParent } from "../../../../src/logging/client.js";
+import type { LoggingAdapter } from "../../../../src/logging/adapters/base.js";
+import type { SharedWebSocket } from "../../../../src/ws.js";
+import { SmplConnectionError } from "../../../../src/errors.js";
 
 const mockFetch = vi.fn();
 
@@ -14,30 +22,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
-
-const API_KEY = "sk_test";
-
-interface MockSharedWs {
-  on: ReturnType<typeof vi.fn>;
-  off: ReturnType<typeof vi.fn>;
-  connectionStatus: string;
-}
-
-function createMockSharedWs(): MockSharedWs {
-  return {
-    on: vi.fn(),
-    off: vi.fn(),
-    connectionStatus: "connected",
-  };
-}
-
-let lastMockWs: MockSharedWs;
-
-function makeClient(): LoggingClient {
-  lastMockWs = createMockSharedWs();
-  return new LoggingClient(API_KEY, () => lastMockWs as never, 30000);
-}
 
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -46,12 +32,54 @@ function jsonResponse(body: object, status = 200): Response {
   });
 }
 
-/** Mock fetch to always return fresh Response objects with the given body. */
-function mockFetchAlways(body: object, status = 200): void {
-  mockFetch.mockImplementation(() => Promise.resolve(jsonResponse(body, status)));
+function makeTransport(): any {
+  return createClient<import("../../../../src/generated/logging.d.ts").paths>({
+    baseUrl: "https://logging.smplkit.com",
+    headers: { Authorization: "Bearer sk_test", Accept: "application/json" },
+  });
 }
 
-function createMockAdapter(overrides?: Partial<LoggingAdapter>): LoggingAdapter {
+type WsCallback = (data: Record<string, unknown>) => void;
+
+interface MockSharedWs {
+  on: ReturnType<typeof vi.fn>;
+  off: ReturnType<typeof vi.fn>;
+  connectionStatus: string;
+  _emit: (event: string, data: Record<string, unknown>) => void;
+}
+
+function createMockSharedWs(): MockSharedWs {
+  const listeners: Record<string, WsCallback[]> = {};
+  return {
+    on: vi.fn((event: string, cb: WsCallback) => {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(cb);
+    }),
+    off: vi.fn(),
+    connectionStatus: "connected",
+    _emit: (event: string, data: Record<string, unknown>) => {
+      for (const cb of listeners[event] ?? []) cb(data);
+    },
+  };
+}
+
+let lastMockWs: MockSharedWs;
+
+function makeParent(): LoggingParent {
+  lastMockWs = createMockSharedWs();
+  return {
+    _environment: "production",
+    _service: "svc",
+    _ensureStarted: vi.fn(),
+    _ensureWs: () => lastMockWs as unknown as SharedWebSocket,
+  };
+}
+
+function makeWiredClient(metrics: any = null): LoggingClient {
+  return new LoggingClient({ parent: makeParent(), transport: makeTransport(), metrics });
+}
+
+function makeAdapter(overrides?: Partial<LoggingAdapter>): LoggingAdapter {
   return {
     name: "mock",
     discover: vi.fn(() => []),
@@ -62,330 +90,257 @@ function createMockAdapter(overrides?: Partial<LoggingAdapter>): LoggingAdapter 
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+function loggerResource(id: string, attrs: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    type: "logger",
+    attributes: {
+      name: id,
+      level: null,
+      group: null,
+      managed: true,
+      sources: [],
+      environments: {},
+      created_at: null,
+      updated_at: null,
+      ...attrs,
+    },
+  };
+}
+
+// ===========================================================================
+// Adapter auto-loading
+// ===========================================================================
 
 describe("LoggingClient — adapter auto-loading", () => {
-  it("should auto-load adapters when no explicit adapters registered", async () => {
-    const client = makeClient();
-
-    // Mock list() and listGroups() responses
-    mockFetchAlways({ data: [] });
-
-    // The auto-loader will try to require adapters — this may or may not
-    // find winston/pino depending on test environment. We just verify
-    // start() completes without error.
+  it("warns and continues when no logging framework is detected", async () => {
+    // In the vitest ESM runtime the built-in adapters' `require(...)` calls
+    // fail to resolve, so autoLoadAdapters() returns an empty list and warns.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await client.start();
-    warnSpy.mockRestore();
-
-    // start() should complete and wire WebSocket
-    expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
-  });
-
-  it("should warn when zero adapters are found", async () => {
-    const client = makeClient();
-
-    // Force auto-load to find nothing by overriding _autoLoadAdapters
-    (client as any)._autoLoadAdapters = () => {
-      console.warn(
-        "[smplkit] No logging framework detected. Runtime logging control requires a supported framework (winston, pino).",
-      );
-      return [];
-    };
-
-    mockFetchAlways({ data: [] });
-
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await client.start();
-
+    const client = makeWiredClient();
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("No logging framework detected"));
-    warnSpy.mockRestore();
-  });
-
-  it("should skip missing dependencies during auto-load", async () => {
-    const client = makeClient();
-
-    // Override auto-load to simulate one adapter failing
-    const mockAdapter = createMockAdapter({ name: "winston" });
-    (client as any)._autoLoadAdapters = () => [mockAdapter];
-
-    mockFetchAlways({ data: [] });
-
-    await client.start();
-
-    expect(mockAdapter.discover).toHaveBeenCalled();
-    expect(mockAdapter.installHook).toHaveBeenCalled();
-  });
-});
-
-describe("LoggingClient — registerAdapter", () => {
-  it("should disable auto-load when registerAdapter is called", async () => {
-    const client = makeClient();
-    const mockAdapter = createMockAdapter();
-
-    client.registerAdapter(mockAdapter);
-
-    mockFetchAlways({ data: [] });
-
-    const autoLoadSpy = vi.spyOn(client as any, "_autoLoadAdapters");
-    await client.start();
-
-    expect(autoLoadSpy).not.toHaveBeenCalled();
-    expect(mockAdapter.discover).toHaveBeenCalled();
-    expect(mockAdapter.installHook).toHaveBeenCalled();
-  });
-
-  it("should use only explicitly registered adapters", async () => {
-    const client = makeClient();
-    const adapter1 = createMockAdapter({ name: "adapter1" });
-    const adapter2 = createMockAdapter({ name: "adapter2" });
-
-    client.registerAdapter(adapter1);
-    client.registerAdapter(adapter2);
-
-    mockFetchAlways({ data: [] });
-    await client.start();
-
-    expect(adapter1.discover).toHaveBeenCalled();
-    expect(adapter2.discover).toHaveBeenCalled();
-    expect(adapter1.installHook).toHaveBeenCalled();
-    expect(adapter2.installHook).toHaveBeenCalled();
-  });
-
-  it("should throw when registerAdapter is called after start()", async () => {
-    const client = makeClient();
-
-    // Override auto-load to return empty
-    (client as any)._autoLoadAdapters = () => [];
-    mockFetchAlways({ data: [] });
-
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await client.start();
-    warnSpy.mockRestore();
-
-    const mockAdapter = createMockAdapter();
-    expect(() => client.registerAdapter(mockAdapter)).toThrow(
-      "Cannot register adapters after start()",
-    );
-  });
-});
-
-describe("LoggingClient — adapter lifecycle", () => {
-  it("should call discover() on each adapter during start()", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      discover: vi.fn(() => [{ name: "found-logger", level: "INFO" }]),
-    });
-    client.registerAdapter(adapter);
-
-    // The discovered logger triggers a save, mock create response
-    mockFetchAlways({ data: [] });
-
-    await client.start();
-
-    expect(adapter.discover).toHaveBeenCalledTimes(1);
-  });
-
-  it("should call installHook() on each adapter during start()", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter();
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-    await client.start();
-
-    expect(adapter.installHook).toHaveBeenCalledTimes(1);
-    expect(adapter.installHook).toHaveBeenCalledWith(expect.any(Function));
-  });
-
-  it("should call uninstallHook() on each adapter during close()", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter();
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-    await client.start();
-
-    client._close();
-
-    expect(adapter.uninstallHook).toHaveBeenCalledTimes(1);
-  });
-
-  it("should apply server levels to adapters after fetching", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
-    });
-    client.registerAdapter(adapter);
-
-    // Mock list() to return a logger with a level
-    const loggerResource = {
-      id: "my-app",
-      type: "logger",
-      attributes: {
-        name: "My App",
-        level: "WARN",
-        group: null,
-        managed: true,
-        sources: [],
-        environments: {},
-        created_at: "2026-04-01T10:00:00Z",
-        updated_at: "2026-04-01T10:00:00Z",
-      },
-    };
-
-    // First call(s) may be save attempts for discovered loggers, then list, then listGroups
-    mockFetchAlways({ data: [loggerResource] });
-
-    await client.start();
-
-    expect(adapter.applyLevel).toHaveBeenCalledWith("my-app", "WARN");
-  });
-
-  it("should apply environment-specific levels when available", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
-    });
-    client.registerAdapter(adapter);
-
-    // Set up parent with environment
-    (client as any)._parent = { _environment: "production", _service: null };
-
-    const loggerResource = {
-      id: "my-app",
-      type: "logger",
-      attributes: {
-        name: "My App",
-        level: "INFO",
-        group: null,
-        managed: true,
-        sources: [],
-        environments: { production: { level: "ERROR" } },
-        created_at: "2026-04-01T10:00:00Z",
-        updated_at: "2026-04-01T10:00:00Z",
-      },
-    };
-
-    mockFetchAlways({ data: [loggerResource] });
-
-    await client.start();
-
-    // Should apply the production-specific level, not the base level
-    expect(adapter.applyLevel).toHaveBeenCalledWith("my-app", "ERROR");
-  });
-
-  it("should handle adapter applyLevel() errors gracefully", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      discover: vi.fn(() => [{ name: "my-app", level: "INFO" }]),
-      applyLevel: vi.fn(() => {
-        throw new Error("applyLevel boom");
-      }),
-    });
-    client.registerAdapter(adapter);
-
-    const loggerResource = {
-      id: "my-app",
-      type: "logger",
-      attributes: {
-        name: "My App",
-        level: "WARN",
-        group: null,
-        managed: true,
-        sources: [],
-        environments: {},
-        created_at: "2026-04-01T10:00:00Z",
-        updated_at: "2026-04-01T10:00:00Z",
-      },
-    };
-
-    mockFetchAlways({ data: [loggerResource] });
-
-    // Should not throw despite adapter error
-    await expect(client.start()).resolves.toBeUndefined();
-    expect(adapter.applyLevel).toHaveBeenCalled();
-  });
-
-  it("should call _onAdapterNewLogger when hook fires", async () => {
-    const client = makeClient();
-    let hookCallback: ((name: string, level: string) => void) | null = null;
-
-    const adapter = createMockAdapter({
-      installHook: vi.fn((cb: (name: string, level: string) => void) => {
-        hookCallback = cb;
-      }),
-    });
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-    await client.start();
-
-    // Trigger the hook callback — this should call _onAdapterNewLogger
-    expect(hookCallback).not.toBeNull();
-    // This fires save() which is fire-and-forget
-    hookCallback!("new-runtime-logger", "DEBUG");
-
-    // Wait for the async save to attempt
-    await new Promise((r) => setTimeout(r, 10));
-  });
-
-  it("should handle adapter discover() errors gracefully", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      discover: vi.fn(() => {
-        throw new Error("discover boom");
-      }),
-    });
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-
-    // Should not throw
-    await expect(client.start()).resolves.toBeUndefined();
-  });
-
-  it("should handle adapter installHook() errors gracefully", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      installHook: vi.fn(() => {
-        throw new Error("hook boom");
-      }),
-    });
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-
-    await expect(client.start()).resolves.toBeUndefined();
-  });
-
-  it("should handle adapter uninstallHook() errors gracefully during close", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter({
-      uninstallHook: vi.fn(() => {
-        throw new Error("unhook boom");
-      }),
-    });
-    client.registerAdapter(adapter);
-
-    mockFetchAlways({ data: [] });
-    await client.start();
-
-    expect(() => client._close()).not.toThrow();
-  });
-
-  it("should handle server fetch errors during start gracefully", async () => {
-    const client = makeClient();
-    const adapter = createMockAdapter();
-    client.registerAdapter(adapter);
-
-    // All fetch calls fail
-    mockFetch.mockImplementation(() => Promise.reject(new TypeError("network error")));
-
-    // start() should still complete (WebSocket wired even if fetch fails)
-    await expect(client.start()).resolves.toBeUndefined();
+    // WS handlers still wired despite zero adapters.
     expect(lastMockWs.on).toHaveBeenCalledWith("logger_changed", expect.any(Function));
+  });
+
+  it("does not auto-load when an adapter is explicitly registered", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = makeWiredClient();
+    const adapter = makeAdapter();
+    client.registerAdapter(adapter);
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(adapter.discover).toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// Periodic flush timer
+// ===========================================================================
+
+describe("LoggingClient — periodic flush timer", () => {
+  it("flushes the discovery buffer every 30s after install()", async () => {
+    vi.useFakeTimers();
+    const client = makeWiredClient();
+    client.registerAdapter(makeAdapter());
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+
+    const flushSpy = vi.spyOn(client.loggers, "flush").mockResolvedValue(undefined);
+    vi.advanceTimersByTime(30_000);
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+
+    client.close();
+    flushSpy.mockClear();
+    vi.advanceTimersByTime(60_000);
+    // Timer cleared on close — no further flushes.
+    expect(flushSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// _applyLevels — level-change metric
+// ===========================================================================
+
+describe("LoggingClient — _applyLevels metric", () => {
+  it("records a level_changes metric per adapter-known logger", async () => {
+    const metrics = { record: vi.fn(), recordGauge: vi.fn() };
+    const client = makeWiredClient(metrics);
+    client.registerAdapter(makeAdapter({ discover: () => [{ name: "sql", level: "INFO" }] }));
+    mockFetch.mockImplementation((req: Request) => {
+      const url = req.url;
+      if (url.includes("/loggers/bulk")) return Promise.resolve(jsonResponse({ registered: 1 }));
+      if (url.includes("/loggers") && !url.endsWith("/log_groups")) {
+        return Promise.resolve(jsonResponse({ data: [loggerResource("sql", { level: "WARN" })] }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    await client.install();
+    expect(metrics.record).toHaveBeenCalledWith("logging.level_changes", 1, "changes", {
+      logger: "sql",
+    });
+  });
+});
+
+// ===========================================================================
+// WebSocket-handler .catch branches
+// ===========================================================================
+
+describe("LoggingClient — WS handler error branches", () => {
+  async function installed(names: string[]): Promise<LoggingClient> {
+    const client = makeWiredClient();
+    client.registerAdapter({
+      name: "t",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
+      applyLevel: vi.fn(),
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    mockFetch.mockReset();
+    return client;
+  }
+
+  it("logger_changed: swallows an error thrown in the .then chain", async () => {
+    const client = await installed(["sql"]);
+    // The scoped fetch resolves, but _applyLevels throws inside the .then —
+    // the handler's .catch must absorb it.
+    (client as any)._applyLevels = () => {
+      throw new Error("apply exploded");
+    };
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: loggerResource("sql", { level: "DEBUG" }) }),
+    );
+    expect(() => lastMockWs._emit("logger_changed", { id: "sql" })).not.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("group_changed: swallows an error thrown in the .then chain", async () => {
+    const client = await installed(["app.db"]);
+    (client as any)._applyLevels = () => {
+      throw new Error("apply exploded");
+    };
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "app",
+          type: "log_group",
+          attributes: { name: "app", level: "WARN", parent_id: null, environments: {} },
+        },
+      }),
+    );
+    expect(() => lastMockWs._emit("group_changed", { id: "app" })).not.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+  });
+});
+
+// ===========================================================================
+// Single-resource fetchers — catch → null fallback
+// ===========================================================================
+
+describe("LoggingClient — single-resource fetcher fallbacks", () => {
+  async function installed(names: string[]): Promise<LoggingClient> {
+    const client = makeWiredClient();
+    client.registerAdapter({
+      name: "t",
+      discover: () => names.map((name) => ({ name, level: "INFO" })),
+      applyLevel: vi.fn(),
+      installHook: () => {},
+      uninstallHook: () => {},
+    });
+    mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
+    await client.install();
+    mockFetch.mockReset();
+    return client;
+  }
+
+  it("_fetchSingleLogger returns null (cache eviction) when the GET rejects", async () => {
+    await installed(["sql"]);
+    // Reject the scoped fetch with a network error → openapi-fetch throws →
+    // _fetchSingleLogger's catch returns null → the cache entry is evicted.
+    mockFetch.mockRejectedValueOnce(new TypeError("network gone"));
+    lastMockWs._emit("logger_changed", { id: "sql" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("_fetchSingleGroup returns null (cache eviction) when the GET rejects", async () => {
+    await installed(["app.db"]);
+    mockFetch.mockRejectedValueOnce(new TypeError("network gone"));
+    lastMockWs._emit("group_changed", { id: "app" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+});
+
+// ===========================================================================
+// LogGroupsClient — connection-error wrapping (wrapFetchError)
+// ===========================================================================
+
+describe("LogGroupsClient — connection-error wrapping", () => {
+  it("get() wraps a network error as SmplConnectionError", async () => {
+    const client = makeWiredClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(client.logGroups.get("g1")).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("_createGroup() wraps a network error as SmplConnectionError", async () => {
+    const client = makeWiredClient();
+    const group = client.logGroups.new("g1");
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(group.save()).rejects.toThrow(SmplConnectionError);
+  });
+
+  it("_updateGroup() wraps a network error as SmplConnectionError", async () => {
+    const client = makeWiredClient();
+    const group = client.logGroups.new("g1");
+    // Mark as existing so save() routes to _updateGroup (PUT).
+    group.createdAt = "2026-01-01T00:00:00Z";
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(group.save()).rejects.toThrow(SmplConnectionError);
+  });
+});
+
+// ===========================================================================
+// Standalone URL derivation (no explicit baseUrl)
+// ===========================================================================
+
+describe("LoggingClient — standalone URL derivation", () => {
+  it("derives the logging service URL from baseDomain/scheme when no baseUrl is given", async () => {
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
+    });
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+      baseDomain: "example.test",
+      scheme: "https",
+    });
+    await client.loggers.list();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toContain("logging.example.test");
+  });
+
+  it("falls back to the default logging URL when serviceUrl yields nothing", async () => {
+    // serviceUrl always returns a string in practice; force the defensive
+    // `?? DEFAULT_LOGGING_BASE_URL` fallback by stubbing it to null.
+    const configModule = await import("../../../../src/config.js");
+    vi.spyOn(configModule, "serviceUrl").mockReturnValue(null as unknown as string);
+    const seen: Request[] = [];
+    mockFetch.mockImplementation(async (req: Request) => {
+      seen.push(req);
+      return jsonResponse({ data: [] });
+    });
+    const client = new LoggingClient({
+      apiKey: "sk_standalone",
+      environment: "production",
+    });
+    await client.loggers.list();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toContain("logging.smplkit.com");
   });
 });

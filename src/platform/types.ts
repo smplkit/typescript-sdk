@@ -1,14 +1,18 @@
 /**
- * Shared types for the management namespace.
+ * Shared types for `client.platform.*`.
  */
 
 /**
  * Whether an environment participates in the canonical ordering.
  *
- * `AD_HOC` environments are transient targets (preview branches,
- * developer sandboxes) that are excluded from the standard ordering.
- * `STANDARD` environments are the customer's deploy targets (production,
- * staging, development, etc.) and appear in the environment_order list.
+ * STANDARD environments are the customer's deploy targets — production,
+ * staging, development, etc. They participate in
+ * `account.settings.environmentOrder` and appear in the standard
+ * Console environment columns.
+ *
+ * AD_HOC environments are transient targets (preview branches,
+ * individual developer sandboxes) that should not appear in the
+ * standard ordering.
  */
 export enum EnvironmentClassification {
   AD_HOC = "AD_HOC",
@@ -80,9 +84,7 @@ export class Color {
 }
 
 /**
- * Coerce a `Color | string | null` value into a `Color | null`.
- *
- * Strings are validated via `new Color(...)`. Anything else raises `TypeError`.
+ * Accept Color, hex string, or null; reject anything else.
  *
  * @internal
  */
@@ -90,5 +92,7 @@ export function coerceColor(value: Color | string | null | undefined): Color | n
   if (value === null || value === undefined) return null;
   if (value instanceof Color) return value;
   if (typeof value === "string") return new Color(value);
-  throw new TypeError(`Environment color must be a Color, string, or null; got ${typeof value}`);
+  throw new TypeError(
+    `color must be a Color, hex string, or null; got ${typeof value}: ${JSON.stringify(value)}`,
+  );
 }

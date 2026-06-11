@@ -1,32 +1,32 @@
 /**
- * SmplManagementClient + sub-clients for app-plane resources.
+ * The Smpl Platform client — cross-cutting CRUD on `client.platform`.
  *
- * The management client has zero construction side effects:
- *   - no service registration
- *   - no metrics thread
- *   - no WebSocket
- *   - no logger discovery
+ * `PlatformClient` groups the account-wide configuration resources that aren't
+ * owned by a single product, mirroring the product UI's Platform area:
  *
- * Right for setup scripts, CI, admin tooling, and one-off CRUD.
+ * - `platform.environments` — environment CRUD
+ * - `platform.services` — service CRUD
+ * - `platform.contexts` — evaluation-context registration + read/delete
+ * - `platform.contextTypes` — context-type CRUD
  *
- * Ten flat namespaces:
- *   - mgmt.contexts
- *   - mgmt.contextTypes
- *   - mgmt.environments
- *   - mgmt.services
- *   - mgmt.accountSettings
- *   - mgmt.config           (singular — matches runtime client.config)
- *   - mgmt.flags
- *   - mgmt.loggers
- *   - mgmt.logGroups
- *   - mgmt.audit            (SIEM forwarder CRUD)
- *   - mgmt.jobs             (scheduled-job CRUD, runs, usage)
+ * All four are pure CRUD — no `install()` gate. Every sub-client speaks to the
+ * app service, so the client needs exactly one app transport (plus the
+ * context-registration buffer that `contexts` drains).
+ *
+ * The client supports two construction shapes:
+ *
+ * - **Wired** into {@link SmplClient} — borrows the parent's app transport and
+ *   an externally-supplied context buffer. This is the common path;
+ *   `client.flags` borrows `client.platform.contexts` as its
+ *   evaluation-context registration seam.
+ * - **Standalone** — `new PlatformClient({ apiKey, baseUrl, ... })` builds and
+ *   owns its own app transport and buffer. `close()` tears down only the owned
+ *   transport.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import createClient from "openapi-fetch";
-import type { components } from "../generated/app.d.ts";
 import {
   SmplkitError,
   SmplkitNotFoundError,
@@ -34,28 +34,19 @@ import {
   SmplkitConnectionError,
   throwForStatus,
 } from "../errors.js";
-import { Color, EnvironmentClassification, coerceColor } from "./types.js";
-import { Environment, ContextType, AccountSettings, Service } from "./models.js";
-import { Context } from "../flags/types.js";
-import { ManagementConfigClient } from "./config.js";
-import { ManagementFlagsClient } from "./flags.js";
-import { LoggersClient, LogGroupsClient } from "./logging.js";
-import { ManagementAuditClient } from "./audit.js";
-import { ManagementJobsClient } from "./jobs.js";
 import { resolveManagementConfig, serviceUrl } from "../config.js";
-import type { ResolvedManagementConfig } from "../config.js";
+import { Color, EnvironmentClassification, coerceColor } from "./types.js";
+import { Environment, ContextType, Service } from "./models.js";
+import { Context } from "../flags/types.js";
+import { ContextRegistrationBuffer, CONTEXT_BATCH_FLUSH_SIZE } from "../buffer.js";
 
 type AppHttp = ReturnType<typeof createClient<import("../generated/app.d.ts").paths>>;
-type ConfigHttp = ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
-type FlagsHttp = ReturnType<typeof createClient<import("../generated/flags.d.ts").paths>>;
-type LoggingHttp = ReturnType<typeof createClient<import("../generated/logging.d.ts").paths>>;
-type AuditHttp = ReturnType<typeof createClient<import("../generated/audit.d.ts").paths>>;
-type JobsHttp = ReturnType<typeof createClient<import("../generated/jobs.d.ts").paths>>;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Internal helpers
 // ---------------------------------------------------------------------------
 
+/** Resolve the two-arg or composite-id form to `(type, key)`. */
 function splitContextId(idOrType: string, key?: string): [string, string] {
   if (key === undefined) {
     if (!idOrType.includes(":")) {
@@ -111,6 +102,23 @@ function wrapFetchError(err: unknown): never {
   );
 }
 
+/**
+ * Build the `page[number]` / `page[size]` query for a list call.
+ *
+ * Each value is included only when the caller supplied a non-undefined
+ * override — omitting both yields `{}`, letting the server send the default
+ * page (1) and size (1000).
+ */
+function paginationQuery(params: {
+  pageNumber?: number;
+  pageSize?: number;
+}): Record<string, number> {
+  const query: Record<string, number> = {};
+  if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
+  if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+  return query;
+}
+
 function envFromResource(resource: any, client: EnvironmentsClient): Environment {
   const attrs = resource.attributes ?? {};
   let color: Color | string | null = null;
@@ -129,7 +137,6 @@ function envFromResource(resource: any, client: EnvironmentsClient): Environment
       attrs.classification === "AD_HOC"
         ? EnvironmentClassification.AD_HOC
         : EnvironmentClassification.STANDARD,
-    managed: typeof attrs.managed === "boolean" ? attrs.managed : false,
     createdAt: attrs.created_at ?? null,
     updatedAt: attrs.updated_at ?? null,
   });
@@ -182,24 +189,21 @@ function ctxFromResource(resource: any, client: ContextsClient): Context {
 }
 
 // ---------------------------------------------------------------------------
-// EnvironmentsClient
+// Environments
 // ---------------------------------------------------------------------------
 
-/** `mgmt.environments.*` — CRUD for environments. */
+/** Environment CRUD (`client.platform.environments`). */
 export class EnvironmentsClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
-  /**
-   * Construct an unsaved {@link Environment}. Call `.save()` to persist.
-   */
+  /** Return an unsaved {@link Environment}. Call `.save()` to persist. */
   new(
     id: string,
     options: {
       name: string;
       color?: Color | string | null;
       classification?: EnvironmentClassification;
-      managed?: boolean;
     },
   ): Environment {
     return new Environment(this, {
@@ -207,24 +211,13 @@ export class EnvironmentsClient {
       name: options.name,
       color: coerceColor(options.color ?? null),
       classification: options.classification ?? EnvironmentClassification.STANDARD,
-      managed: options.managed ?? true,
       createdAt: null,
       updatedAt: null,
     });
   }
 
-  /**
-   * List environments.
-   *
-   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
-   * Omit both to fetch the first page; pass them through to walk further
-   * pages. The wrapper does not loop on the customer's behalf — the
-   * customer chooses how to paginate.
-   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Environment[]> {
-    const query: Record<string, number> = {};
-    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
-    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+    const query = paginationQuery(params);
     let data: any;
     try {
       const result = await this._http.GET("/api/v1/environments", {
@@ -272,13 +265,13 @@ export class EnvironmentsClient {
   /** @internal */
   async _create(env: Environment): Promise<Environment> {
     /* v8 ignore start — defensive guard: `Environment.id` is always set by
-       `mgmt.environments.new(id, ...)`, the only public path that reaches
+       `platform.environments.new(id, ...)`, the only public path that reaches
        `_create`. The spec narrows `data.id` to a non-null string on create. */
     if (env.id === null) {
       throw new SmplkitValidationError("Cannot create an Environment without an id");
     }
     /* v8 ignore stop */
-    const body: components["schemas"]["EnvironmentCreateRequest"] = {
+    const body: any = {
       data: {
         id: env.id,
         type: "environment",
@@ -286,7 +279,6 @@ export class EnvironmentsClient {
           name: env.name,
           color: env.color === null ? null : env.color.hex,
           classification: env.classification,
-          managed: env.managed,
         },
       },
     };
@@ -304,16 +296,15 @@ export class EnvironmentsClient {
 
   /** @internal */
   async _update(env: Environment): Promise<Environment> {
-    if (!env.id) throw new Error("Cannot update an Environment with no id");
-    const body = {
+    if (!env.id) throw new Error("cannot update an Environment with no id");
+    const body: any = {
       data: {
         id: env.id,
-        type: "environment" as const,
+        type: "environment",
         attributes: {
           name: env.name,
           color: env.color === null ? null : env.color.hex,
           classification: env.classification,
-          managed: env.managed,
         },
       },
     };
@@ -334,17 +325,15 @@ export class EnvironmentsClient {
 }
 
 // ---------------------------------------------------------------------------
-// ServicesClient
+// Services
 // ---------------------------------------------------------------------------
 
-/** `mgmt.services.*` — CRUD for services. */
+/** Service CRUD (`client.platform.services`). */
 export class ServicesClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
-  /**
-   * Construct an unsaved {@link Service}. Call `.save()` to persist.
-   */
+  /** Return an unsaved {@link Service}. Call `.save()` to persist. */
   new(id: string, options: { name: string }): Service {
     return new Service(this, {
       id,
@@ -354,18 +343,8 @@ export class ServicesClient {
     });
   }
 
-  /**
-   * List services.
-   *
-   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
-   * Omit both to fetch the first page; pass them through to walk further
-   * pages. The wrapper does not loop on the customer's behalf — the
-   * customer chooses how to paginate.
-   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Service[]> {
-    const query: Record<string, number> = {};
-    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
-    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+    const query = paginationQuery(params);
     let data: any;
     try {
       const result = await this._http.GET("/api/v1/services", {
@@ -413,13 +392,13 @@ export class ServicesClient {
   /** @internal */
   async _create(svc: Service): Promise<Service> {
     /* v8 ignore start — defensive guard: `Service.id` is always set by
-       `mgmt.services.new(id, ...)`, the only public path that reaches
+       `platform.services.new(id, ...)`, the only public path that reaches
        `_create`. The spec narrows `data.id` to a non-null string on create. */
     if (svc.id === null) {
       throw new SmplkitValidationError("Cannot create a Service without an id");
     }
     /* v8 ignore stop */
-    const body: components["schemas"]["ServiceCreateRequest"] = {
+    const body: any = {
       data: {
         id: svc.id,
         type: "service",
@@ -442,11 +421,11 @@ export class ServicesClient {
 
   /** @internal */
   async _update(svc: Service): Promise<Service> {
-    if (!svc.id) throw new Error("Cannot update a Service with no id");
-    const body = {
+    if (!svc.id) throw new Error("cannot update a Service with no id");
+    const body: any = {
       data: {
         id: svc.id,
-        type: "service" as const,
+        type: "service",
         attributes: {
           name: svc.name,
         },
@@ -469,19 +448,14 @@ export class ServicesClient {
 }
 
 // ---------------------------------------------------------------------------
-// ContextTypesClient
+// Context Types
 // ---------------------------------------------------------------------------
 
-/** `mgmt.contextTypes.*` — CRUD for context types. */
+/** Context-type CRUD (`client.platform.contextTypes`). */
 export class ContextTypesClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
-  /**
-   * Construct an unsaved {@link ContextType}. Call `.save()` to persist.
-   *
-   * `name` defaults to the id when omitted.
-   */
   new(
     id: string,
     options: { name?: string; attributes?: Record<string, Record<string, any>> } = {},
@@ -495,18 +469,8 @@ export class ContextTypesClient {
     });
   }
 
-  /**
-   * List context types.
-   *
-   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
-   * Omit both to fetch the first page; pass them through to walk further
-   * pages. The wrapper does not loop on the customer's behalf — the
-   * customer chooses how to paginate.
-   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<ContextType[]> {
-    const query: Record<string, number> = {};
-    if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
-    if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
+    const query = paginationQuery(params);
     let data: any;
     try {
       const result = await this._http.GET("/api/v1/context_types", {
@@ -553,10 +517,10 @@ export class ContextTypesClient {
 
   /** @internal */
   async _create(ct: ContextType): Promise<ContextType> {
-    const body = {
+    const body: any = {
       data: {
         id: ct.id,
-        type: "context_type" as const,
+        type: "context_type",
         attributes: {
           name: ct.name,
           attributes: ct.attributes,
@@ -577,11 +541,11 @@ export class ContextTypesClient {
 
   /** @internal */
   async _update(ct: ContextType): Promise<ContextType> {
-    if (!ct.id) throw new Error("Cannot update a ContextType with no id");
-    const body = {
+    if (!ct.id) throw new Error("cannot update a ContextType with no id");
+    const body: any = {
       data: {
         id: ct.id,
-        type: "context_type" as const,
+        type: "context_type",
         attributes: {
           name: ct.name,
           attributes: ct.attributes,
@@ -605,54 +569,10 @@ export class ContextTypesClient {
 }
 
 // ---------------------------------------------------------------------------
-// ContextsClient (with bulk register/flush)
+// Contexts
 // ---------------------------------------------------------------------------
 
-const CONTEXT_BATCH_FLUSH_SIZE = 100;
-const CONTEXT_REGISTRATION_LRU_SIZE = 10_000;
-
-/**
- * Buffer pending context observations for bulk registration.
- *
- * Backed by an LRU of size {@link CONTEXT_REGISTRATION_LRU_SIZE} so the
- * dedup window doesn't grow unbounded for long-lived processes.
- * @internal
- */
-export class ContextRegistrationBuffer {
-  private _seen = new Map<string, Record<string, unknown>>();
-  private _pending: Array<{ type: string; key: string; attributes: Record<string, unknown> }> = [];
-
-  observe(contexts: Context[]): void {
-    for (const ctx of contexts) {
-      const cacheKey = `${ctx.type}:${ctx.key}`;
-      if (!this._seen.has(cacheKey)) {
-        if (this._seen.size >= CONTEXT_REGISTRATION_LRU_SIZE) {
-          const firstKey = this._seen.keys().next().value;
-          /* v8 ignore next */
-          if (firstKey !== undefined) this._seen.delete(firstKey);
-        }
-        this._seen.set(cacheKey, ctx.attributes);
-        this._pending.push({
-          type: ctx.type,
-          key: ctx.key,
-          attributes: { ...ctx.attributes },
-        });
-      }
-    }
-  }
-
-  drain(): Array<{ type: string; key: string; attributes: Record<string, unknown> }> {
-    const batch = this._pending;
-    this._pending = [];
-    return batch;
-  }
-
-  get pendingCount(): number {
-    return this._pending.length;
-  }
-}
-
-/** `mgmt.contexts.*` — register/list/get/delete for context instances. */
+/** Context registration + read/delete (`client.platform.contexts`). */
 export class ContextsClient {
   /** @internal */
   readonly _buffer: ContextRegistrationBuffer;
@@ -665,12 +585,7 @@ export class ContextsClient {
     this._buffer = buffer ?? new ContextRegistrationBuffer();
   }
 
-  /**
-   * Buffer context(s) for registration; optionally flush immediately.
-   *
-   * When `flush` is false (default), contexts are queued for the SDK's
-   * background flush. When `flush` is true the call awaits the round-trip.
-   */
+  /** Buffer contexts for registration; optionally flush immediately. */
   async register(items: Context | Context[], options: { flush?: boolean } = {}): Promise<void> {
     const batch = Array.isArray(items) ? items : [items];
     this._buffer.observe(batch);
@@ -683,7 +598,7 @@ export class ContextsClient {
     }
   }
 
-  /** Send any pending context observations to the server. */
+  /** Send any pending observations to the server. */
   async flush(): Promise<void> {
     const batch = this._buffer.drain();
     if (batch.length === 0) return;
@@ -703,19 +618,12 @@ export class ContextsClient {
     }
   }
 
-  /** Number of contexts awaiting flush. */
+  /** Number of observations queued and awaiting flush. */
   get pendingCount(): number {
     return this._buffer.pendingCount;
   }
 
-  /**
-   * List contexts of a given type.
-   *
-   * Server defaults are `pageNumber=1`, `pageSize=1000` (capped at 1000).
-   * Omit both to fetch the first page; pass them through to walk further
-   * pages. The wrapper does not loop on the customer's behalf — the
-   * customer chooses how to paginate.
-   */
+  /** List all contexts of a given type. */
   async list(
     type: string,
     params: { pageNumber?: number; pageSize?: number } = {},
@@ -737,7 +645,6 @@ export class ContextsClient {
     return items.map((r) => ctxFromResource(r, this));
   }
 
-  /** Fetch a context by composite id (`"type:key"`) or by separate type and key. */
   async get(idOrType: string, key?: string): Promise<Context> {
     const [ctxType, ctxKey] = splitContextId(idOrType, key);
     const composite = `${ctxType}:${ctxKey}`;
@@ -756,7 +663,6 @@ export class ContextsClient {
     return ctxFromResource(data.data, this);
   }
 
-  /** Delete a context by composite id (`"type:key"`) or by separate type and key. */
   async delete(idOrType: string, key?: string): Promise<void> {
     const [ctxType, ctxKey] = splitContextId(idOrType, key);
     const composite = `${ctxType}:${ctxKey}`;
@@ -775,25 +681,19 @@ export class ContextsClient {
 
   /** @internal — called by `Context.save()`. */
   async _saveContext(ctx: Context): Promise<Context> {
+    const body: any = {
+      data: {
+        id: ctx.id,
+        type: "context",
+        attributes: {
+          name: ctx.name ?? null,
+          context_type: ctx.type,
+          attributes: ctx.attributes,
+        },
+      },
+    };
     let data: any;
     try {
-      if (ctx.createdAt === null) {
-        // New contexts go through the bulk endpoint (no individual POST).
-        await this.register([ctx], { flush: true });
-        const fetched = await this.get(ctx.type, ctx.key);
-        return fetched;
-      }
-      const body = {
-        data: {
-          id: ctx.id,
-          type: "context" as const,
-          attributes: {
-            name: ctx.name ?? null,
-            context_type: ctx.type,
-            attributes: ctx.attributes,
-          },
-        },
-      };
       const result = await this._http.PUT("/api/v1/contexts/{id}", {
         params: { path: { id: ctx.id } },
         body,
@@ -809,254 +709,110 @@ export class ContextsClient {
 }
 
 // ---------------------------------------------------------------------------
-// AccountSettingsClient
+// PlatformClient (client.platform)
 // ---------------------------------------------------------------------------
 
-/** `mgmt.accountSettings.*` — get/save for account-level settings. */
-export class AccountSettingsClient {
-  private readonly _headers: Record<string, string>;
-
-  /** @internal */
-  constructor(
-    private readonly _appBaseUrl: string,
-    apiKey: string,
-  ) {
-    this._headers = {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    };
-  }
-
-  async get(): Promise<AccountSettings> {
-    const url = `${this._appBaseUrl}/api/v1/accounts/current/settings`;
-    let resp: Response;
-    try {
-      resp = await fetch(url, { headers: this._headers });
-    } catch (err) {
-      throw new SmplkitConnectionError(
-        `Network error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      throwForStatus(resp.status, body);
-    }
-    const data = await resp.json();
-    return new AccountSettings(this, data ?? {});
-  }
-
-  /** @internal */
-  async _save(data: Record<string, any>): Promise<AccountSettings> {
-    const url = `${this._appBaseUrl}/api/v1/accounts/current/settings`;
-    let resp: Response;
-    try {
-      resp = await fetch(url, {
-        method: "PUT",
-        headers: this._headers,
-        body: JSON.stringify(data),
-      });
-    } catch (err) {
-      throw new SmplkitConnectionError(
-        `Network error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      throwForStatus(resp.status, body);
-    }
-    const saved = await resp.json();
-    return new AccountSettings(this, saved ?? {});
-  }
-}
-
-// ---------------------------------------------------------------------------
-// SmplManagementClient — top-level standalone management entry point
-// ---------------------------------------------------------------------------
-
-/** Configuration options for the {@link SmplManagementClient}. */
-export interface SmplManagementClientOptions {
-  /** API key. Resolves from `SMPLKIT_API_KEY` / `~/.smplkit` if omitted. */
+/** Configuration options for the {@link PlatformClient}. */
+export interface PlatformClientOptions {
+  /** API key. When omitted, resolved from `SMPLKIT_API_KEY` or `~/.smplkit`. */
   apiKey?: string;
-  /** Configuration profile to use from `~/.smplkit`. Default `"default"`. */
+  /**
+   * Full app-service base URL. Usually resolved from `baseDomain`/`scheme`;
+   * supplied directly by the top-level clients which have already computed it.
+   */
+  baseUrl?: string;
+  /** Named `~/.smplkit` profile section. */
   profile?: string;
-  /** Base domain for service URLs. Default `"smplkit.com"`. */
+  /** Base domain for API requests (default `"smplkit.com"`). */
   baseDomain?: string;
-  /** URL scheme. Default `"https"`. */
+  /** URL scheme (default `"https"`). */
   scheme?: string;
-  /** Enable debug logging to stderr. */
+  /** Enable SDK debug logging. */
   debug?: boolean;
+  /** Extra headers attached to every request. */
+  extraHeaders?: Record<string, string>;
+  /**
+   * Internal — a pre-built app transport supplied by a top-level client so the
+   * platform surface shares one connection pool. Not for direct use.
+   * @internal
+   */
+  appTransport?: AppHttp;
+  /**
+   * Internal — the shared context-registration buffer. Not for direct use.
+   * @internal
+   */
+  contextBuffer?: ContextRegistrationBuffer;
 }
 
 /**
- * Standalone management/CRUD entry point — zero construction side effects.
+ * The Smpl Platform client.
  *
- * Construction does **not**:
- *   - register the service or environment as context instances
- *   - start a metrics thread
- *   - open the WebSocket
- *   - install logger discovery
- *
- * Use this for setup scripts, CI, admin tooling, and one-off CRUD.
+ * Groups the account-wide CRUD resources that aren't owned by a single
+ * product, reachable as `client.platform` ({@link SmplClient}) or constructed
+ * directly:
  *
  * @example
  * ```typescript
- * import { SmplManagementClient } from "@smplkit/sdk";
+ * import { PlatformClient } from "@smplkit/sdk";
  *
- * const mgmt = new SmplManagementClient();
- * const env = mgmt.environments.new("production", { name: "Production" });
- * await env.save();
- * await mgmt.close();
+ * const platform = new PlatformClient({ apiKey: "sk_..." });
+ * const prod = platform.environments.new("production", { name: "Production" });
+ * await prod.save();
+ * for (const svc of await platform.services.list()) {
+ *   // ...
+ * }
  * ```
+ *
+ * Sub-clients: `environments`, `services`, `contexts`, `contextTypes`. Pure
+ * CRUD — no `install()` required.
  */
-export class SmplManagementClient {
-  /** Context entity CRUD. */
-  readonly contexts: ContextsClient;
-  /** Context-type schemas. */
-  readonly contextTypes: ContextTypesClient;
+export class PlatformClient {
   /** Environment CRUD. */
   readonly environments: EnvironmentsClient;
   /** Service CRUD. */
   readonly services: ServicesClient;
-  /** Account-level settings. */
-  readonly accountSettings: AccountSettingsClient;
-  /** Config CRUD (singular — matches runtime `client.config`). */
-  readonly config: ManagementConfigClient;
-  /** Flag CRUD + bulk registration. */
-  readonly flags: ManagementFlagsClient;
-  /** Logger CRUD + bulk registration. */
-  readonly loggers: LoggersClient;
-  /** Log group CRUD. */
-  readonly logGroups: LogGroupsClient;
-  /** Audit SIEM forwarder CRUD. */
-  readonly audit: ManagementAuditClient;
-  /** Scheduled-job CRUD, runs, and usage. */
-  readonly jobs: ManagementJobsClient;
+  /** Evaluation-context registration + read/delete. */
+  readonly contexts: ContextsClient;
+  /** Context-type CRUD. */
+  readonly contextTypes: ContextTypesClient;
 
-  /** @internal — shared HTTP transports (so SmplClient can alias them). */
-  readonly _appHttp: AppHttp;
-  /** @internal */
-  readonly _configHttp: ConfigHttp;
-  /** @internal */
-  readonly _flagsHttp: FlagsHttp;
-  /** @internal */
-  readonly _loggingHttp: LoggingHttp;
+  private readonly _appHttp: AppHttp;
 
-  constructor(options: SmplManagementClientOptions = {}) {
-    const cfg = resolveManagementConfig(options);
-    this._init(cfg);
-    // Construct namespaces (assigned in _init via helper)
-    this.contexts = this._contextsRef;
-    this.contextTypes = this._contextTypesRef;
-    this.environments = this._environmentsRef;
-    this.services = this._servicesRef;
-    this.accountSettings = this._accountSettingsRef;
-    this.config = this._configRef;
-    this.flags = this._flagsRef;
-    this.loggers = this._loggersRef;
-    this.logGroups = this._logGroupsRef;
-    this.audit = this._auditRef;
-    this.jobs = this._jobsRef;
-    this._appHttp = this._appHttpRef;
-    this._configHttp = this._configHttpRef;
-    this._flagsHttp = this._flagsHttpRef;
-    this._loggingHttp = this._loggingHttpRef;
-  }
+  /** @internal — the shared context-registration buffer. */
+  readonly _contextBuffer: ContextRegistrationBuffer;
 
-  // The fields below are populated in _init and then captured into readonly
-  // properties on the constructor. This keeps the class shape simple.
-
-  private _contextsRef!: ContextsClient;
-  private _contextTypesRef!: ContextTypesClient;
-  private _environmentsRef!: EnvironmentsClient;
-  private _servicesRef!: ServicesClient;
-  private _accountSettingsRef!: AccountSettingsClient;
-  private _configRef!: ManagementConfigClient;
-  private _flagsRef!: ManagementFlagsClient;
-  private _loggersRef!: LoggersClient;
-  private _logGroupsRef!: LogGroupsClient;
-  private _auditRef!: ManagementAuditClient;
-  private _jobsRef!: ManagementJobsClient;
-  private _appHttpRef!: AppHttp;
-  private _configHttpRef!: ConfigHttp;
-  private _flagsHttpRef!: FlagsHttp;
-  private _loggingHttpRef!: LoggingHttp;
-  private _sharedContextBuffer!: ContextRegistrationBuffer;
-
-  private _init(cfg: ResolvedManagementConfig): void {
-    const appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
-    const configBaseUrl = serviceUrl(cfg.scheme, "config", cfg.baseDomain);
-    const flagsBaseUrl = serviceUrl(cfg.scheme, "flags", cfg.baseDomain);
-    const loggingBaseUrl = serviceUrl(cfg.scheme, "logging", cfg.baseDomain);
-    const auditBaseUrl = serviceUrl(cfg.scheme, "audit", cfg.baseDomain);
-    const jobsBaseUrl = serviceUrl(cfg.scheme, "jobs", cfg.baseDomain);
-
-    const headers = {
-      Authorization: `Bearer ${cfg.apiKey}`,
-      Accept: "application/json",
-    };
-
-    // JSON:API services (audit, jobs) negotiate the vendor media type.
-    const jsonApiHeaders = {
-      Authorization: `Bearer ${cfg.apiKey}`,
-      Accept: "application/vnd.api+json",
-      "Content-Type": "application/vnd.api+json",
-    };
-
-    this._appHttpRef = createClient<import("../generated/app.d.ts").paths>({
-      baseUrl: appBaseUrl,
-      headers,
-    });
-    this._configHttpRef = createClient<import("../generated/config.d.ts").paths>({
-      baseUrl: configBaseUrl,
-      headers,
-    });
-    this._flagsHttpRef = createClient<import("../generated/flags.d.ts").paths>({
-      baseUrl: flagsBaseUrl,
-      headers,
-    });
-    this._loggingHttpRef = createClient<import("../generated/logging.d.ts").paths>({
-      baseUrl: loggingBaseUrl,
-      headers,
-    });
-    const auditHttpRef = createClient<import("../generated/audit.d.ts").paths>({
-      baseUrl: auditBaseUrl,
-      headers: jsonApiHeaders,
-    });
-    const jobsHttpRef = createClient<import("../generated/jobs.d.ts").paths>({
-      baseUrl: jobsBaseUrl,
-      headers: jsonApiHeaders,
-    });
-
-    this._sharedContextBuffer = new ContextRegistrationBuffer();
-
-    this._environmentsRef = new EnvironmentsClient(this._appHttpRef);
-    this._servicesRef = new ServicesClient(this._appHttpRef);
-    this._contextTypesRef = new ContextTypesClient(this._appHttpRef);
-    this._contextsRef = new ContextsClient(this._appHttpRef, this._sharedContextBuffer);
-    this._accountSettingsRef = new AccountSettingsClient(appBaseUrl, cfg.apiKey);
-    this._configRef = new ManagementConfigClient(this._configHttpRef);
-    this._flagsRef = new ManagementFlagsClient(this._flagsHttpRef);
-    this._loggersRef = new LoggersClient(this._loggingHttpRef);
-    this._logGroupsRef = new LogGroupsClient(this._loggingHttpRef);
-    this._auditRef = new ManagementAuditClient(auditHttpRef as AuditHttp);
-    this._jobsRef = new ManagementJobsClient(jobsHttpRef as JobsHttp);
-  }
-
-  /** @internal — used by SmplClient to share the buffer. */
-  get _contextBuffer(): ContextRegistrationBuffer {
-    return this._sharedContextBuffer;
-  }
-
-  /** Release resources. Drains pending bulk registrations one last time. */
-  async close(): Promise<void> {
-    try {
-      await this.contexts.flush();
-      await this.flags.flush();
-      await this.loggers.flush();
-      await this.config.flush();
-    } catch {
-      // Final flush best-effort.
+  constructor(options: PlatformClientOptions = {}) {
+    if (options.appTransport !== undefined) {
+      this._appHttp = options.appTransport;
+    } else {
+      const cfg = resolveManagementConfig(options);
+      const appUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "app", cfg.baseDomain);
+      this._appHttp = createClient<import("../generated/app.d.ts").paths>({
+        baseUrl: appUrl.replace(/\/+$/, ""),
+        headers: {
+          ...(options.extraHeaders ?? {}),
+          Authorization: `Bearer ${cfg.apiKey}`,
+          Accept: "application/json",
+        },
+      });
     }
+
+    const buffer = options.contextBuffer ?? new ContextRegistrationBuffer();
+    this._contextBuffer = buffer;
+
+    this.environments = new EnvironmentsClient(this._appHttp);
+    this.services = new ServicesClient(this._appHttp);
+    this.contexts = new ContextsClient(this._appHttp, buffer);
+    this.contextTypes = new ContextTypesClient(this._appHttp);
+  }
+
+  /**
+   * Close the app transport — only when this client owns it.
+   *
+   * A wired client borrows the parent's app transport and closes nothing.
+   */
+  close(): void {
+    // openapi-fetch has no pooled transport to tear down; kept for interface
+    // symmetry with the wired/standalone construction shapes.
   }
 }

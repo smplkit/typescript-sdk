@@ -1,60 +1,13 @@
 /**
- * Tests for Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag — model
- * methods and runtime-client save/delete guards.
- *
- * Management/CRUD on flags lives in tests/unit/management/management_flags.test.ts.
+ * Flag model: save/delete guards + delegation, and the synchronous local
+ * mutations (addRule / enableRules / setDefault / values, etc.) that stage
+ * changes before `save()`.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { FlagsClient } from "../../../src/flags/client.js";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { describe, expect, it, vi } from "vitest";
 import { Flag, FlagRule, FlagEnvironment } from "../../../src/flags/models.js";
-
-const mockFetch = vi.fn();
-
-beforeEach(() => {
-  vi.stubGlobal("fetch", mockFetch);
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-const API_KEY = "sk_api_test";
-
-type WsCallback = (data: Record<string, unknown>) => void;
-
-interface MockSharedWs {
-  on: ReturnType<typeof vi.fn>;
-  off: ReturnType<typeof vi.fn>;
-  connectionStatus: string;
-  _listeners: Record<string, WsCallback[]>;
-  _emit: (event: string, data: Record<string, unknown>) => void;
-}
-
-function createMockSharedWs(): MockSharedWs {
-  const listeners: Record<string, WsCallback[]> = {};
-  return {
-    on: vi.fn((event: string, cb: WsCallback) => {
-      if (!listeners[event]) listeners[event] = [];
-      listeners[event].push(cb);
-    }),
-    off: vi.fn((event: string, cb: WsCallback) => {
-      if (listeners[event]) {
-        listeners[event] = listeners[event].filter((l) => l !== cb);
-      }
-    }),
-    connectionStatus: "connected",
-    _listeners: listeners,
-    _emit: (event: string, data: Record<string, unknown>) => {
-      for (const cb of listeners[event] ?? []) cb(data);
-    },
-  };
-}
-
-function makeFlagsClient(): FlagsClient {
-  const ws = createMockSharedWs();
-  return new FlagsClient(API_KEY, () => ws as never, 30000);
-}
 
 /** Build a FlagEnvironment from a plain dict shape. */
 function makeEnv(fields: {
@@ -76,43 +29,38 @@ function makeEnv(fields: {
   });
 }
 
+function makeFlag(overrides?: Partial<ConstructorParameters<typeof Flag>[1]>): Flag {
+  return new Flag(null, {
+    id: "my-flag",
+    name: "My Flag",
+    type: "BOOLEAN",
+    default: false,
+    values: [{ name: "True", value: true } as any, { name: "False", value: false } as any],
+    description: "test",
+    environments: {},
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Save / delete guards
+// Save / delete: guards + delegation
 // ---------------------------------------------------------------------------
 
-describe("Flag.save() / Flag.delete() guards", () => {
-  it("save() should throw when client is null", async () => {
-    const flag = new Flag(null, {
-      id: "x",
-      name: "X",
-      type: "BOOLEAN",
-      default: false,
-      values: [],
-      description: null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-    await expect(flag.save()).rejects.toThrow("cannot save");
+describe("Flag.save() / Flag.delete()", () => {
+  it("save() throws when the client is null", async () => {
+    const flag = makeFlag({ createdAt: null });
+    await expect(flag.save()).rejects.toThrow(/cannot save/);
   });
 
-  it("delete() should throw when client is null", async () => {
-    const flag = new Flag(null, {
-      id: "x",
-      name: "X",
-      type: "BOOLEAN",
-      default: false,
-      values: [],
-      description: null,
-      environments: {},
-      createdAt: null,
-      updatedAt: null,
-    });
-    await expect(flag.delete()).rejects.toThrow("cannot delete");
+  it("delete() throws when the client is null", async () => {
+    const flag = makeFlag();
+    await expect(flag.delete()).rejects.toThrow(/cannot delete/);
   });
 
-  it("delete() should throw when id is null", async () => {
-    const client = makeFlagsClient();
+  it("delete() throws when the id is null", async () => {
+    const client = { delete: vi.fn() } as any;
     const flag = new Flag(client, {
       id: null,
       name: "X",
@@ -124,55 +72,68 @@ describe("Flag.save() / Flag.delete() guards", () => {
       createdAt: null,
       updatedAt: null,
     });
-    await expect(flag.delete()).rejects.toThrow("cannot delete");
+    await expect(flag.delete()).rejects.toThrow(/cannot delete/);
   });
 
-  it("save() (create flow) should throw on runtime FlagsClient handles", async () => {
-    const client = makeFlagsClient();
-    const flag = client.booleanFlag("rt", true);
-    flag.createdAt = null;
-    await expect(flag.save()).rejects.toThrow(/cannot be saved/);
+  it("save() (create flow) delegates to _createFlag when createdAt is null", async () => {
+    const created = makeFlag({ id: "my-flag", name: "Created", createdAt: "2024-06-01T00:00:00Z" });
+    const client = {
+      _createFlag: vi.fn().mockResolvedValue(created),
+      _updateFlag: vi.fn(),
+    } as any;
+    const flag = new Flag(client, {
+      id: "my-flag",
+      name: "Draft",
+      type: "BOOLEAN",
+      default: false,
+      values: null,
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+
+    await flag.save();
+
+    expect(client._createFlag).toHaveBeenCalledWith(flag);
+    expect(client._updateFlag).not.toHaveBeenCalled();
+    expect(flag.name).toBe("Created");
+    expect(flag.createdAt).toBe("2024-06-01T00:00:00Z");
   });
 
-  it("save() (update flow) should throw on runtime FlagsClient handles", async () => {
-    const client = makeFlagsClient();
-    const flag = client.booleanFlag("rt", true);
-    flag.createdAt = "2024-01-01T00:00:00Z";
-    await expect(flag.save()).rejects.toThrow(/cannot be saved/);
+  it("save() (update flow) delegates to _updateFlag when createdAt is set", async () => {
+    const updated = makeFlag({ name: "Updated", default: true });
+    const client = {
+      _createFlag: vi.fn(),
+      _updateFlag: vi.fn().mockResolvedValue(updated),
+    } as any;
+    const flag = makeFlag({ createdAt: "2024-01-01T00:00:00Z" });
+    (flag as any)._client = client;
+
+    await flag.save();
+
+    expect(client._updateFlag).toHaveBeenCalledWith(flag);
+    expect(client._createFlag).not.toHaveBeenCalled();
+    expect(flag.name).toBe("Updated");
+    expect(flag.default).toBe(true);
   });
 
-  it("delete() should throw on runtime FlagsClient handles", async () => {
-    const client = makeFlagsClient();
-    const flag = client.booleanFlag("rt", true);
-    await expect(flag.delete()).rejects.toThrow(/cannot be deleted/);
+  it("delete() delegates to client.delete with the id", async () => {
+    const client = { delete: vi.fn().mockResolvedValue(undefined) } as any;
+    const flag = makeFlag();
+    (flag as any)._client = client;
+    await flag.delete();
+    expect(client.delete).toHaveBeenCalledWith("my-flag");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Flag local mutations (sync, no client interaction)
+// Local mutations (synchronous, no client interaction)
 // ---------------------------------------------------------------------------
 
 describe("Flag local mutations", () => {
-  function makeFlag(overrides?: Partial<ConstructorParameters<typeof Flag>[1]>): Flag {
-    return new Flag(null, {
-      id: "my-flag",
-      name: "My Flag",
-      type: "BOOLEAN",
-      default: false,
-      values: [
-        { name: "True", value: true },
-        { name: "False", value: false },
-      ],
-      description: "test",
-      environments: {},
-      createdAt: "2024-01-01T00:00:00Z",
-      updatedAt: "2024-01-01T00:00:00Z",
-      ...overrides,
-    });
-  }
-
   describe("addRule", () => {
-    it("should be synchronous and return this for chaining", () => {
+    it("is synchronous and returns this for chaining", () => {
       const flag = makeFlag();
       const result = flag.addRule({
         environment: "staging",
@@ -183,7 +144,7 @@ describe("Flag local mutations", () => {
       expect(result).toBe(flag);
     });
 
-    it("should mutate environments locally", () => {
+    it("mutates the environment locally", () => {
       const flag = makeFlag();
       flag.addRule({
         environment: "staging",
@@ -191,97 +152,66 @@ describe("Flag local mutations", () => {
         logic: { "==": [{ var: "user.plan" }, "enterprise"] },
         value: true,
       });
-
-      expect(flag.environments.staging).toBeDefined();
       expect(flag.environments.staging.rules).toHaveLength(1);
       expect(flag.environments.staging.rules[0].description).toBe("rule 1");
     });
 
-    it("should append to existing rules", () => {
+    it("appends to existing rules", () => {
       const flag = makeFlag({
         environments: {
-          staging: makeEnv({
-            enabled: true,
-            rules: [{ description: "existing", logic: {}, value: true }],
-          }),
+          staging: makeEnv({ rules: [{ description: "existing", logic: {}, value: true }] }),
         },
       });
-
       flag.addRule({
         environment: "staging",
         description: "rule 2",
         logic: { "==": [{ var: "user.plan" }, "free"] },
         value: false,
       });
-
       expect(flag.environments.staging.rules).toHaveLength(2);
-      expect(flag.environments.staging.rules[0].description).toBe("existing");
       expect(flag.environments.staging.rules[1].description).toBe("rule 2");
     });
 
-    it("should strip the environment key from the stored rule", () => {
+    it("strips the environment key off the stored rule", () => {
       const flag = makeFlag();
-      flag.addRule({
-        environment: "staging",
-        description: "rule 1",
-        logic: {},
-        value: true,
-      });
-
-      const storedRule = flag.environments.staging.rules[0];
-      expect(storedRule).not.toHaveProperty("environment");
+      flag.addRule({ environment: "staging", description: "r", logic: {}, value: true });
+      expect(flag.environments.staging.rules[0]).not.toHaveProperty("environment");
     });
 
-    it("should throw if built rule has no environment key", () => {
+    it("throws when the built rule has no environment key", () => {
       const flag = makeFlag();
       expect(() => flag.addRule({ description: "no env", logic: {}, value: true })).toThrow(
         "Built rule must include 'environment' key",
       );
     });
 
-    it("should create environment with enabled: true when environment does not exist", () => {
+    it("creates the environment (enabled) when it does not exist", () => {
       const flag = makeFlag();
-      flag.addRule({
-        environment: "production",
-        description: "rule 1",
-        logic: {},
-        value: true,
-      });
+      flag.addRule({ environment: "production", description: "r", logic: {}, value: true });
       expect(flag.environments.production.enabled).toBe(true);
     });
 
-    it("should support chaining multiple addRule calls", () => {
+    it("supports chaining multiple addRule calls", () => {
       const flag = makeFlag();
       flag
-        .addRule({
-          environment: "staging",
-          description: "rule 1",
-          logic: { "==": [{ var: "user.plan" }, "enterprise"] },
-          value: true,
-        })
-        .addRule({
-          environment: "staging",
-          description: "rule 2",
-          logic: { "==": [{ var: "user.plan" }, "pro"] },
-          value: true,
-        });
-
+        .addRule({ environment: "staging", description: "r1", logic: {}, value: true })
+        .addRule({ environment: "staging", description: "r2", logic: {}, value: true });
       expect(flag.environments.staging.rules).toHaveLength(2);
     });
   });
 
   describe("enableRules / disableRules", () => {
-    it("should enable an environment", () => {
+    it("enables a single environment", () => {
       const flag = makeFlag();
       flag.enableRules({ environment: "staging" });
       expect(flag.environments.staging.enabled).toBe(true);
     });
 
-    it("should enable rules across all environments when no environment is specified", () => {
+    it("enables every configured environment when none is given", () => {
       const flag = makeFlag({
         environments: {
-          staging: makeEnv({ enabled: false, rules: [] }),
-          production: makeEnv({ enabled: false, rules: [] }),
+          staging: makeEnv({ enabled: false }),
+          production: makeEnv({ enabled: false }),
         },
       });
       flag.enableRules();
@@ -289,19 +219,17 @@ describe("Flag local mutations", () => {
       expect(flag.environments.production.enabled).toBe(true);
     });
 
-    it("should disable an environment", () => {
-      const flag = makeFlag({
-        environments: { staging: makeEnv({ enabled: true, rules: [] }) },
-      });
+    it("disables a single environment", () => {
+      const flag = makeFlag({ environments: { staging: makeEnv({ enabled: true }) } });
       flag.disableRules({ environment: "staging" });
       expect(flag.environments.staging.enabled).toBe(false);
     });
 
-    it("should disable rules across all environments when no environment is specified", () => {
+    it("disables every configured environment when none is given", () => {
       const flag = makeFlag({
         environments: {
-          staging: makeEnv({ enabled: true, rules: [] }),
-          production: makeEnv({ enabled: true, rules: [] }),
+          staging: makeEnv({ enabled: true }),
+          production: makeEnv({ enabled: true }),
         },
       });
       flag.disableRules();
@@ -309,14 +237,19 @@ describe("Flag local mutations", () => {
       expect(flag.environments.production.enabled).toBe(false);
     });
 
-    it("should create environment if it does not exist", () => {
+    it("creates the environment if it does not exist (disable path)", () => {
+      const flag = makeFlag();
+      flag.disableRules({ environment: "production" });
+      expect(flag.environments.production.enabled).toBe(false);
+    });
+
+    it("creates the environment if it does not exist (enable path)", () => {
       const flag = makeFlag();
       flag.enableRules({ environment: "production" });
-      expect(flag.environments.production).toBeDefined();
       expect(flag.environments.production.enabled).toBe(true);
     });
 
-    it("should preserve existing rules when toggling", () => {
+    it("preserves existing rules when toggling", () => {
       const flag = makeFlag({
         environments: {
           staging: makeEnv({
@@ -331,29 +264,28 @@ describe("Flag local mutations", () => {
     });
   });
 
-  describe("setDefault with environment option", () => {
-    it("should set the default value for an environment", () => {
+  describe("setDefault", () => {
+    it("sets the environment-level default", () => {
       const flag = makeFlag();
       flag.setDefault(true, { environment: "staging" });
       expect(flag.environments.staging.default).toBe(true);
     });
 
-    it("should set the flag-level default when no environment option is given", () => {
+    it("sets the flag-level default when no environment is given", () => {
       const flag = makeFlag({ default: false });
       flag.setDefault(true);
       expect(flag.default).toBe(true);
     });
 
-    it("should create environment if it does not exist", () => {
+    it("creates the environment if it does not exist", () => {
       const flag = makeFlag();
       flag.setDefault("blue", { environment: "production" });
-      expect(flag.environments.production).toBeDefined();
       expect(flag.environments.production.default).toBe("blue");
     });
 
-    it("should update existing environment default", () => {
+    it("updates an existing environment default", () => {
       const flag = makeFlag({
-        environments: { staging: makeEnv({ enabled: true, default: "red", rules: [] }) },
+        environments: { staging: makeEnv({ default: "red" }) },
       });
       flag.setDefault("green", { environment: "staging" });
       expect(flag.environments.staging.default).toBe("green");
@@ -361,51 +293,36 @@ describe("Flag local mutations", () => {
   });
 
   describe("clearDefault", () => {
-    it("should clear the per-environment default", () => {
-      const flag = makeFlag({
-        environments: {
-          staging: makeEnv({ enabled: true, default: "red", rules: [] }),
-        },
-      });
-
+    it("clears the per-environment default", () => {
+      const flag = makeFlag({ environments: { staging: makeEnv({ default: "red" }) } });
       flag.clearDefault({ environment: "staging" });
       expect(flag.environments.staging.default).toBeNull();
     });
 
-    it("should be a no-op for a non-existent environment", () => {
+    it("is a no-op for a non-existent environment", () => {
       const flag = makeFlag();
       flag.clearDefault({ environment: "no-such-env" });
-      // The environment was never created.
       expect(flag.environments).not.toHaveProperty("no-such-env");
     });
   });
 
   describe("clearRules", () => {
-    it("should clear rules across all environments when no environment option is given", () => {
+    it("clears rules across all environments when none is given", () => {
       const flag = makeFlag({
         environments: {
-          staging: makeEnv({
-            enabled: true,
-            rules: [{ description: "s1", logic: {}, value: true }],
-          }),
-          production: makeEnv({
-            enabled: true,
-            rules: [{ description: "p1", logic: {}, value: false }],
-          }),
+          staging: makeEnv({ rules: [{ description: "s1", logic: {}, value: true }] }),
+          production: makeEnv({ rules: [{ description: "p1", logic: {}, value: false }] }),
         },
       });
-
       flag.clearRules();
-
       expect(flag.environments.staging.rules).toEqual([]);
       expect(flag.environments.production.rules).toEqual([]);
     });
 
-    it("should clear rules for a specific environment", () => {
+    it("clears rules for a single environment", () => {
       const flag = makeFlag({
         environments: {
           staging: makeEnv({
-            enabled: true,
             rules: [
               { description: "r1", logic: {}, value: true },
               { description: "r2", logic: {}, value: false },
@@ -413,12 +330,11 @@ describe("Flag local mutations", () => {
           }),
         },
       });
-
       flag.clearRules({ environment: "staging" });
       expect(flag.environments.staging.rules).toEqual([]);
     });
 
-    it("should preserve the enabled state", () => {
+    it("preserves the enabled state", () => {
       const flag = makeFlag({
         environments: {
           staging: makeEnv({
@@ -427,33 +343,23 @@ describe("Flag local mutations", () => {
           }),
         },
       });
-
       flag.clearRules({ environment: "staging" });
       expect(flag.environments.staging.enabled).toBe(true);
     });
 
-    it("should be a no-op for a non-existent environment", () => {
+    it("creates an empty environment for a missing env", () => {
       const flag = makeFlag();
-      // Should not throw
       flag.clearRules({ environment: "nonexistent" });
-      // clearRules creates an empty FlagEnvironment for the missing env per source semantics
       expect(flag.environments.nonexistent.rules).toEqual([]);
     });
 
-    it("should not affect other environments", () => {
+    it("does not affect other environments", () => {
       const flag = makeFlag({
         environments: {
-          staging: makeEnv({
-            enabled: true,
-            rules: [{ description: "s1", logic: {}, value: true }],
-          }),
-          production: makeEnv({
-            enabled: true,
-            rules: [{ description: "p1", logic: {}, value: false }],
-          }),
+          staging: makeEnv({ rules: [{ description: "s1", logic: {}, value: true }] }),
+          production: makeEnv({ rules: [{ description: "p1", logic: {}, value: false }] }),
         },
       });
-
       flag.clearRules({ environment: "staging" });
       expect(flag.environments.staging.rules).toEqual([]);
       expect(flag.environments.production.rules).toHaveLength(1);
@@ -461,7 +367,7 @@ describe("Flag local mutations", () => {
   });
 
   describe("addValue / removeValue / clearValues", () => {
-    it("addValue should append a new FlagValue", () => {
+    it("addValue appends a new FlagValue (from null)", () => {
       const flag = makeFlag({ values: null });
       flag.addValue("On", true);
       flag.addValue("Off", false);
@@ -469,7 +375,7 @@ describe("Flag local mutations", () => {
       expect(flag.values?.[0]).toMatchObject({ name: "On", value: true });
     });
 
-    it("removeValue should drop entries matching the given value", () => {
+    it("removeValue drops entries matching the value", () => {
       const flag = makeFlag();
       flag.removeValue(true);
       expect(flag.values).toHaveLength(1);
@@ -478,27 +384,46 @@ describe("Flag local mutations", () => {
 
     it("removeValue is a no-op when values is null", () => {
       const flag = makeFlag({ values: null });
-      const result = flag.removeValue(true);
-      expect(result).toBe(flag);
+      expect(flag.removeValue(true)).toBe(flag);
       expect(flag.values).toBeNull();
     });
 
-    it("clearValues should set values to null (unconstrained)", () => {
+    it("clearValues sets values to null", () => {
       const flag = makeFlag();
       flag.clearValues();
       expect(flag.values).toBeNull();
     });
   });
 
-  describe("toString", () => {
-    it("should produce a readable string", () => {
+  describe("values / environments getters return defensive copies", () => {
+    it("values getter copies the array", () => {
       const flag = makeFlag();
-      expect(flag.toString()).toBe("Flag(id=my-flag, type=BOOLEAN, default=false)");
+      const a = flag.values;
+      const b = flag.values;
+      expect(a).not.toBe(b);
+    });
+
+    it("environments getter copies the record", () => {
+      const flag = makeFlag({ environments: { staging: makeEnv({}) } });
+      const a = flag.environments;
+      const b = flag.environments;
+      expect(a).not.toBe(b);
     });
   });
 
-  describe("_apply", () => {
-    it("should copy all fields from another Flag instance", () => {
+  describe("toString / _apply / _envsRaw", () => {
+    it("toString is readable", () => {
+      const flag = makeFlag();
+      expect(flag.toString()).toBe("Flag(id=my-flag, type=BOOLEAN, default=false)");
+    });
+
+    it("_envsRaw exposes the underlying environments map", () => {
+      const env = makeEnv({});
+      const flag = makeFlag({ environments: { staging: env } });
+      expect(flag._envsRaw().staging).toBe(env);
+    });
+
+    it("_apply copies every field from another Flag", () => {
       const flag = new Flag(null, {
         id: "a",
         name: "A",
@@ -510,22 +435,20 @@ describe("Flag local mutations", () => {
         createdAt: null,
         updatedAt: null,
       });
-
       const other = new Flag(null, {
         id: "a",
         name: "Updated A",
         type: "BOOLEAN",
         default: true,
-        values: [{ name: "T", value: true }],
+        values: [{ name: "T", value: true } as any],
         description: "Updated",
-        environments: { staging: makeEnv({ enabled: true, rules: [] }) },
+        environments: { staging: makeEnv({}) },
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-06-01T00:00:00Z",
       });
 
       flag._apply(other);
 
-      expect(flag.id).toBe("a");
       expect(flag.name).toBe("Updated A");
       expect(flag.default).toBe(true);
       expect(flag.values).toHaveLength(1);
@@ -533,6 +456,13 @@ describe("Flag local mutations", () => {
       expect(flag.environments).toHaveProperty("staging");
       expect(flag.createdAt).toBe("2024-01-01T00:00:00Z");
       expect(flag.updatedAt).toBe("2024-06-01T00:00:00Z");
+    });
+
+    it("_apply handles a null values source", () => {
+      const flag = makeFlag();
+      const other = makeFlag({ values: null });
+      flag._apply(other);
+      expect(flag.values).toBeNull();
     });
   });
 });

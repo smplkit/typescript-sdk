@@ -1,10 +1,13 @@
 /**
- * Tests for SmplClient.waitUntilReady() — rule 4 of PR #127.
+ * Tests for SmplClient.waitUntilReady().
  *
  * Validates:
- *   - flags.initialize() and config.start() are awaited.
+ *   - flags._ensureConnected() and config._ensureConnected() are awaited.
  *   - Returns once the WebSocket reaches "connected".
  *   - Throws SmplTimeoutError if the WebSocket never connects.
+ *
+ * Also covers the shared-buffer wiring between platform.contexts and the
+ * runtime flags client.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -37,28 +40,45 @@ describe("SmplClient.waitUntilReady", () => {
     else process.env.SMPLKIT_DISABLE_TELEMETRY = originalDisable;
   });
 
-  it("awaits flags.initialize, config.start, and resolves when WS reports connected", async () => {
+  it("awaits flags + config connect and resolves when the WS reports connected", async () => {
     const client = new SmplClient();
-    const flagsInit = vi.fn().mockResolvedValue(undefined);
-    const configStart = vi.fn().mockResolvedValue(undefined);
-    (client.flags as unknown as { initialize: typeof flagsInit }).initialize = flagsInit;
-    (client.config as unknown as { start: typeof configStart }).start = configStart;
+    const flagsConnect = vi.fn().mockResolvedValue(undefined);
+    const configConnect = vi.fn().mockResolvedValue(undefined);
+    (client.flags as unknown as { _ensureConnected: typeof flagsConnect })._ensureConnected =
+      flagsConnect;
+    (client.config as unknown as { _ensureConnected: typeof configConnect })._ensureConnected =
+      configConnect;
     // Pretend the WS is already connected so the loop exits immediately.
     (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
       connectionStatus: "connected",
     });
 
     await expect(client.waitUntilReady({ timeoutMs: 1_000 })).resolves.toBeUndefined();
-    expect(flagsInit).toHaveBeenCalledOnce();
-    expect(configStart).toHaveBeenCalledOnce();
+    expect(flagsConnect).toHaveBeenCalledOnce();
+    expect(configConnect).toHaveBeenCalledOnce();
+    client.close();
+  });
+
+  it("uses the default timeout when none is provided", async () => {
+    const client = new SmplClient();
+    (client.flags as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
+      Promise.resolve();
+    (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
+      Promise.resolve();
+    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
+      connectionStatus: "connected",
+    });
+
+    await expect(client.waitUntilReady()).resolves.toBeUndefined();
     client.close();
   });
 
   it("throws SmplTimeoutError when the WS never connects", async () => {
     const client = new SmplClient();
-    (client.flags as unknown as { initialize: () => Promise<void> }).initialize = () =>
+    (client.flags as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
-    (client.config as unknown as { start: () => Promise<void> }).start = () => Promise.resolve();
+    (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
+      Promise.resolve();
     (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
       connectionStatus: "connecting",
     });
@@ -69,9 +89,10 @@ describe("SmplClient.waitUntilReady", () => {
 
   it("polls until the WS reports connected on a later tick", async () => {
     const client = new SmplClient();
-    (client.flags as unknown as { initialize: () => Promise<void> }).initialize = () =>
+    (client.flags as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
-    (client.config as unknown as { start: () => Promise<void> }).start = () => Promise.resolve();
+    (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
+      Promise.resolve();
     let calls = 0;
     (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
       get connectionStatus() {
@@ -86,7 +107,7 @@ describe("SmplClient.waitUntilReady", () => {
   });
 });
 
-describe("SmplClient.manage shares context buffer with runtime flags", () => {
+describe("SmplClient shared context buffer", () => {
   beforeEach(() => {
     process.env.SMPLKIT_API_KEY = "sk_test_buffer";
     process.env.SMPLKIT_ENVIRONMENT = "production";
@@ -101,44 +122,23 @@ describe("SmplClient.manage shares context buffer with runtime flags", () => {
     delete process.env.SMPLKIT_DISABLE_TELEMETRY;
   });
 
-  it("flags client and management share a single ContextRegistrationBuffer instance", () => {
+  it("flags borrows platform.contexts as its evaluation-context registration seam", () => {
     const client = new SmplClient();
-    const flagsBuffer = (client.flags as unknown as { _contextBuffer: unknown })._contextBuffer;
-    expect(flagsBuffer).toBe(client.manage._contextBuffer);
+    const flagsContexts = (client.flags as unknown as { _contexts: unknown })._contexts;
+    // The flags client and platform.contexts share one ContextRegistrationBuffer
+    // because flags is wired to borrow client.platform.contexts directly.
+    expect(flagsContexts).toBe(client.platform.contexts);
+    expect((flagsContexts as { _buffer: unknown })._buffer).toBe(client.platform.contexts._buffer);
+    expect(client.platform.contexts._buffer).toBe(client.platform._contextBuffer);
     client.close();
   });
 
-  it("client.manage is the only top-level management entry point", () => {
+  it("exposes platform and account, and no legacy `.manage` namespace", () => {
     const client = new SmplClient();
-    // `client.management` was removed — the only exposed name is `client.manage`.
-    expect(client.manage).toBeDefined();
+    expect(client.platform).toBeDefined();
+    expect(client.account).toBeDefined();
+    expect((client as unknown as Record<string, unknown>).manage).toBeUndefined();
     expect((client as unknown as Record<string, unknown>).management).toBeUndefined();
-    client.close();
-  });
-});
-
-describe("ConfigClient.start", () => {
-  beforeEach(() => {
-    process.env.SMPLKIT_API_KEY = "sk_test_config_start";
-    process.env.SMPLKIT_ENVIRONMENT = "production";
-    process.env.SMPLKIT_SERVICE = "test-service";
-    process.env.SMPLKIT_DISABLE_TELEMETRY = "true";
-  });
-
-  afterEach(() => {
-    delete process.env.SMPLKIT_API_KEY;
-    delete process.env.SMPLKIT_ENVIRONMENT;
-    delete process.env.SMPLKIT_SERVICE;
-    delete process.env.SMPLKIT_DISABLE_TELEMETRY;
-  });
-
-  it("delegates to the lazy initializer", async () => {
-    const client = new SmplClient();
-    const internal = vi.fn().mockResolvedValue(undefined);
-    (client.config as unknown as { _ensureInitialized: typeof internal })._ensureInitialized =
-      internal;
-    await client.config.start();
-    expect(internal).toHaveBeenCalledOnce();
     client.close();
   });
 });

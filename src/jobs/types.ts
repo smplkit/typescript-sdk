@@ -1,13 +1,13 @@
 /**
- * Smpl Jobs resource types — surface exposed by `mgmt.jobs.*`.
+ * Smpl Jobs resource types.
  *
  * Unlike Config/Flags/Logging, Jobs has no live "phone-home" agent — no
- * environment registration, no WebSocket — so its entire surface lives on
- * the management client rather than the runtime client. A {@link Job} is an
- * active record: build it with `mgmt.jobs.new(...)`, set fields, and call
- * {@link Job.save} (create when new, full-replace update when it already
+ * environment registration, no WebSocket — so it has no runtime/management
+ * split: a single {@link JobsClient} exposes the full surface. A {@link Job}
+ * is an active record: build it with `client.jobs.new(...)`, set fields, and
+ * call {@link Job.save} (create when new, full-replace update when it already
  * exists) or {@link Job.delete}. Runs are read-only views; run actions live
- * on `mgmt.jobs.runs`.
+ * on `client.jobs.runs`.
  *
  * ADR-049.
  */
@@ -231,7 +231,7 @@ export class Job {
  *
  * Runs are created and mutated by the jobs service, not by clients; clients
  * influence runs only through the `run` / `cancel` / `rerun` actions on
- * `mgmt.jobs`.
+ * `client.jobs`.
  */
 export class Run {
   /** Server-assigned UUID for this run. */
@@ -314,7 +314,7 @@ export class Usage {
 
 /**
  * @internal Minimal interface that `Job.save()` / `.delete()` call back
- * into. Implemented by `ManagementJobsClient` in `src/management/jobs.ts`.
+ * into. Implemented by `JobsClient` in `src/jobs/client.ts`.
  */
 export interface JobModelClient {
   _createJob(job: Job): Promise<Job>;
@@ -322,7 +322,7 @@ export interface JobModelClient {
   _deleteJob(id: string): Promise<void>;
 }
 
-/** Parameters accepted by `mgmt.jobs.list(...)`. */
+/** Parameters accepted by `client.jobs.list(...)`. */
 export interface ListJobsParams {
   /** Filter to jobs matching this enabled state. */
   enabled?: boolean;
@@ -332,7 +332,7 @@ export interface ListJobsParams {
   pageSize?: number;
 }
 
-/** Parameters accepted by `mgmt.jobs.runs.list(...)`. */
+/** Parameters accepted by `client.jobs.runs.list(...)`. */
 export interface ListRunsParams {
   /** Filter to a single job's run history, by job id. */
   job?: string;

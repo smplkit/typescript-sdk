@@ -4,22 +4,51 @@
  * @packageDocumentation
  */
 
-// Top-level clients
+// Top-level client
 export { SmplClient } from "./client.js";
 export type { SmplClientOptions } from "./client.js";
-export { SmplManagementClient } from "./management/client.js";
-export type { SmplManagementClientOptions } from "./management/client.js";
+
+// Platform — cross-cutting CRUD (environments, services, contexts, context types)
+export { PlatformClient } from "./platform/client.js";
+export type { PlatformClientOptions } from "./platform/client.js";
+export {
+  EnvironmentsClient,
+  ServicesClient,
+  ContextsClient,
+  ContextTypesClient,
+} from "./platform/client.js";
+export { Environment, Service, ContextType } from "./platform/models.js";
+export { Color, EnvironmentClassification } from "./platform/types.js";
+
+// Account — account-level settings
+export { AccountClient } from "./account/client.js";
+export type { AccountClientOptions } from "./account/client.js";
+export { AccountSettings } from "./account/models.js";
 
 // Audit
 export { AuditClient } from "./audit/client.js";
+export type { AuditClientOptions } from "./audit/client.js";
+export {
+  Forwarder,
+  ForwarderEnvironment,
+  ForwarderType,
+  HttpConfiguration,
+  HttpMethod as AuditHttpMethod,
+  TransformType,
+} from "./audit/types.js";
 export type {
   EventType as AuditEventType,
   EventTypeListPage as AuditEventTypeListPage,
   ListEventTypesParams as AuditListEventTypesParams,
   AuditEvent,
+  Category as AuditCategory,
+  CategoryListPage as AuditCategoryListPage,
+  ListCategoriesParams as AuditListCategoriesParams,
   CreateEventInput as CreateAuditEventInput,
   ListEventsPage as AuditEventListPage,
   ListEventsParams as AuditEventListParams,
+  ListForwardersPage as AuditForwarderListPage,
+  ListForwardersParams as AuditListForwardersParams,
   ResourceType as AuditResourceType,
   ListResourceTypesPage as AuditResourceTypeListPage,
   ListResourceTypesParams as AuditListResourceTypesParams,
@@ -59,23 +88,10 @@ export type { WinstonAdapterConfig } from "./logging/adapters/winston.js";
 export { PinoAdapter } from "./logging/adapters/pino.js";
 export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 
-// Management
-export {
-  EnvironmentsClient,
-  ServicesClient,
-  ContextTypesClient,
-  ContextsClient,
-  AccountSettingsClient,
-} from "./management/client.js";
-export {
-  ManagementAuditClient,
-  ForwardersClient as AuditForwardersClient,
-} from "./management/audit.js";
-export { ManagementJobsClient, RunsClient as JobsRunsClient } from "./management/jobs.js";
+// Jobs
+export { JobsClient, RunsClient } from "./jobs/client.js";
 export { HttpConfig, HttpMethod as JobsHttpMethod, Job, Run, Usage } from "./jobs/types.js";
 export type { JobModelClient, ListJobsParams, ListRunsParams } from "./jobs/types.js";
-export { Environment, ContextType, AccountSettings, Service } from "./management/models.js";
-export { EnvironmentClassification, Color } from "./management/types.js";
 
 // Shared WebSocket
 export { SharedWebSocket } from "./ws.js";
@@ -92,6 +108,7 @@ export {
   SmplConflictError,
   SmplValidationError,
   SmplPaymentRequiredError,
+  SmplNotInstalledError,
   SmplkitError,
   SmplkitConnectionError,
   SmplkitTimeoutError,
@@ -99,5 +116,6 @@ export {
   SmplkitConflictError,
   SmplkitValidationError,
   SmplkitPaymentRequiredError,
+  SmplkitNotInstalledError,
 } from "./errors.js";
 export type { ApiErrorDetail, ApiErrorObject } from "./errors.js";

@@ -14,33 +14,33 @@
 
 import { strict as assert } from "node:assert";
 
-import { SmplManagementClient, LogLevel } from "../src/index.js";
+import { SmplClient, LogLevel } from "../src/index.js";
 import {
   cleanupManagementShowcase,
   setupManagementShowcase,
 } from "./setup/logging_management_setup.js";
 
 async function main(): Promise<void> {
-  // create the client (TypeScript has a single Promise-based client)
-  const manage = new SmplManagementClient();
+  // TypeScript has a single Promise-based client
+  const client = new SmplClient();
   try {
-    await setupManagementShowcase(manage);
+    await setupManagementShowcase(client);
 
     // create a parent logger with a default level
-    const root = manage.loggers.new("showcase");
+    const root = client.logging.loggers.new("showcase");
     root.setLevel(LogLevel.INFO);
     await root.save();
     console.log(`Created: ${root.id} (level=${root.level})`);
     assert.equal(root.level, LogLevel.INFO);
 
     // child logger with no level (inherits from parent)
-    const db = manage.loggers.new("showcase.db");
+    const db = client.logging.loggers.new("showcase.db");
     await db.save();
     console.log(`Created: ${db.id} (inherits)`);
     assert.equal(db.level, null);
 
     // child logger with explicit level (overrides parent)
-    const payments = manage.loggers.new("showcase.payments");
+    const payments = client.logging.loggers.new("showcase.payments");
     payments.setLevel(LogLevel.WARN);
     await payments.save();
     console.log(`Created: ${payments.id} (level=${payments.level})`);
@@ -58,14 +58,14 @@ async function main(): Promise<void> {
     console.log(`Cleared production override: ${JSON.stringify(root.environments)}`);
     assert.equal("production" in root.environments, false);
 
-    // fetch a logger by id
-    const fetched = await manage.loggers.get("showcase");
+    // get a logger
+    const fetched = await client.logging.loggers.get("showcase");
     assert.equal(fetched.level, LogLevel.INFO);
 
-    await cleanupManagementShowcase(manage);
+    await cleanupManagementShowcase(client);
     console.log("Done!");
   } finally {
-    await manage.close();
+    client.close();
   }
 }
 

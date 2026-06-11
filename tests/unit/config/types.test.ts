@@ -65,6 +65,28 @@ describe("ConfigEnvironment", () => {
     const env = new ConfigEnvironment({ retries: 5, timeout: 30 });
     expect(env.toString()).toBe('ConfigEnvironment(values={"retries":5,"timeout":30})');
   });
+
+  it("preserves a pre-wrapped {value, type} entry unchanged", () => {
+    const env = new ConfigEnvironment({
+      retries: { value: 5, type: "NUMBER", description: "max" },
+    });
+    // The wrapped envelope is copied through; `values` unwraps to the raw value.
+    expect(env.values).toEqual({ retries: 5 });
+    expect(env.valuesRaw.retries).toEqual({ value: 5, type: "NUMBER", description: "max" });
+  });
+
+  it("valuesRaw returns an independent deep copy", () => {
+    const env = new ConfigEnvironment({ retries: 5 });
+    const raw = env.valuesRaw;
+    raw.retries.value = 99;
+    // Mutating the copy must not change the source.
+    expect(env.values).toEqual({ retries: 5 });
+  });
+
+  it("constructs empty when no values are provided", () => {
+    const env = new ConfigEnvironment();
+    expect(env.values).toEqual({});
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -293,43 +315,6 @@ describe("Config", () => {
         updatedAt: null,
       });
       await expect(config.save()).rejects.toThrow("cannot save");
-    });
-  });
-
-  describe("save() — runtime client (no CRUD methods)", () => {
-    it("create flow throws when _createConfig is undefined", async () => {
-      const client = {
-        _apiKey: "sk_test",
-        _baseUrl: "https://config.smplkit.com",
-        // No _createConfig — runtime client surface
-      } as unknown as ConfigModelClient;
-      const config = makeConfig(client, { id: "new", createdAt: null });
-      await expect(config.save()).rejects.toThrow(/cannot be saved/);
-    });
-
-    it("update flow throws when _updateConfig is undefined", async () => {
-      const client = {
-        _apiKey: "sk_test",
-        _baseUrl: "https://config.smplkit.com",
-        // No _updateConfig
-      } as unknown as ConfigModelClient;
-      const config = makeConfig(client, {
-        id: "existing",
-        createdAt: "2024-01-01T00:00:00Z",
-      });
-      await expect(config.save()).rejects.toThrow(/cannot be saved/);
-    });
-  });
-
-  describe("delete() — runtime client (no _deleteConfig)", () => {
-    it("throws when _deleteConfig is undefined", async () => {
-      const client = {
-        _apiKey: "sk_test",
-        _baseUrl: "https://config.smplkit.com",
-        // No _deleteConfig
-      } as unknown as ConfigModelClient;
-      const config = makeConfig(client, { id: "existing" });
-      await expect(config.delete()).rejects.toThrow(/cannot be deleted/);
     });
   });
 
@@ -700,6 +685,93 @@ describe("Config", () => {
       expect(chain).toHaveLength(2);
       expect(chain[0].id).toBe("child-id");
       expect(chain[1].id).toBe("parent-id");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Constructor — pre-wrapped items envelope
+  // ---------------------------------------------------------------------------
+
+  describe("constructor item normalization", () => {
+    it("preserves a pre-wrapped {value, type} item entry unchanged", () => {
+      const client = makeMockClient();
+      const config = new Config(client, {
+        id: "x",
+        name: "X",
+        description: null,
+        parent: null,
+        items: { retries: { value: 7, type: "NUMBER", description: "tries" } },
+        environments: {},
+        createdAt: null,
+        updatedAt: null,
+      });
+      // The {value: raw} unwrap is exposed through `items`; the wrapper is
+      // preserved in `itemsRaw`.
+      expect(config.items).toEqual({ retries: 7 });
+      expect(config.itemsRaw.retries).toEqual({ value: 7, type: "NUMBER", description: "tries" });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Setters — setString / setBoolean
+  // ---------------------------------------------------------------------------
+
+  describe("setString / setBoolean", () => {
+    it("setString sets a STRING base item", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setString("region", "us-east", { description: "AWS region" });
+      expect(config.items.region).toBe("us-east");
+      expect(config.itemsRaw.region).toMatchObject({
+        value: "us-east",
+        type: "STRING",
+        description: "AWS region",
+      });
+    });
+
+    it("setString scopes to an environment when given one", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setString("region", "eu-west", { environment: "production" });
+      expect(config.items.region).toBeUndefined();
+      expect(config.environments.production.values.region).toBe("eu-west");
+    });
+
+    it("setBoolean sets a BOOLEAN base item", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setBoolean("enabled", true);
+      expect(config.items.enabled).toBe(true);
+      expect(config.itemsRaw.enabled).toMatchObject({ value: true, type: "BOOLEAN" });
+    });
+
+    it("setBoolean scopes to an environment when given one", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setBoolean("enabled", false, { environment: "staging" });
+      expect(config.environments.staging.values.enabled).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Serialization getters — _itemsRawDirect / _environmentsDirect
+  // ---------------------------------------------------------------------------
+
+  describe("serialization getters", () => {
+    it("_itemsRawDirect exposes the live raw items map", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setNumber("retries", 3);
+      expect(config._itemsRawDirect.retries).toMatchObject({ value: 3, type: "NUMBER" });
+    });
+
+    it("_environmentsDirect exposes the live typed environments map", () => {
+      const client = makeMockClient();
+      const config = makeConfig(client, { items: {} });
+      config.setNumber("retries", 9, { environment: "production" });
+      const direct = config._environmentsDirect;
+      expect(direct.production).toBeInstanceOf(ConfigEnvironment);
+      expect(direct.production.values.retries).toBe(9);
     });
   });
 });

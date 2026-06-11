@@ -26,8 +26,12 @@ export interface ResolvedConfig {
   apiKey: string;
   baseDomain: string;
   scheme: string;
-  environment: string;
-  service: string;
+  // Optional: when absent the SDK sends no environment/service signal and the
+  // server derives the environment from the API key (the key can be scoped to
+  // an environment). config/flags/logging simply send no environment signal
+  // when it's unset.
+  environment: string | null;
+  service: string | null;
   debug: boolean;
   disableTelemetry: boolean;
 }
@@ -144,18 +148,6 @@ const NO_API_KEY_MESSAGE =
   "  2. Set the SMPLKIT_API_KEY environment variable\n" +
   "  3. Add api_key to your ~/.smplkit config file";
 
-const NO_ENVIRONMENT_MESSAGE =
-  "No environment provided. Set one of:\n" +
-  "  1. Pass environment to the constructor\n" +
-  "  2. Set the SMPLKIT_ENVIRONMENT environment variable\n" +
-  "  3. Add environment to your ~/.smplkit config file";
-
-const NO_SERVICE_MESSAGE =
-  "No service provided. Set one of:\n" +
-  "  1. Pass service in options\n" +
-  "  2. Set the SMPLKIT_SERVICE environment variable\n" +
-  "  3. Add service to your ~/.smplkit config file";
-
 /** @internal Read merged config (defaults + file + env). Used by both runtime + management. */
 function readMergedConfig(profile: string): Record<string, string | undefined> {
   const merged: Record<string, string | undefined> = {
@@ -201,16 +193,17 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
   if (options.disableTelemetry !== undefined)
     merged.disable_telemetry = String(options.disableTelemetry);
 
+  // `environment` and `service` are OPTIONAL: an audit-only or jobs-only
+  // customer needs neither, and when `environment` is absent the server derives
+  // it from the API key. `api_key` remains required.
   if (!merged.api_key) throw new SmplkitError(NO_API_KEY_MESSAGE);
-  if (!merged.environment) throw new SmplkitError(NO_ENVIRONMENT_MESSAGE);
-  if (!merged.service) throw new SmplkitError(NO_SERVICE_MESSAGE);
 
   return {
     apiKey: merged.api_key,
     baseDomain: merged.base_domain!,
     scheme: merged.scheme!,
-    environment: merged.environment,
-    service: merged.service,
+    environment: merged.environment ?? null,
+    service: merged.service ?? null,
     debug: parseBool(merged.debug!, "debug"),
     disableTelemetry: parseBool(merged.disable_telemetry!, "disable_telemetry"),
   };

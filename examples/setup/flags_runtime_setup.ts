@@ -1,19 +1,13 @@
 /** Setup / cleanup helpers for `flags_runtime_showcase.ts`. */
 
-import {
-  SmplManagementClient,
-  FlagValue,
-  Op,
-  Rule,
-  SmplkitNotFoundError,
-} from "../../src/index.js";
+import { SmplClient, FlagValue, Op, Rule, SmplkitNotFoundError } from "../../src/index.js";
 
 const DEMO_FLAG_IDS = ["checkout-v2", "banner-color", "max-retries"];
 
-export async function setupRuntimeShowcase(manage: SmplManagementClient): Promise<void> {
-  await cleanupRuntimeShowcase(manage);
+export async function setupRuntimeShowcase(client: SmplClient): Promise<void> {
+  await cleanupRuntimeShowcase(client);
 
-  const checkout = manage.flags.newBooleanFlag("checkout-v2", {
+  const checkout = client.flags.newBooleanFlag("checkout-v2", {
     default: false,
     description: "Controls rollout of the new checkout experience.",
   });
@@ -31,7 +25,7 @@ export async function setupRuntimeShowcase(manage: SmplManagementClient): Promis
   );
   await checkout.save();
 
-  const banner = manage.flags.newStringFlag("banner-color", {
+  const banner = client.flags.newStringFlag("banner-color", {
     default: "red",
     name: "Banner Color",
     description: "Controls the banner color shown to users.",
@@ -54,7 +48,7 @@ export async function setupRuntimeShowcase(manage: SmplManagementClient): Promis
   );
   await banner.save();
 
-  const retries = manage.flags.newNumberFlag("max-retries", {
+  const retries = client.flags.newNumberFlag("max-retries", {
     default: 3,
     description: "Maximum number of API retries before failing.",
   });
@@ -67,10 +61,10 @@ export async function setupRuntimeShowcase(manage: SmplManagementClient): Promis
   await retries.save();
 }
 
-export async function cleanupRuntimeShowcase(manage: SmplManagementClient): Promise<void> {
+export async function cleanupRuntimeShowcase(client: SmplClient): Promise<void> {
   for (const flagId of DEMO_FLAG_IDS) {
     try {
-      await manage.flags.delete(flagId);
+      await client.flags.delete(flagId);
     } catch (err) {
       if (!(err instanceof SmplkitNotFoundError)) throw err;
     }

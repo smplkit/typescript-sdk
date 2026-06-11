@@ -1,5 +1,5 @@
 /**
- * Logger and LogGroup active-record models for the Logging SDK.
+ * Logger / LogGroup active-record models.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -8,40 +8,30 @@ import { LogLevel, LoggerEnvironment, convertLoggerEnvironments } from "./types.
 
 /** @internal */
 export interface LoggerModelClient {
-  _saveLogger?: (logger: Logger) => Promise<Logger>;
-  _deleteLogger?: (id: string) => Promise<void>;
+  _saveLogger(logger: Logger): Promise<Logger>;
+  delete(id: string): Promise<void>;
 }
 
 /** @internal */
 export interface LogGroupModelClient {
-  _createGroup?: (group: LogGroup) => Promise<LogGroup>;
-  _updateGroup?: (group: LogGroup) => Promise<LogGroup>;
-  _deleteGroup?: (id: string) => Promise<void>;
+  _createGroup(group: LogGroup): Promise<LogGroup>;
+  _updateGroup(group: LogGroup): Promise<LogGroup>;
+  delete(id: string): Promise<void>;
 }
 
 /**
- * A logger resource managed by the smplkit platform.
+ * SDK model for a logger resource.
  *
- * Mutate via {@link setLevel} / {@link clearLevel} /
- * {@link clearAllEnvironmentLevels} (with `environment` option for per-env
- * overrides), then call {@link save} to persist.
+ * Modify properties locally, then call {@link save} to persist.
  */
 export class Logger {
-  /** Unique identifier (dot-separated hierarchy, e.g. `"sqlalchemy.engine"`). */
   id: string | null;
-  /** Human-readable display name. */
   name: string;
-  /** Base log level, or null if inherited. */
   level: LogLevel | null;
-  /** Id of the parent log group, or null. */
   group: string | null;
-  /** Whether this logger is managed by the platform. */
   managed: boolean | null;
-  /** Observed sources (services that report this logger). */
   sources: Array<Record<string, any>>;
-  /** When the logger was created. */
   createdAt: string | null;
-  /** When the logger was last updated. */
   updatedAt: string | null;
 
   /** @internal */
@@ -97,14 +87,8 @@ export class Logger {
     if (this._client === null) {
       throw new Error("Logger was constructed without a client; cannot save");
     }
-    if (!this._client._saveLogger) {
-      throw new Error(
-        "Logger models obtained from the runtime LoggingClient cannot be saved. " +
-          "Use mgmt.loggers.new(...) (or client.manage.loggers.*) to author loggers.",
-      );
-    }
-    const saved = await this._client._saveLogger(this);
-    this._apply(saved);
+    const updated = await this._client._saveLogger(this);
+    this._apply(updated);
   }
 
   /** Delete this logger from the server. */
@@ -112,21 +96,15 @@ export class Logger {
     if (this._client === null || this.id === null) {
       throw new Error("Logger was constructed without a client or id; cannot delete");
     }
-    if (!this._client._deleteLogger) {
-      throw new Error(
-        "Logger models obtained from the runtime LoggingClient cannot be deleted. " +
-          "Use client.manage.loggers.delete(id) instead.",
-      );
-    }
-    await this._client._deleteLogger(this.id);
+    await this._client.delete(this.id);
   }
 
   /**
    * Set the log level.
    *
-   * With `environment` undefined (the default), sets the base log level
-   * used when no environment-specific override applies. With `environment`,
-   * sets the per-environment override.
+   * With `environment` undefined (the default), sets the base log level used
+   * when no environment-specific override applies. With `environment`, sets
+   * the per-environment override.
    */
   setLevel(level: LogLevel, options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
@@ -141,7 +119,8 @@ export class Logger {
    *
    * With `environment` undefined (the default), removes the base log level
    * (the logger then inherits from its group / dot-notation ancestor /
-   * system default). With `environment`, removes only that env's override.
+   * system default). With `environment`, removes the per-environment override
+   * only.
    */
   clearLevel(options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
@@ -156,7 +135,7 @@ export class Logger {
     this._environments = {};
   }
 
-  /** @internal */
+  /** Copy all properties from other into self. @internal */
   _apply(other: Logger): void {
     this.id = other.id;
     this.name = other.name;
@@ -170,16 +149,12 @@ export class Logger {
   }
 
   toString(): string {
-    return `Logger(id=${this.id}, level=${this.level})`;
+    return `Logger(id=${this.id}, name=${this.name})`;
   }
 }
 
 /**
- * A log group resource for organizing loggers.
- *
- * Mutate via {@link setLevel} / {@link clearLevel} /
- * {@link clearAllEnvironmentLevels} (with `environment` option), then
- * call {@link save} to persist.
+ * SDK model for a log group resource.
  */
 export class LogGroup {
   id: string | null;
@@ -218,7 +193,12 @@ export class LogGroup {
     this.updatedAt = fields.updatedAt ?? null;
   }
 
-  /** Read-only view of per-environment level overrides. */
+  /**
+   * Read-only view of per-environment level overrides.
+   *
+   * Mutate via {@link setLevel} / {@link clearLevel} /
+   * {@link clearAllEnvironmentLevels} (with `environment` option).
+   */
   get environments(): Record<string, LoggerEnvironment> {
     return { ...this._environments };
   }
@@ -228,6 +208,7 @@ export class LogGroup {
     return this._environments;
   }
 
+  /** Persist this group to the server (create or update). */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("LogGroup was constructed without a client; cannot save");
@@ -235,39 +216,29 @@ export class LogGroup {
     if (this.createdAt === null) {
       // New group — POST /api/v1/log_groups. The {id} PUT endpoint
       // returns 404 for non-existent ids; PUT is update-only on the server.
-      if (!this._client._createGroup) {
-        throw new Error(
-          "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
-            "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
-        );
-      }
       const created = await this._client._createGroup(this);
       this._apply(created);
     } else {
-      if (!this._client._updateGroup) {
-        throw new Error(
-          "LogGroup models obtained from the runtime LoggingClient cannot be saved. " +
-            "Use mgmt.logGroups.new(...) (or client.manage.logGroups.*) to author groups.",
-        );
-      }
       const updated = await this._client._updateGroup(this);
       this._apply(updated);
     }
   }
 
+  /** Delete this group from the server. */
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("LogGroup was constructed without a client or id; cannot delete");
     }
-    if (!this._client._deleteGroup) {
-      throw new Error(
-        "LogGroup models obtained from the runtime LoggingClient cannot be deleted. " +
-          "Use client.manage.logGroups.delete(id) instead.",
-      );
-    }
-    await this._client._deleteGroup(this.id);
+    await this._client.delete(this.id);
   }
 
+  /**
+   * Set the log level.
+   *
+   * With `environment` undefined (the default), sets the base log level used
+   * when no environment-specific override applies. With `environment`, sets
+   * the per-environment override.
+   */
   setLevel(level: LogLevel, options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
       this.level = level;
@@ -276,6 +247,14 @@ export class LogGroup {
     }
   }
 
+  /**
+   * Remove a log level.
+   *
+   * With `environment` undefined (the default), removes the base log level
+   * (the logger then inherits from its group / dot-notation ancestor /
+   * system default). With `environment`, removes the per-environment override
+   * only.
+   */
   clearLevel(options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
       this.level = null;
@@ -284,11 +263,12 @@ export class LogGroup {
     }
   }
 
+  /** Remove all per-environment level overrides. */
   clearAllEnvironmentLevels(): void {
     this._environments = {};
   }
 
-  /** @internal */
+  /** Copy all properties from other into self. @internal */
   _apply(other: LogGroup): void {
     this.id = other.id;
     this.name = other.name;
@@ -300,6 +280,6 @@ export class LogGroup {
   }
 
   toString(): string {
-    return `LogGroup(id=${this.id}, level=${this.level})`;
+    return `LogGroup(id=${this.id}, name=${this.name})`;
   }
 }

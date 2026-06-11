@@ -1,289 +1,299 @@
-import { describe, expect, it } from "vitest";
-import { FlagsClient } from "../../../src/flags/client.js";
+/**
+ * Typed flag handles: the async declaration methods on FlagsClient
+ * (`booleanFlag` / `stringFlag` / `numberFlag` / `jsonFlag`) and the typed
+ * `.get()` coercion on each {@link Flag} subclass.
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Flag, BooleanFlag, StringFlag, NumberFlag, JsonFlag } from "../../../src/flags/models.js";
-import { SmplError } from "../../../src/errors.js";
+import { makeWiredClient, flagListResponse } from "./_helpers.js";
+import type { FlagsClient } from "../../../src/flags/client.js";
 
-function makeFlagsClient(): FlagsClient {
-  const mockWs = { on: () => {}, off: () => {}, connectionStatus: "disconnected" };
-  return new FlagsClient("sk_test", () => mockWs as never, 30000);
+const mockFetch = vi.fn();
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", mockFetch);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function seedStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
+  (client as any)._flagStore = store;
+  (client as any)._connected = true;
 }
 
-function setFlagStore(client: FlagsClient, store: Record<string, Record<string, unknown>>): void {
-  (client as Record<string, unknown>)["_flagStore"] = store;
-  (client as Record<string, unknown>)["_initialized"] = true;
-  (client as Record<string, unknown>)["_environment"] = "staging";
+function makeHandle(client: FlagsClient, type: string, id: string, def: unknown): any {
+  const fields = {
+    id,
+    name: id,
+    type,
+    default: def,
+    values: null,
+    description: null,
+    environments: {},
+    createdAt: null,
+    updatedAt: null,
+  };
+  switch (type) {
+    case "STRING":
+      return new StringFlag(client as any, fields as any);
+    case "NUMERIC":
+      return new NumberFlag(client as any, fields as any);
+    case "JSON":
+      return new JsonFlag(client as any, fields as any);
+    default:
+      return new BooleanFlag(client as any, fields as any);
+  }
 }
 
-describe("Typed flag handles", () => {
-  describe("handle declarations", () => {
-    it("booleanFlag() returns BooleanFlag", () => {
-      const client = makeFlagsClient();
-      const handle = client.booleanFlag("b", false);
-      expect(handle).toBeInstanceOf(BooleanFlag);
-    });
+describe("Typed flag handle declarations", () => {
+  it("booleanFlag() connects lazily and returns a BooleanFlag", async () => {
+    const { client, ensureStarted } = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    const handle = await client.booleanFlag("b", false);
+    expect(handle).toBeInstanceOf(BooleanFlag);
+    expect(handle.id).toBe("b");
+    expect(handle.default).toBe(false);
+    expect(ensureStarted).toHaveBeenCalled();
+  });
 
-    it("stringFlag() returns StringFlag", () => {
-      const client = makeFlagsClient();
-      const handle = client.stringFlag("s", "default");
-      expect(handle).toBeInstanceOf(StringFlag);
-    });
+  it("stringFlag() returns a StringFlag", async () => {
+    const { client } = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    expect(await client.stringFlag("s", "default")).toBeInstanceOf(StringFlag);
+  });
 
-    it("numberFlag() returns NumberFlag", () => {
-      const client = makeFlagsClient();
-      const handle = client.numberFlag("n", 0);
-      expect(handle).toBeInstanceOf(NumberFlag);
-    });
+  it("numberFlag() returns a NumberFlag", async () => {
+    const { client } = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    expect(await client.numberFlag("n", 0)).toBeInstanceOf(NumberFlag);
+  });
 
-    it("jsonFlag() returns JsonFlag", () => {
-      const client = makeFlagsClient();
-      const handle = client.jsonFlag("j", {});
-      expect(handle).toBeInstanceOf(JsonFlag);
+  it("jsonFlag() returns a JsonFlag", async () => {
+    const { client } = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    expect(await client.jsonFlag("j", {})).toBeInstanceOf(JsonFlag);
+  });
+
+  it("records the declaration on the discovery buffer", async () => {
+    const { client } = makeWiredClient({ service: "svc", environment: "prod" });
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    await client.booleanFlag("dark-mode", true);
+    const batch = (client as any)._buffer.peek();
+    expect(batch).toHaveLength(1);
+    expect(batch[0]).toMatchObject({
+      id: "dark-mode",
+      type: "BOOLEAN",
+      default: true,
+      service: "svc",
+      environment: "prod",
     });
   });
 
-  describe("handle properties", () => {
-    it("should expose id and default properties", () => {
-      const client = makeFlagsClient();
-      const handle = client.booleanFlag("my-flag", true);
-      expect(handle.id).toBe("my-flag");
-      expect(handle.default).toBe(true);
-    });
+  it("registers the handle so it is reachable for live updates", async () => {
+    const { client } = makeWiredClient();
+    mockFetch.mockResolvedValueOnce(flagListResponse([]));
+    const handle = await client.stringFlag("theme", "light");
+    expect((client as any)._handles["theme"]).toBe(handle);
   });
+});
 
-  describe("BooleanFlag.get()", () => {
-    it("should return boolean when type matches", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        "my-flag": {
-          id: "my-flag",
-          default: true,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.booleanFlag("my-flag", false);
-      expect(handle.get()).toBe(true);
-      expect(typeof handle.get()).toBe("boolean");
-    });
-
-    it("should return code default on type mismatch", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        "my-flag": {
-          id: "my-flag",
-          default: "not a bool",
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.booleanFlag("my-flag", false);
-      expect(handle.get()).toBe(false);
-    });
-
-    it("should throw SmplError when not initialized", () => {
-      const client = makeFlagsClient();
-      const handle = client.booleanFlag("my-flag", false);
-      expect(() => handle.get()).toThrow(SmplError);
-      expect(() => handle.get()).toThrow("Flags not initialized");
-    });
-  });
-
-  describe("StringFlag.get()", () => {
-    it("should return string when type matches", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        color: {
-          id: "color",
-          default: "blue",
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.stringFlag("color", "red");
-      expect(handle.get()).toBe("blue");
-      expect(typeof handle.get()).toBe("string");
-    });
-
-    it("should return code default on type mismatch", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        color: {
-          id: "color",
-          default: 42,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.stringFlag("color", "red");
-      expect(handle.get()).toBe("red");
-    });
-
-    it("should throw SmplError when not initialized", () => {
-      const client = makeFlagsClient();
-      const handle = client.stringFlag("color", "red");
-      expect(() => handle.get()).toThrow(SmplError);
-      expect(() => handle.get()).toThrow("Flags not initialized");
-    });
-  });
-
-  describe("NumberFlag.get()", () => {
-    it("should return number when type matches", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        retries: {
-          id: "retries",
-          default: 5,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.numberFlag("retries", 3);
-      expect(handle.get()).toBe(5);
-      expect(typeof handle.get()).toBe("number");
-    });
-
-    it("should return code default on type mismatch", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        retries: {
-          id: "retries",
-          default: "not a number",
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.numberFlag("retries", 3);
-      expect(handle.get()).toBe(3);
-    });
-
-    it("should throw SmplError when not initialized", () => {
-      const client = makeFlagsClient();
-      const handle = client.numberFlag("retries", 3);
-      expect(() => handle.get()).toThrow(SmplError);
-    });
-  });
-
-  describe("JsonFlag.get()", () => {
-    it("should return object when type matches", () => {
-      const client = makeFlagsClient();
-      const theme = { mode: "dark", accent: "#fff" };
-      setFlagStore(client, {
-        theme: {
-          id: "theme",
-          default: theme,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const handle = client.jsonFlag("theme", { mode: "light" });
-      expect(handle.get()).toEqual(theme);
-    });
-
-    it("should return code default on type mismatch (string)", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        theme: {
-          id: "theme",
-          default: "not an object",
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const defaultTheme = { mode: "light" };
-      const handle = client.jsonFlag("theme", defaultTheme);
-      expect(handle.get()).toEqual(defaultTheme);
-    });
-
-    it("should return code default on type mismatch (array)", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        theme: {
-          id: "theme",
-          default: [1, 2, 3],
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const defaultTheme = { mode: "light" };
-      const handle = client.jsonFlag("theme", defaultTheme);
-      expect(handle.get()).toEqual(defaultTheme);
-    });
-
-    it("should return code default on type mismatch (null)", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        theme: {
-          id: "theme",
-          default: null,
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-      const defaultTheme = { mode: "light" };
-      const handle = client.jsonFlag("theme", defaultTheme);
-      expect(handle.get()).toEqual(defaultTheme);
-    });
-
-    it("should throw SmplError when not initialized", () => {
-      const client = makeFlagsClient();
-      const handle = client.jsonFlag("theme", {});
-      expect(() => handle.get()).toThrow(SmplError);
-    });
-  });
-
-  describe("Flag.get() (base class)", () => {
-    it("should evaluate via the base Flag class directly", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {
-        "my-flag": {
-          id: "my-flag",
-          default: "hello",
-          environments: { staging: { enabled: true, rules: [] } },
-        },
-      });
-
-      // Instantiate the base Flag class directly (as _resourceToModel does)
-      const flag = new Flag(client, {
+describe("BooleanFlag.get()", () => {
+  it("returns the stored boolean when the type matches", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      "my-flag": {
         id: "my-flag",
-        name: "My Flag",
-        type: "STRING",
-        default: "fallback",
-        values: [],
-        description: null,
-        environments: {},
-        createdAt: null,
-        updatedAt: null,
-      });
-      expect(flag.get()).toBe("hello");
+        default: true,
+        environments: { staging: { enabled: true, rules: [] } },
+      },
     });
+    const h = makeHandle(client, "BOOLEAN", "my-flag", false);
+    expect(h.get()).toBe(true);
+    expect(typeof h.get()).toBe("boolean");
+  });
 
-    it("should return code default when flag not in store", () => {
-      const client = makeFlagsClient();
-      setFlagStore(client, {});
-
-      const handle = client.booleanFlag("nonexistent", false);
-      expect(handle.get()).toBe(false);
-    });
-
-    it("should throw when client is null", () => {
-      const flag = new Flag(null, {
+  it("returns the code default on a type mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      "my-flag": {
         id: "my-flag",
-        name: "My Flag",
-        type: "BOOLEAN",
-        default: false,
-        values: [],
-        description: null,
-        environments: {},
-        createdAt: null,
-        updatedAt: null,
-      });
-      expect(() => flag.get()).toThrow("cannot evaluate");
+        default: "not a bool",
+        environments: { staging: { enabled: true, rules: [] } },
+      },
     });
+    expect(makeHandle(client, "BOOLEAN", "my-flag", false).get()).toBe(false);
+  });
+});
 
-    it("should throw when id is null (unsaved flag)", () => {
-      const client = makeFlagsClient();
-      const flag = new Flag(client, {
-        id: null,
-        name: "Unsaved Flag",
-        type: "BOOLEAN",
-        default: false,
-        values: [],
-        description: null,
-        environments: {},
-        createdAt: null,
-        updatedAt: null,
-      });
-      expect(() => flag.get()).toThrow(/Flag has no id/);
+describe("StringFlag.get()", () => {
+  it("returns the stored string when the type matches", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      color: {
+        id: "color",
+        default: "blue",
+        environments: { staging: { enabled: true, rules: [] } },
+      },
     });
+    const h = makeHandle(client, "STRING", "color", "red");
+    expect(h.get()).toBe("blue");
+    expect(typeof h.get()).toBe("string");
+  });
+
+  it("returns the code default on a type mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      color: { id: "color", default: 42, environments: { staging: { enabled: true, rules: [] } } },
+    });
+    expect(makeHandle(client, "STRING", "color", "red").get()).toBe("red");
+  });
+});
+
+describe("NumberFlag.get()", () => {
+  it("returns the stored number when the type matches", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      retries: {
+        id: "retries",
+        default: 5,
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    const h = makeHandle(client, "NUMERIC", "retries", 3);
+    expect(h.get()).toBe(5);
+    expect(typeof h.get()).toBe("number");
+  });
+
+  it("returns the code default on a type mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      retries: {
+        id: "retries",
+        default: "not a number",
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    expect(makeHandle(client, "NUMERIC", "retries", 3).get()).toBe(3);
+  });
+});
+
+describe("JsonFlag.get()", () => {
+  it("returns the stored object when the type matches", () => {
+    const { client } = makeWiredClient();
+    const theme = { mode: "dark", accent: "#fff" };
+    seedStore(client, {
+      theme: {
+        id: "theme",
+        default: theme,
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    expect(makeHandle(client, "JSON", "theme", { mode: "light" }).get()).toEqual(theme);
+  });
+
+  it("returns the code default on a string mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      theme: {
+        id: "theme",
+        default: "not an object",
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    const def = { mode: "light" };
+    expect(makeHandle(client, "JSON", "theme", def).get()).toEqual(def);
+  });
+
+  it("returns the code default on an array mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      theme: {
+        id: "theme",
+        default: [1, 2, 3],
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    const def = { mode: "light" };
+    expect(makeHandle(client, "JSON", "theme", def).get()).toEqual(def);
+  });
+
+  it("returns the code default on a null mismatch", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      theme: {
+        id: "theme",
+        default: null,
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    const def = { mode: "light" };
+    expect(makeHandle(client, "JSON", "theme", def).get()).toEqual(def);
+  });
+});
+
+describe("Flag.get() (base class)", () => {
+  it("evaluates via the base Flag class directly", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {
+      "my-flag": {
+        id: "my-flag",
+        default: "hello",
+        environments: { staging: { enabled: true, rules: [] } },
+      },
+    });
+    const flag = new Flag(client as any, {
+      id: "my-flag",
+      name: "My Flag",
+      type: "STRING",
+      default: "fallback",
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+    expect(flag.get()).toBe("hello");
+  });
+
+  it("returns the code default when the flag is not in the store", () => {
+    const { client } = makeWiredClient();
+    seedStore(client, {});
+    expect(makeHandle(client, "BOOLEAN", "nonexistent", false).get()).toBe(false);
+  });
+
+  it("throws when the client is null", () => {
+    const flag = new Flag(null, {
+      id: "my-flag",
+      name: "My Flag",
+      type: "BOOLEAN",
+      default: false,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+    expect(() => flag.get()).toThrow(/cannot evaluate/);
+  });
+
+  it("throws when the id is null (unsaved flag)", () => {
+    const { client } = makeWiredClient();
+    const flag = new Flag(client as any, {
+      id: null,
+      name: "Unsaved Flag",
+      type: "BOOLEAN",
+      default: false,
+      values: [],
+      description: null,
+      environments: {},
+      createdAt: null,
+      updatedAt: null,
+    });
+    expect(() => flag.get()).toThrow(/Flag has no id/);
   });
 });

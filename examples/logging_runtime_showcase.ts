@@ -15,11 +15,8 @@
 import { SmplClient } from "../src/index.js";
 
 async function main(): Promise<void> {
-  // create the client (TypeScript has a single Promise-based client)
-  const client = new SmplClient({
-    environment: "production",
-    service: "showcase-service",
-  });
+  // TypeScript has a single Promise-based client
+  const client = new SmplClient();
   try {
     await client.logging.install();
     console.log("All loggers are now controlled by smplkit");
