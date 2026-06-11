@@ -69,7 +69,10 @@ function makeWired(opts: { environment?: string; service?: string | null } = {})
     _ensureStarted: ensureStarted,
     _ensureWs: () => ws as unknown as SharedWebSocket,
   };
-  const client = new ConfigClient({ parent });
+  // Pass an explicit apiKey so construction never depends on a `~/.smplkit`
+  // file (absent in CI). The parent still supplies environment/service and the
+  // shared WebSocket; HTTP is driven through the mocked global fetch.
+  const client = new ConfigClient({ parent, apiKey: API_KEY });
   return { client, parent, ws, ensureStarted };
 }
 
@@ -183,6 +186,7 @@ describe("subscribe()", () => {
     };
     const client = new ConfigClient({
       parent,
+      apiKey: API_KEY,
       metrics: { record, recordGauge: vi.fn() } as never,
     });
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
@@ -631,6 +635,7 @@ describe("onChange()", () => {
     };
     const client = new ConfigClient({
       parent,
+      apiKey: API_KEY,
       metrics: { record, recordGauge: vi.fn() } as never,
     });
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
