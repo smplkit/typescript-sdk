@@ -18,7 +18,7 @@ const SMPLKIT_VARS = [
   "SMPLKIT_ENVIRONMENT",
   "SMPLKIT_SERVICE",
   "SMPLKIT_DEBUG",
-  "SMPLKIT_DISABLE_TELEMETRY",
+  "SMPLKIT_TELEMETRY",
   "SMPLKIT_PROFILE",
 ] as const;
 
@@ -187,7 +187,7 @@ describe("resolveConfig", () => {
 
   // ---- Defaults ----
 
-  it("should apply defaults for scheme, baseDomain, debug, disableTelemetry", () => {
+  it("should apply defaults for scheme, baseDomain, debug, telemetry", () => {
     const cfg = resolveConfig({
       apiKey: "sk_api_test",
       environment: "prod",
@@ -196,7 +196,7 @@ describe("resolveConfig", () => {
     expect(cfg.scheme).toBe("https");
     expect(cfg.baseDomain).toBe("smplkit.com");
     expect(cfg.debug).toBe(false);
-    expect(cfg.disableTelemetry).toBe(false);
+    expect(cfg.telemetry).toBe(true);
   });
 
   // ---- File resolution ----
@@ -328,16 +328,16 @@ describe("resolveConfig", () => {
     expect(cfg.scheme).toBe("http");
   });
 
-  it("should allow constructor to set debug and disableTelemetry", () => {
+  it("should allow constructor to set debug and telemetry", () => {
     const cfg = resolveConfig({
       apiKey: "sk_test",
       environment: "prod",
       service: "svc",
       debug: true,
-      disableTelemetry: true,
+      telemetry: false,
     });
     expect(cfg.debug).toBe(true);
-    expect(cfg.disableTelemetry).toBe(true);
+    expect(cfg.telemetry).toBe(false);
   });
 
   // ---- Boolean parsing from file/env ----
@@ -350,14 +350,14 @@ describe("resolveConfig", () => {
     expect(cfg.debug).toBe(true);
   });
 
-  it("should parse boolean disable_telemetry from env var", () => {
-    process.env.SMPLKIT_DISABLE_TELEMETRY = "1";
+  it("should parse boolean telemetry from env var", () => {
+    process.env.SMPLKIT_TELEMETRY = "0";
     const cfg = resolveConfig({
       apiKey: "sk_test",
       environment: "prod",
       service: "svc",
     });
-    expect(cfg.disableTelemetry).toBe(true);
+    expect(cfg.telemetry).toBe(false);
   });
 
   it("should throw on invalid boolean in file", () => {
@@ -394,7 +394,7 @@ describe("resolveConfig", () => {
         "environment = file-env",
         "service = file-svc",
         "debug = true",
-        "disable_telemetry = true",
+        "telemetry = false",
       ].join("\n"),
     );
     process.env.SMPLKIT_BASE_DOMAIN = "env.example.com";
@@ -415,6 +415,6 @@ describe("resolveConfig", () => {
     expect(cfg.service).toBe("file-svc");
     // file wins for booleans (over defaults)
     expect(cfg.debug).toBe(true);
-    expect(cfg.disableTelemetry).toBe(true);
+    expect(cfg.telemetry).toBe(false);
   });
 });

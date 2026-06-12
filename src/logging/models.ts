@@ -82,7 +82,11 @@ export class Logger {
     return this._environments;
   }
 
-  /** Persist this logger to the server (create or update). */
+  /**
+   * Persist this logger to the server (create or update).
+   *
+   * @throws {@link Error} If this logger was constructed without a client.
+   */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("Logger was constructed without a client; cannot save");
@@ -91,7 +95,11 @@ export class Logger {
     this._apply(updated);
   }
 
-  /** Delete this logger from the server. */
+  /**
+   * Delete this logger from the server.
+   *
+   * @throws {@link Error} If this logger was constructed without a client or id.
+   */
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Logger was constructed without a client or id; cannot delete");
@@ -105,6 +113,13 @@ export class Logger {
    * With `environment` undefined (the default), sets the base log level used
    * when no environment-specific override applies. With `environment`, sets
    * the per-environment override.
+   *
+   * Changes are local until you call {@link save}.
+   *
+   * @param level - The log level to apply.
+   * @param options - Level options.
+   * @param options.environment - When given, set the override for that
+   *   environment only. When omitted, set the base level.
    */
   setLevel(level: LogLevel, options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
@@ -121,6 +136,12 @@ export class Logger {
    * (the logger then inherits from its group / dot-notation ancestor /
    * system default). With `environment`, removes the per-environment override
    * only.
+   *
+   * Changes are local until you call {@link save}.
+   *
+   * @param options - Level options.
+   * @param options.environment - When given, remove the override for that
+   *   environment only. When omitted, remove the base level.
    */
   clearLevel(options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
@@ -208,7 +229,11 @@ export class LogGroup {
     return this._environments;
   }
 
-  /** Persist this group to the server (create or update). */
+  /**
+   * Persist this group to the server (create or update).
+   *
+   * @throws {@link Error} If this group was constructed without a client.
+   */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("LogGroup was constructed without a client; cannot save");
@@ -224,7 +249,11 @@ export class LogGroup {
     }
   }
 
-  /** Delete this group from the server. */
+  /**
+   * Delete this group from the server.
+   *
+   * @throws {@link Error} If this group was constructed without a client or id.
+   */
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("LogGroup was constructed without a client or id; cannot delete");
@@ -238,6 +267,13 @@ export class LogGroup {
    * With `environment` undefined (the default), sets the base log level used
    * when no environment-specific override applies. With `environment`, sets
    * the per-environment override.
+   *
+   * Changes are local until you call {@link save}.
+   *
+   * @param level - The log level to apply.
+   * @param options - Level options.
+   * @param options.environment - When given, set the override for that
+   *   environment only. When omitted, set the base level.
    */
   setLevel(level: LogLevel, options: { environment?: string } = {}): void {
     if (options.environment === undefined) {
@@ -254,6 +290,12 @@ export class LogGroup {
    * (the logger then inherits from its group / dot-notation ancestor /
    * system default). With `environment`, removes the per-environment override
    * only.
+   *
+   * Changes are local until you call {@link save}.
+   *
+   * @param options - Level options.
+   * @param options.environment - When given, remove the override for that
+   *   environment only. When omitted, remove the base level.
    */
   clearLevel(options: { environment?: string } = {}): void {
     if (options.environment === undefined) {

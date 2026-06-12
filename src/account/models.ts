@@ -29,7 +29,10 @@ export class AccountSettings {
     this._data = { ...data };
   }
 
-  /** The full settings dict. Mutations are persisted on save(). */
+  /**
+   * The full settings object. Mutations are persisted on `save()`. Assigning
+   * replaces the entire settings object.
+   */
   get raw(): Record<string, any> {
     return this._data;
   }
@@ -38,7 +41,10 @@ export class AccountSettings {
     this._data = { ...value };
   }
 
-  /** Canonical ordering of STANDARD environments. Empty array if unset. */
+  /**
+   * Canonical ordering of STANDARD environments. Empty array if unset. Assign a
+   * list of environment ids to set the ordering.
+   */
   get environmentOrder(): string[] {
     const val = this._data["environment_order"];
     return Array.isArray(val) ? [...val] : [];
@@ -48,6 +54,12 @@ export class AccountSettings {
     this._data["environment_order"] = [...value];
   }
 
+  /**
+   * Write the full settings object back to the account.
+   *
+   * @throws {@link !Error} If this model was constructed without a client (e.g.
+   *   built by hand rather than returned from `get()`).
+   */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("AccountSettings was constructed without a client; cannot save");
@@ -61,6 +73,11 @@ export class AccountSettings {
     this._data = { ...other._data };
   }
 
+  /**
+   * A debug string showing the full settings object.
+   *
+   * @returns A human-readable representation of these account settings.
+   */
   toString(): string {
     return `AccountSettings(${JSON.stringify(this._data)})`;
   }

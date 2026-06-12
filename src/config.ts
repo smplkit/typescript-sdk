@@ -18,7 +18,7 @@ const CONFIG_KEYS = {
   environment: "SMPLKIT_ENVIRONMENT",
   service: "SMPLKIT_SERVICE",
   debug: "SMPLKIT_DEBUG",
-  disable_telemetry: "SMPLKIT_DISABLE_TELEMETRY",
+  telemetry: "SMPLKIT_TELEMETRY",
 } as const;
 
 /** Fully resolved configuration after the 4-step merge. */
@@ -33,14 +33,17 @@ export interface ResolvedConfig {
   environment: string | null;
   service: string | null;
   debug: boolean;
-  disableTelemetry: boolean;
+  telemetry: boolean;
 }
 
 /**
- * Subset of ResolvedConfig used by SmplManagementClient — environment,
- * service, and telemetry are runtime-only concerns.
+ * Resolved configuration for a product client.
+ *
+ * CRUD operations against the platform are not tied to an environment or
+ * service, so those fields are not part of the resolved config and are not
+ * required at construction time.
  */
-export interface ResolvedManagementConfig {
+export interface ResolvedClientConfig {
   apiKey: string;
   baseDomain: string;
   scheme: string;
@@ -135,7 +138,7 @@ interface ConstructorOptions {
   environment?: string;
   service?: string;
   timeout?: number;
-  disableTelemetry?: boolean;
+  telemetry?: boolean;
   profile?: string;
   baseDomain?: string;
   scheme?: string;
@@ -154,7 +157,7 @@ function readMergedConfig(profile: string): Record<string, string | undefined> {
     scheme: "https",
     base_domain: "smplkit.com",
     debug: "false",
-    disable_telemetry: "false",
+    telemetry: "true",
   };
   try {
     const configPath = join(homedir(), ".smplkit");
@@ -190,8 +193,7 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
   if (options.environment !== undefined) merged.environment = options.environment;
   if (options.service !== undefined) merged.service = options.service;
   if (options.debug !== undefined) merged.debug = String(options.debug);
-  if (options.disableTelemetry !== undefined)
-    merged.disable_telemetry = String(options.disableTelemetry);
+  if (options.telemetry !== undefined) merged.telemetry = String(options.telemetry);
 
   // `environment` and `service` are OPTIONAL: an audit-only or jobs-only
   // customer needs neither, and when `environment` is absent the server derives
@@ -205,21 +207,22 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
     environment: merged.environment ?? null,
     service: merged.service ?? null,
     debug: parseBool(merged.debug!, "debug"),
-    disableTelemetry: parseBool(merged.disable_telemetry!, "disable_telemetry"),
+    telemetry: parseBool(merged.telemetry!, "telemetry"),
   };
 }
 
 /**
- * Resolve a {@link ResolvedManagementConfig} — the subset needed by
- * {@link SmplManagementClient}. No `environment` or `service` required.
+ * Resolve a {@link ResolvedClientConfig} — the subset a product client needs.
+ * No `environment` or `service` required, since CRUD operations are not tied
+ * to either.
  */
-export function resolveManagementConfig(options: {
+export function resolveClientConfig(options: {
   apiKey?: string;
   profile?: string;
   baseDomain?: string;
   scheme?: string;
   debug?: boolean;
-}): ResolvedManagementConfig {
+}): ResolvedClientConfig {
   const profile = options.profile ?? process.env.SMPLKIT_PROFILE ?? "default";
   const merged = readMergedConfig(profile);
 

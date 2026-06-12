@@ -31,7 +31,7 @@ const DEFAULT_OPTS = {
   apiKey: "sk_api_test",
   environment: "test",
   service: "test-svc",
-  disableTelemetry: true,
+  telemetry: false,
 };
 
 beforeEach(() => {

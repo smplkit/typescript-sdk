@@ -34,7 +34,7 @@ import {
   SmplkitConnectionError,
   throwForStatus,
 } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import { Color, EnvironmentClassification, coerceColor } from "./types.js";
 import { Environment, ContextType, Service } from "./models.js";
 import { Context } from "../flags/types.js";
@@ -197,7 +197,19 @@ export class EnvironmentsClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
-  /** Return an unsaved {@link Environment}. Call `.save()` to persist. */
+  /**
+   * Build an unsaved {@link Environment}; call `.save()` to persist it.
+   *
+   * @param id - Stable, human-readable identifier for the environment (for
+   *   example `"production"`).
+   * @param options.name - Display name shown in the Console.
+   * @param options.color - Accent color for the environment, as a {@link Color}
+   *   or a CSS hex string. Defaults to no color.
+   * @param options.classification - Whether the environment participates in the
+   *   standard environment ordering. Defaults to
+   *   {@link EnvironmentClassification.STANDARD}.
+   * @returns An unsaved {@link Environment} bound to this client.
+   */
   new(
     id: string,
     options: {
@@ -216,6 +228,15 @@ export class EnvironmentsClient {
     });
   }
 
+  /**
+   * List environments in the account.
+   *
+   * @param params.pageNumber - 1-based page to fetch. Defaults to the first
+   *   page.
+   * @param params.pageSize - Maximum number of environments per page. Defaults
+   *   to the server's page size.
+   * @returns The environments on the requested page.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Environment[]> {
     const query = paginationQuery(params);
     let data: any;
@@ -232,6 +253,13 @@ export class EnvironmentsClient {
     return items.map((r) => envFromResource(r, this));
   }
 
+  /**
+   * Fetch a single environment by id.
+   *
+   * @param id - Identifier of the environment to fetch.
+   * @returns The matching {@link Environment}.
+   * @throws {@link SmplkitNotFoundError} If no environment with that id exists.
+   */
   async get(id: string): Promise<Environment> {
     let data: any;
     try {
@@ -248,6 +276,11 @@ export class EnvironmentsClient {
     return envFromResource(data.data, this);
   }
 
+  /**
+   * Delete an environment by id.
+   *
+   * @param id - Identifier of the environment to delete.
+   */
   async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/environments/{id}", {
@@ -333,7 +366,13 @@ export class ServicesClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
-  /** Return an unsaved {@link Service}. Call `.save()` to persist. */
+  /**
+   * Build an unsaved {@link Service}; call `.save()` to persist it.
+   *
+   * @param id - Stable, human-readable identifier for the service.
+   * @param options.name - Display name shown in the Console.
+   * @returns An unsaved {@link Service} bound to this client.
+   */
   new(id: string, options: { name: string }): Service {
     return new Service(this, {
       id,
@@ -343,6 +382,15 @@ export class ServicesClient {
     });
   }
 
+  /**
+   * List services in the account.
+   *
+   * @param params.pageNumber - 1-based page to fetch. Defaults to the first
+   *   page.
+   * @param params.pageSize - Maximum number of services per page. Defaults to
+   *   the server's page size.
+   * @returns The services on the requested page.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Service[]> {
     const query = paginationQuery(params);
     let data: any;
@@ -359,6 +407,13 @@ export class ServicesClient {
     return items.map((r) => svcFromResource(r, this));
   }
 
+  /**
+   * Fetch a single service by id.
+   *
+   * @param id - Identifier of the service to fetch.
+   * @returns The matching {@link Service}.
+   * @throws {@link SmplkitNotFoundError} If no service with that id exists.
+   */
   async get(id: string): Promise<Service> {
     let data: any;
     try {
@@ -375,6 +430,11 @@ export class ServicesClient {
     return svcFromResource(data.data, this);
   }
 
+  /**
+   * Delete a service by id.
+   *
+   * @param id - Identifier of the service to delete.
+   */
   async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/services/{id}", {
@@ -456,6 +516,17 @@ export class ContextTypesClient {
   /** @internal */
   constructor(private readonly _http: AppHttp) {}
 
+  /**
+   * Build an unsaved {@link ContextType}; call `.save()` to persist it.
+   *
+   * @param id - Stable, human-readable identifier for the context type (for
+   *   example `"user"`).
+   * @param options.name - Display name shown in the Console. Defaults to `id`
+   *   when omitted.
+   * @param options.attributes - Known-attribute slots, keyed by attribute name,
+   *   with a metadata object per slot. Defaults to no declared attributes.
+   * @returns An unsaved {@link ContextType} bound to this client.
+   */
   new(
     id: string,
     options: { name?: string; attributes?: Record<string, Record<string, any>> } = {},
@@ -469,6 +540,15 @@ export class ContextTypesClient {
     });
   }
 
+  /**
+   * List context types in the account.
+   *
+   * @param params.pageNumber - 1-based page to fetch. Defaults to the first
+   *   page.
+   * @param params.pageSize - Maximum number of context types per page. Defaults
+   *   to the server's page size.
+   * @returns The context types on the requested page.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<ContextType[]> {
     const query = paginationQuery(params);
     let data: any;
@@ -485,6 +565,13 @@ export class ContextTypesClient {
     return items.map((r) => ctFromResource(r, this));
   }
 
+  /**
+   * Fetch a single context type by id.
+   *
+   * @param id - Identifier of the context type to fetch.
+   * @returns The matching {@link ContextType}.
+   * @throws {@link SmplkitNotFoundError} If no context type with that id exists.
+   */
   async get(id: string): Promise<ContextType> {
     let data: any;
     try {
@@ -501,6 +588,11 @@ export class ContextTypesClient {
     return ctFromResource(data.data, this);
   }
 
+  /**
+   * Delete a context type by id.
+   *
+   * @param id - Identifier of the context type to delete.
+   */
   async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/context_types/{id}", {
@@ -585,7 +677,17 @@ export class ContextsClient {
     this._buffer = buffer ?? new ContextRegistrationBuffer();
   }
 
-  /** Buffer contexts for registration; optionally flush immediately. */
+  /**
+   * Buffer one or more contexts for registration.
+   *
+   * Buffered contexts are sent in batches: a background flush kicks in once
+   * enough have accumulated, and any remainder is sent on the next explicit
+   * flush. Pass `flush: true` to send everything buffered right away.
+   *
+   * @param items - A single context or a list of contexts to register.
+   * @param options.flush - When `true`, send all buffered contexts immediately
+   *   rather than waiting for the batch threshold. Defaults to `false`.
+   */
   async register(items: Context | Context[], options: { flush?: boolean } = {}): Promise<void> {
     const batch = Array.isArray(items) ? items : [items];
     this._buffer.observe(batch);
@@ -623,7 +725,16 @@ export class ContextsClient {
     return this._buffer.pendingCount;
   }
 
-  /** List all contexts of a given type. */
+  /**
+   * List all contexts of a given type.
+   *
+   * @param type - Context type to list (for example `"user"`).
+   * @param params.pageNumber - 1-based page to fetch. Defaults to the first
+   *   page.
+   * @param params.pageSize - Maximum number of contexts per page. Defaults to
+   *   the server's page size.
+   * @returns The contexts of the given type on the requested page.
+   */
   async list(
     type: string,
     params: { pageNumber?: number; pageSize?: number } = {},
@@ -645,6 +756,16 @@ export class ContextsClient {
     return items.map((r) => ctxFromResource(r, this));
   }
 
+  /**
+   * Fetch a single context, identified by composite id or by type and key.
+   *
+   * @param idOrType - Either the composite context id `"type:key"` (when `key`
+   *   is omitted) or just the context type (when `key` is supplied).
+   * @param key - The context key. Provide it to use the two-argument form; omit
+   *   it when `idOrType` already carries the composite id.
+   * @returns The matching {@link Context}.
+   * @throws {@link SmplkitNotFoundError} If no context with that id exists.
+   */
   async get(idOrType: string, key?: string): Promise<Context> {
     const [ctxType, ctxKey] = splitContextId(idOrType, key);
     const composite = `${ctxType}:${ctxKey}`;
@@ -663,6 +784,14 @@ export class ContextsClient {
     return ctxFromResource(data.data, this);
   }
 
+  /**
+   * Delete a single context, identified by composite id or by type and key.
+   *
+   * @param idOrType - Either the composite context id `"type:key"` (when `key`
+   *   is omitted) or just the context type (when `key` is supplied).
+   * @param key - The context key. Provide it to use the two-argument form; omit
+   *   it when `idOrType` already carries the composite id.
+   */
   async delete(idOrType: string, key?: string): Promise<void> {
     const [ctxType, ctxKey] = splitContextId(idOrType, key);
     const composite = `${ctxType}:${ctxKey}`;
@@ -785,7 +914,7 @@ export class PlatformClient {
     if (options.appTransport !== undefined) {
       this._appHttp = options.appTransport;
     } else {
-      const cfg = resolveManagementConfig(options);
+      const cfg = resolveClientConfig(options);
       const appUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "app", cfg.baseDomain);
       this._appHttp = createClient<import("../generated/app.d.ts").paths>({
         baseUrl: appUrl.replace(/\/+$/, ""),

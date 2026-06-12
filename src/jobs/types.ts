@@ -8,8 +8,6 @@
  * call {@link Job.save} (create when new, full-replace update when it already
  * exists) or {@link Job.delete}. Runs are read-only views; run actions live
  * on `client.jobs.runs`.
- *
- * ADR-049.
  */
 
 /** A request header attached to the HTTP request a job performs. */
@@ -17,8 +15,8 @@ export interface HttpHeader {
   /** Header name (e.g. `"Authorization"`, `"Content-Type"`). */
   name: string;
   /**
-   * Header value, plaintext on writes. The jobs service encrypts values at
-   * rest; reads return them redacted.
+   * Header value. Returned in plaintext on reads, so a get-mutate-put
+   * round-trip preserves it without re-entering secrets.
    */
   value: string;
 }
@@ -49,7 +47,11 @@ export class HttpConfig {
   method: HttpMethod;
   /** Destination URL the job requests on each run. */
   url: string;
-  /** Headers attached to every request. Values are redacted on reads. */
+  /**
+   * Headers attached to every request. Values often carry credentials and
+   * are returned in plaintext on reads, so a get-mutate-put round-trip
+   * preserves them without re-entering secrets.
+   */
   headers: HttpHeader[];
   /**
    * Request body sent on each run. `null` (the default) sends an empty body,
@@ -108,8 +110,9 @@ export class HttpConfig {
  *
  * Active-record style: mutate fields directly and call {@link save} to
  * persist, or {@link delete} to remove. Header values in
- * `configuration.headers` are returned redacted on reads — re-supply the
- * real values before calling {@link save} (the SDK does not cache them).
+ * `configuration.headers` are returned in plaintext on reads, so fetching a
+ * job, mutating it, and calling {@link save} preserves its header values
+ * without re-entering secrets.
  */
 export class Job {
   /** Caller-supplied unique identifier for the job (the resource `id`). */
@@ -139,7 +142,7 @@ export class Job {
   createdAt: string | null;
   /** When the job was last modified. */
   updatedAt: string | null;
-  /** Soft-delete timestamp. `null` for live jobs. */
+  /** When the job was deleted; `null` for live jobs. */
   deletedAt: string | null;
   /** Monotonic version counter; bumped on every server-side write. */
   version: number | null;
@@ -147,6 +150,7 @@ export class Job {
   /** @internal */
   _client: JobModelClient | null;
 
+  /** @internal */
   constructor(
     client: JobModelClient | null,
     fields: {
@@ -200,7 +204,7 @@ export class Job {
     this._apply(other);
   }
 
-  /** Soft-delete this job on the server. */
+  /** Delete this job on the server. */
   async delete(): Promise<void> {
     if (this._client === null) {
       throw new Error("Job was constructed without a client; cannot delete");

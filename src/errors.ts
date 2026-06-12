@@ -15,8 +15,8 @@ export interface ApiErrorDetail {
   status?: string;
   /**
    * Application-specific machine-readable error code (e.g.
-   * ``environment_unmanaged``). Per JSON:API §7 and ADR-014, the server
-   * sets this on every error so callers can branch without string-matching.
+   * `environment_unmanaged`). Per JSON:API §7, the server sets this on every
+   * error so callers can branch without string-matching the human `detail`.
    */
   code?: string;
   title?: string;
@@ -37,6 +37,14 @@ export class SmplError extends Error {
   /** Structured JSON:API error objects from the server response, if available. */
   public readonly errors: ReadonlyArray<ApiErrorDetail>;
 
+  /**
+   * @param message - Human-readable error message.
+   * @param statusCode - HTTP status code, when the error originated from an
+   *   HTTP response.
+   * @param responseBody - Raw response body, when available.
+   * @param errors - Structured JSON:API error objects from the server
+   *   response.
+   */
   constructor(
     message: string,
     statusCode?: number,
@@ -51,6 +59,13 @@ export class SmplError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 
+  /**
+   * Format the error as a string, appending any structured JSON:API error
+   * objects from the server response.
+   *
+   * @returns The error name and message, followed by the JSON-encoded error
+   *   objects when present.
+   */
   toString(): string {
     if (this.errors.length === 0) {
       return `${this.name}: ${this.message}`;

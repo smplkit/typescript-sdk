@@ -47,9 +47,9 @@ export interface ContextClient {
  * keyword arguments) carry the data that targeting rules evaluate against.
  *
  * Used for both authoring (`flag.get({ context: [...] })`,
- * `client.setContext([...])`, `client.platform.contexts.register([...])`)
- * and reading (`client.platform.contexts.list/get` return populated
- * `Context` instances with `save()` / `delete()` ready to call).
+ * `client.platform.contexts.register([...])`) and reading
+ * (`client.platform.contexts.list/get` return populated `Context` instances
+ * with `save()` / `delete()` ready to call).
  *
  * @example
  * ```typescript
@@ -207,12 +207,33 @@ export class Context {
  * forwards declarations.
  */
 export class FlagDeclaration {
+  /** Stable flag identifier the declaration registers. */
   readonly id: string;
+  /** Flag value type (e.g. `"BOOLEAN"`, `"STRING"`, `"NUMERIC"`, `"JSON"`). */
   readonly type: string;
+  /** Default value to register for the flag. */
   readonly default: unknown;
+  /**
+   * Originating service name. Defaults to `null`; the runtime client fills it
+   * from the active `SmplClient` when it forwards declarations.
+   */
   readonly service: string | null;
+  /**
+   * Target environment. Defaults to `null`; the runtime client fills it from
+   * the active `SmplClient` when it forwards declarations.
+   */
   readonly environment: string | null;
 
+  /**
+   * Build a flag declaration for buffered registration.
+   *
+   * @param fields.id - Stable flag identifier the declaration registers.
+   * @param fields.type - Flag value type (e.g. `"BOOLEAN"`, `"STRING"`,
+   *   `"NUMERIC"`, `"JSON"`).
+   * @param fields.default - Default value to register for the flag.
+   * @param fields.service - Originating service name. Defaults to `null`.
+   * @param fields.environment - Target environment. Defaults to `null`.
+   */
   constructor(fields: {
     id: string;
     type: string;
@@ -249,6 +270,14 @@ export class Rule {
   private readonly _conditions: Array<Record<string, any>> = [];
   private readonly _environment: string;
 
+  /**
+   * Start building a targeting rule.
+   *
+   * @param description - Human-readable label for the rule.
+   * @param options.environment - Name of the environment the rule targets. Required
+   *   so the target environment is unambiguous when the built rule is passed to
+   *   {@link Flag.addRule}.
+   */
   constructor(description: string, options: { environment: string }) {
     this._description = description;
     if (typeof options?.environment !== "string") {
@@ -271,6 +300,15 @@ export class Rule {
    * - `when(expr)` — escape hatch accepting an arbitrary JSON Logic
    *   expression (use this for OR, nested AND/OR, `if`, etc.).
    *   See https://jsonlogic.com/ for the full expression grammar.
+   *
+   * @param expr - A single JSON Logic expression object — `when(expr)`.
+   * @param variable - The context variable to compare — `when(variable, op, value)`.
+   * @param op - An {@link Op} enum value (preferred) or a raw operator string such as
+   *   `"=="` or `"contains"`.
+   * @param value - The value to compare the variable against.
+   * @returns This rule, so `when` and `serve` calls can be chained.
+   * @throws {@link TypeError} The arguments are neither a single object nor exactly
+   *   three positional values.
    */
   when(expr: Record<string, any>): Rule;
   when(variable: string, op: Op | string, value: any): Rule;
@@ -294,7 +332,13 @@ export class Rule {
     );
   }
 
-  /** Finalize the rule with `value` served on match and return the built dict. */
+  /**
+   * Finalize the rule with `value` served on match and return the built object.
+   *
+   * @param value - The value to serve when the rule's conditions evaluate truthy.
+   * @returns The built rule object (description, logic, value, environment) ready to
+   *   pass to {@link Flag.addRule}.
+   */
   serve(value: any): Record<string, any> {
     let logic: Record<string, any>;
     if (this._conditions.length === 1) {

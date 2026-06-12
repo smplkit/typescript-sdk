@@ -4,7 +4,7 @@
  * Smpl Config has two surfaces on a single client, mirroring how the audit
  * and jobs clients expose their full surface from one class:
  *
- * - **Management surface** — pure CRUD, no live connection: `new` / `get`
+ * - **CRUD surface** — pure CRUD, no live connection: `new` / `get`
  *   / `list` / `delete` and the discovery buffer (`registerConfig` /
  *   `registerConfigItem` / `flush` / `pendingCount`). The client owns the
  *   discovery buffer directly.
@@ -39,7 +39,7 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import { resolveChain } from "./resolve.js";
 import { Config, ConfigEnvironment, environmentsToWire } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
@@ -437,7 +437,7 @@ export interface ConfigClientOptions {
  * console.log(proxy["max_seats"]);
  * ```
  *
- * The management surface (`new` / `get` / `list` / `delete` and discovery) is
+ * The CRUD surface (`new` / `get` / `list` / `delete` and discovery) is
  * pure CRUD. The live surface (`subscribe` / `getValue` / `bind` / `onChange`
  * / `refresh`) connects lazily on first use — the first call flushes
  * discovery, fetches and resolves all configs into the local cache, and opens
@@ -484,7 +484,7 @@ export class ConfigClient {
       this._appBaseUrl = null;
       this._standaloneApiKey = null;
     } else {
-      const cfg = resolveManagementConfig(options);
+      const cfg = resolveClientConfig(options);
       const configUrl =
         options.baseUrl ?? serviceUrl(cfg.scheme, "config", cfg.baseDomain) ?? BASE_URL;
       this._appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
@@ -522,9 +522,16 @@ export class ConfigClient {
   /**
    * Return a new unsaved {@link Config}. Call {@link Config.save} to persist.
    *
-   * `parent` accepts either a config id (string) or an existing {@link Config}
-   * instance — passing the instance lets you skip naming the id explicitly
-   * when you already have the parent in scope.
+   * @param id - The config identifier (slug) the resource will be saved under.
+   * @param options - Optional metadata for the new config.
+   * @param options.name - Display name. Defaults to a title-cased form of `id`.
+   * @param options.description - Optional human-readable description.
+   * @param options.parent - Optional parent config to inherit values from.
+   *   Accepts either a config id (string) or an existing {@link Config}
+   *   instance — passing the instance lets you skip naming the id explicitly
+   *   when you already have the parent in scope.
+   * @returns A new, unsaved {@link Config}. Nothing is sent to the server until
+   *   you call {@link Config.save}.
    */
   new(
     id: string,
@@ -548,7 +555,9 @@ export class ConfigClient {
   /**
    * Fetch the editable {@link Config} resource by id.
    *
-   * Throws {@link SmplkitNotFoundError} if no config with that id exists.
+   * @param id - The config identifier (slug) to fetch.
+   * @returns The editable {@link Config} resource.
+   * @throws SmplkitNotFoundError if no config with that id exists.
    */
   async get(id: string): Promise<Config> {
     let data: components["schemas"]["ConfigResponse"] | undefined;
@@ -567,7 +576,17 @@ export class ConfigClient {
     return resourceToConfig(this, data.data);
   }
 
-  /** List configs for the authenticated account. */
+  /**
+   * List configs for the authenticated account.
+   *
+   * @param params - Optional pagination controls.
+   * @param params.pageNumber - 1-based page to fetch. When omitted, the
+   *   server's default first page is returned.
+   * @param params.pageSize - Number of configs per page. When omitted, the
+   *   server's default page size is used.
+   * @returns The configs on the requested page, or an empty list if there are
+   *   none.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Config[]> {
     const query: Record<string, number> = {};
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
@@ -586,7 +605,11 @@ export class ConfigClient {
     return data.data.map((r) => resourceToConfig(this, r));
   }
 
-  /** Delete a config by id. */
+  /**
+   * Delete a config by id.
+   *
+   * @param id - The config identifier (slug) to delete.
+   */
   async delete(id: string): Promise<void> {
     return this._deleteConfig(id);
   }
@@ -651,7 +674,21 @@ export class ConfigClient {
   // Management surface: discovery buffer (owned directly)
   // ------------------------------------------------------------------
 
-  /** Queue a configuration declaration for bulk-discovery upload. */
+  /**
+   * Queue a configuration declaration for bulk-discovery upload.
+   *
+   * The declaration is buffered and sent in the background; it surfaces the
+   * config in the smplkit console even if no values are set yet.
+   *
+   * @param configId - The config identifier (slug) being declared.
+   * @param meta - Metadata describing the config being declared.
+   * @param meta.service - Name of the service declaring the config, or `null`.
+   * @param meta.environment - Environment the declaration is scoped to, or
+   *   `null`.
+   * @param meta.parent - Optional parent config id this config inherits from.
+   * @param meta.name - Optional display name for the config.
+   * @param meta.description - Optional human-readable description.
+   */
   registerConfig(
     configId: string,
     meta: {
@@ -674,7 +711,19 @@ export class ConfigClient {
     }
   }
 
-  /** Queue a config item declaration. `registerConfig` must run first. */
+  /**
+   * Queue a config item declaration. `registerConfig` must run first.
+   *
+   * The declaration is buffered and sent in the background, surfacing the item
+   * (with its type and default) in the smplkit console.
+   *
+   * @param configId - The config identifier (slug) the item belongs to.
+   * @param itemKey - Key of the item within the config.
+   * @param itemType - Item value type — one of `"STRING"`, `"NUMBER"`,
+   *   `"BOOLEAN"`, or `"JSON"`.
+   * @param defaultValue - The in-code default value for the item.
+   * @param description - Optional human-readable description.
+   */
   registerConfigItem(
     configId: string,
     itemKey: string,
@@ -701,14 +750,15 @@ export class ConfigClient {
   }
 
   /**
-   * POST pending declarations to `/api/v1/configs/bulk`.
+   * Send any queued config and item declarations to the server.
    *
-   * Per ADR-024 §2.9, bulk registration always lands rows as `managed=false`
-   * and is plan-limit-exempt — failures here never propagate to customer
-   * code. Drained entries are not requeued; the SDK will re-observe on the
-   * next process start.
+   * Discovery is best-effort — failures here never propagate to your code.
+   * Drained entries are not requeued; the SDK re-observes them on the next
+   * process start.
    */
   async flush(): Promise<void> {
+    // Bulk registration lands rows as managed=false and is plan-limit-exempt
+    // (ADR-024 §2.9). Kept here for maintainers; not customer-facing.
     const batch = this._buffer.drain();
     if (batch.length === 0) return;
     try {
@@ -906,8 +956,12 @@ export class ConfigClient {
    * the config declaration for code-first observability so the reference
    * appears in the smplkit console.
    *
-   * Connects lazily on first use — no explicit install step. Throws
-   * {@link SmplkitNotFoundError} if the config is unknown.
+   * Connects lazily on first use — no explicit install step.
+   *
+   * @param id - The config identifier (slug) to subscribe to.
+   * @returns A live {@link LiveConfigProxy} whose reads always see the current
+   *   resolved values.
+   * @throws SmplkitNotFoundError if the config is unknown.
    */
   async subscribe(id: string): Promise<LiveConfigProxy> {
     await this._ensureConnected();
@@ -940,6 +994,18 @@ export class ConfigClient {
    *
    * For a live dict-like view use {@link subscribe}; for typed access use
    * {@link bind}. Connects lazily on first use — no explicit install step.
+   *
+   * @param id - The config identifier (slug) to read from.
+   * @param key - The item key within the config.
+   * @param defaultValue - Value returned when the config or key is missing.
+   *   When omitted, a missing config or key throws instead of returning a
+   *   fallback. Supplying a default also registers the config (if new) and the
+   *   key — with its type inferred and `defaultValue` as its value — so the
+   *   reference appears in the smplkit console.
+   * @returns The resolved value. When `defaultValue` is supplied and the config
+   *   or key is missing, returns `defaultValue` instead.
+   * @throws SmplkitNotFoundError if the config or key is missing and no
+   *   `defaultValue` was supplied.
    */
   async getValue(id: string, key: string): Promise<unknown>;
   async getValue<V>(id: string, key: string, defaultValue: V): Promise<V | unknown>;
@@ -1126,6 +1192,14 @@ export class ConfigClient {
    * - `onChange(callback)` — global listener.
    * - `onChange(configId, callback)` — config-scoped listener.
    * - `onChange(configId, itemKey, callback)` — item-scoped.
+   *
+   * @param callbackOrConfigId - The listener function (global form), or the
+   *   config id to scope the listener to.
+   * @param callbackOrItemKey - When the first argument is a config id, either
+   *   the listener function (config-scoped form) or the item key to scope the
+   *   listener to.
+   * @param callback - The listener function for the item-scoped form, when both
+   *   a config id and an item key are supplied.
    */
   onChange(
     callbackOrConfigId: string | ((event: ConfigChangeEvent) => void),

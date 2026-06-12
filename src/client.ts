@@ -58,11 +58,13 @@ export interface SmplClientOptions {
   timeout?: number;
 
   /**
-   * Disable SDK telemetry reporting.
-   * When `true`, no usage metrics are collected or sent.
-   * @default false
+   * Enable anonymous usage telemetry.
+   * When omitted, resolved from the `SMPLKIT_TELEMETRY` environment variable
+   * or the `~/.smplkit` configuration file, falling back to `true`.
+   * Set to `false` to disable telemetry collection entirely.
+   * @default true
    */
-  disableTelemetry?: boolean;
+  telemetry?: boolean;
 
   /**
    * Configuration profile to use from `~/.smplkit`.
@@ -137,7 +139,7 @@ export class SmplClient {
   /** Client for logging management and runtime. */
   readonly logging: LoggingClient;
 
-  /** Client for the audit service — fire-and-forget event recording (ADR-047). */
+  /** Client for the audit service — fire-and-forget event recording. */
   readonly audit: AuditClient;
 
   /** Client for scheduled jobs — CRUD, runs, and usage. */
@@ -146,14 +148,16 @@ export class SmplClient {
   private _wsManager: SharedWebSocket | null = null;
   private readonly _apiKey: string;
 
+  // Read by wired sub-clients through the `*Parent` interfaces, so these stay
+  // `readonly` (public) for structural assignability; `@internal` + the build's
+  // `stripInternal` keep them out of the published `.d.ts`.
   /** @internal */
   readonly _environment: string;
 
   /** @internal */
   readonly _service: string | null;
 
-  /** @internal */
-  readonly _metrics: MetricsReporter | null = null;
+  private _metrics: MetricsReporter | null = null;
 
   private readonly _timeout: number;
   private readonly _appBaseUrl: string;
@@ -231,7 +235,7 @@ export class SmplClient {
     });
 
     // Metrics reporter
-    if (!cfg.disableTelemetry) {
+    if (cfg.telemetry) {
       this._metrics = new MetricsReporter({
         apiKey: cfg.apiKey,
         environment: this._environment,

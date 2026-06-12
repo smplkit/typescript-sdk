@@ -4,7 +4,7 @@
  * Smpl Flags has two surfaces on a single client, mirroring how the config,
  * audit, and jobs clients expose their full surface from one class:
  *
- * - **Management surface** — pure CRUD, no live connection:
+ * - **CRUD surface** — pure CRUD, no live connection:
  *   `newBooleanFlag` / `newStringFlag` / `newNumberFlag` / `newJsonFlag`
  *   constructors, `get` / `list` / `delete` CRUD, and the flag-declaration
  *   discovery buffer (`register` / `flush` / `pendingCount`). The client owns
@@ -42,7 +42,7 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import {
   Flag,
   BooleanFlag,
@@ -317,7 +317,7 @@ function _coerceValues(
 /**
  * Evaluate a flag definition against the given context.
  *
- * Follows ADR-022 §2.6 semantics:
+ * Evaluation order:
  * 1. Look up the environment. If missing, return flag-level default.
  * 2. If disabled, return env default or flag default.
  * 3. Iterate rules; first match wins.
@@ -565,7 +565,7 @@ export interface FlagsClientOptions {
  * }
  * ```
  *
- * The management surface (`new*` / `get` / `list` / `delete` and discovery)
+ * The CRUD surface (`new*` / `get` / `list` / `delete` and discovery)
  * is pure CRUD. The live surface (`booleanFlag` / `stringFlag` /
  * `numberFlag` / `jsonFlag` / `refresh` / `stats` / `onChange`) connects
  * lazily on first use — the first call flushes discovery, fetches all flag
@@ -622,7 +622,7 @@ export class FlagsClient {
       // registration seam.
       this._contexts = options.contexts ?? null;
     } else {
-      const cfg = resolveManagementConfig(options);
+      const cfg = resolveClientConfig(options);
       const flagsUrl =
         options.baseUrl ?? serviceUrl(cfg.scheme, "flags", cfg.baseDomain) ?? FLAGS_BASE_URL;
       this._appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
@@ -669,7 +669,16 @@ export class FlagsClient {
   // Management surface: CRUD (no live connection)
   // ------------------------------------------------------------------
 
-  /** Return a new unsaved boolean {@link BooleanFlag}. Call `save()` to persist. */
+  /**
+   * Return a new unsaved boolean {@link BooleanFlag}. Call `save()` to persist.
+   *
+   * @param id - Stable flag identifier. Unique per account.
+   * @param options.default - Value served when no environment override or rule applies.
+   * @param options.name - Human-readable display name. Defaults to a title-cased
+   *   form of `id`.
+   * @param options.description - Optional free-text description of the flag.
+   * @returns An unsaved {@link BooleanFlag}; call `save()` to persist it.
+   */
   newBooleanFlag(
     id: string,
     options: { default: boolean; name?: string; description?: string },
@@ -690,7 +699,18 @@ export class FlagsClient {
     });
   }
 
-  /** Return a new unsaved string {@link StringFlag}. Call `save()` to persist. */
+  /**
+   * Return a new unsaved string {@link StringFlag}. Call `save()` to persist.
+   *
+   * @param id - Stable flag identifier. Unique per account.
+   * @param options.default - Value served when no environment override or rule applies.
+   * @param options.name - Human-readable display name. Defaults to a title-cased
+   *   form of `id`.
+   * @param options.description - Optional free-text description of the flag.
+   * @param options.values - Optional list of allowed values constraining what the
+   *   flag may serve. When omitted, the flag is unconstrained.
+   * @returns An unsaved {@link StringFlag}; call `save()` to persist it.
+   */
   newStringFlag(
     id: string,
     options: {
@@ -713,7 +733,18 @@ export class FlagsClient {
     });
   }
 
-  /** Return a new unsaved numeric {@link NumberFlag}. Call `save()` to persist. */
+  /**
+   * Return a new unsaved numeric {@link NumberFlag}. Call `save()` to persist.
+   *
+   * @param id - Stable flag identifier. Unique per account.
+   * @param options.default - Value served when no environment override or rule applies.
+   * @param options.name - Human-readable display name. Defaults to a title-cased
+   *   form of `id`.
+   * @param options.description - Optional free-text description of the flag.
+   * @param options.values - Optional list of allowed values constraining what the
+   *   flag may serve. When omitted, the flag is unconstrained.
+   * @returns An unsaved {@link NumberFlag}; call `save()` to persist it.
+   */
   newNumberFlag(
     id: string,
     options: {
@@ -736,7 +767,18 @@ export class FlagsClient {
     });
   }
 
-  /** Return a new unsaved JSON {@link JsonFlag}. Call `save()` to persist. */
+  /**
+   * Return a new unsaved JSON {@link JsonFlag}. Call `save()` to persist.
+   *
+   * @param id - Stable flag identifier. Unique per account.
+   * @param options.default - Value served when no environment override or rule applies.
+   * @param options.name - Human-readable display name. Defaults to a title-cased
+   *   form of `id`.
+   * @param options.description - Optional free-text description of the flag.
+   * @param options.values - Optional list of allowed values constraining what the
+   *   flag may serve. When omitted, the flag is unconstrained.
+   * @returns An unsaved {@link JsonFlag}; call `save()` to persist it.
+   */
   newJsonFlag(
     id: string,
     options: {
@@ -759,7 +801,13 @@ export class FlagsClient {
     });
   }
 
-  /** Fetch the editable {@link Flag} resource by id. */
+  /**
+   * Fetch the editable {@link Flag} resource by id.
+   *
+   * @param id - Identifier of the flag to fetch.
+   * @returns The {@link Flag}, ready to mutate and `save()`.
+   * @throws {@link SmplkitNotFoundError} No flag with that id exists for the account.
+   */
   async get(id: string): Promise<Flag> {
     let data: components["schemas"]["FlagResponse"] | undefined;
     try {
@@ -777,7 +825,15 @@ export class FlagsClient {
     return resourceToFlag(data.data, this);
   }
 
-  /** List flags for the authenticated account. */
+  /**
+   * List flags for the authenticated account.
+   *
+   * @param params.pageNumber - 1-based page index to fetch. When omitted, the
+   *   server default applies.
+   * @param params.pageSize - Number of flags per page. When omitted, the server
+   *   default applies.
+   * @returns The flags on the requested page.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Flag[]> {
     const query: Record<string, number> = {};
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
@@ -796,7 +852,12 @@ export class FlagsClient {
     return data.data.map((r) => resourceToFlag(r, this));
   }
 
-  /** Delete a flag by id. */
+  /**
+   * Delete a flag by id.
+   *
+   * @param id - Identifier of the flag to delete.
+   * @throws {@link SmplkitNotFoundError} No flag with that id exists for the account.
+   */
   async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/flags/{id}", {
@@ -851,7 +912,15 @@ export class FlagsClient {
   // Management surface: discovery buffer (owned directly)
   // ------------------------------------------------------------------
 
-  /** Buffer flag declarations for bulk-discovery upload; optionally flush now. */
+  /**
+   * Buffer flag declarations for bulk-discovery upload; optionally flush now.
+   *
+   * @param items - A single {@link FlagDeclaration} or a list of them to queue.
+   * @param options.flush - When `true`, send the buffered declarations immediately
+   *   via {@link flush} before returning. When `false` (the default), they stay
+   *   buffered and are sent on the next flush — automatic once the buffer reaches
+   *   its batch size, or on the first live call.
+   */
   async register(
     items: FlagDeclaration | FlagDeclaration[],
     options: { flush?: boolean } = {},
@@ -894,6 +963,8 @@ export class FlagsClient {
    * against an unhealthy `flags` service is automatically retried by the
    * next `flush()` call (periodic background flush, install retry, or
    * final flush on close).
+   *
+   * @returns A promise that resolves once the buffered declarations have been sent.
    */
   async flush(): Promise<void> {
     const batch = this._buffer.peek();
@@ -996,7 +1067,14 @@ export class FlagsClient {
   // Live surface: typed flag handles
   // ------------------------------------------------------------------
 
-  /** Declare a boolean flag handle for live evaluation. Connects lazily on first use. */
+  /**
+   * Declare a boolean flag handle for live evaluation. Connects lazily on first use.
+   *
+   * @param id - Identifier of the flag to evaluate.
+   * @param defaultValue - Value returned by `handle.get()` when the flag is unknown
+   *   or no environment override or rule applies.
+   * @returns A {@link BooleanFlag} handle whose `get()` evaluates against the live cache.
+   */
   async booleanFlag(id: string, defaultValue: boolean): Promise<BooleanFlag> {
     await this._ensureConnected();
     const handle = new BooleanFlag(this, {
@@ -1015,7 +1093,14 @@ export class FlagsClient {
     return handle;
   }
 
-  /** Declare a string flag handle for live evaluation. Connects lazily on first use. */
+  /**
+   * Declare a string flag handle for live evaluation. Connects lazily on first use.
+   *
+   * @param id - Identifier of the flag to evaluate.
+   * @param defaultValue - Value returned by `handle.get()` when the flag is unknown
+   *   or no environment override or rule applies.
+   * @returns A {@link StringFlag} handle whose `get()` evaluates against the live cache.
+   */
   async stringFlag(id: string, defaultValue: string): Promise<StringFlag> {
     await this._ensureConnected();
     const handle = new StringFlag(this, {
@@ -1034,7 +1119,14 @@ export class FlagsClient {
     return handle;
   }
 
-  /** Declare a numeric flag handle for live evaluation. Connects lazily on first use. */
+  /**
+   * Declare a numeric flag handle for live evaluation. Connects lazily on first use.
+   *
+   * @param id - Identifier of the flag to evaluate.
+   * @param defaultValue - Value returned by `handle.get()` when the flag is unknown
+   *   or no environment override or rule applies.
+   * @returns A {@link NumberFlag} handle whose `get()` evaluates against the live cache.
+   */
   async numberFlag(id: string, defaultValue: number): Promise<NumberFlag> {
     await this._ensureConnected();
     const handle = new NumberFlag(this, {
@@ -1053,7 +1145,14 @@ export class FlagsClient {
     return handle;
   }
 
-  /** Declare a JSON flag handle for live evaluation. Connects lazily on first use. */
+  /**
+   * Declare a JSON flag handle for live evaluation. Connects lazily on first use.
+   *
+   * @param id - Identifier of the flag to evaluate.
+   * @param defaultValue - Value returned by `handle.get()` when the flag is unknown
+   *   or no environment override or rule applies.
+   * @returns A {@link JsonFlag} handle whose `get()` evaluates against the live cache.
+   */
   async jsonFlag(id: string, defaultValue: Record<string, any>): Promise<JsonFlag> {
     await this._ensureConnected();
     const handle = new JsonFlag(this, {
@@ -1080,12 +1179,21 @@ export class FlagsClient {
    * Register a context provider function.
    *
    * Called on every `handle.get()` to supply the current evaluation context.
+   *
+   * @param fn - Provider invoked on each evaluation; returns the list of
+   *   {@link Context} entities to evaluate targeting rules against.
    */
   setContextProvider(fn: () => Context[]): void {
     this._contextProvider = fn;
   }
 
-  /** Register a context provider — decorator-style alias. */
+  /**
+   * Register a context provider — decorator-style alias.
+   *
+   * @param fn - Provider invoked on each `handle.get()`; returns the list of
+   *   {@link Context} entities to evaluate targeting rules against.
+   * @returns The same provider `fn`, so it can be wrapped decorator-style.
+   */
   contextProvider(fn: () => Context[]): () => Context[] {
     this._contextProvider = fn;
     return fn;
@@ -1099,6 +1207,8 @@ export class FlagsClient {
    * Re-fetch all flag definitions and clear cache.
    *
    * Connects lazily on first use — no explicit install step.
+   *
+   * @returns A promise that resolves once the definitions have been re-fetched.
    */
   async refresh(): Promise<void> {
     await this._ensureConnected();
@@ -1112,7 +1222,11 @@ export class FlagsClient {
     this._fireChangeListenersAll(source);
   }
 
-  /** Return evaluation statistics. Connects lazily on first use. */
+  /**
+   * Return evaluation statistics. Connects lazily on first use.
+   *
+   * @returns The current {@link FlagStats} (cache hit / miss counts).
+   */
   async stats(): Promise<FlagStats> {
     await this._ensureConnected();
     return new FlagStats({
@@ -1130,6 +1244,12 @@ export class FlagsClient {
    * - `onChange(id, callback)` — registers an id-scoped listener.
    *
    * Connects lazily on first use — no explicit install step.
+   *
+   * @param callbackOrId - Either the listener callback (used directly as
+   *   `onChange(callback)`) or a flag id string scoping the listener to that flag
+   *   (used as `onChange(id, callback)`).
+   * @param callback - The listener callback, required when `callbackOrId` is a flag
+   *   id. Each listener receives a {@link FlagChangeEvent}.
    */
   async onChange(
     callbackOrId: string | ((event: FlagChangeEvent) => void),

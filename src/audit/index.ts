@@ -1,8 +1,8 @@
 /**
  * Smpl Audit SDK namespace.
  *
- * ADR-047. The audit subsystem records who did what to which resource and
- * when. Audit installs no in-process machinery, so it has no
+ * The audit subsystem records who did what to which resource and when.
+ * Audit installs no in-process machinery, so it has no
  * runtime/management split: a single {@link AuditClient} exposes the full
  * surface and is reachable as `client.audit` on {@link SmplClient} or
  * constructed directly.
@@ -42,7 +42,6 @@ export type {
   CreateEventInput,
   EventType,
   EventTypeListPage,
-  ForwarderModelClient,
   HttpHeader,
   ListCategoriesParams,
   ListEventTypesParams,

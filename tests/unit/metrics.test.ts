@@ -434,10 +434,10 @@ describe("MetricsReporter — close", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SmplClient — disableTelemetry
+// SmplClient — telemetry
 // ---------------------------------------------------------------------------
 
-describe("SmplClient — disableTelemetry", () => {
+describe("SmplClient — telemetry", () => {
   const mockFetch = vi.fn();
 
   beforeEach(() => {
@@ -456,19 +456,19 @@ describe("SmplClient — disableTelemetry", () => {
       environment: "test",
       service: "test-svc",
     });
-    expect(client._metrics).not.toBeNull();
+    expect((client as unknown as { _metrics: unknown })._metrics).not.toBeNull();
     client.close();
   });
 
-  it("should not create metrics reporter when disableTelemetry is true", async () => {
+  it("should not create metrics reporter when telemetry is false", async () => {
     const { SmplClient } = await import("../../src/client.js");
     const client = new SmplClient({
       apiKey: "sk_api_test",
       environment: "test",
       service: "test-svc",
-      disableTelemetry: true,
+      telemetry: false,
     });
-    expect(client._metrics).toBeNull();
+    expect((client as unknown as { _metrics: unknown })._metrics).toBeNull();
     client.close();
   });
 });

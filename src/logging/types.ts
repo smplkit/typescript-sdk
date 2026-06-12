@@ -23,8 +23,8 @@ export enum LogLevel {
  * Fields:
  * - `id`: the affected logger's normalized id.
  * - `level`: the newly-applied effective smplkit level string (e.g.
- *   `"INFO"`, `"DEBUG"`); same value the resolution algorithm returns and
- *   that `smplLevelToPython` converts.
+ *   `"INFO"`, `"DEBUG"`) — the same value the resolution algorithm returns
+ *   and that the SDK passes to each registered adapter's `applyLevel()`.
  * - `source`: short string identifying the trigger — typically `"websocket"`
  *   or `"manual"` (a {@link LoggingClient.refresh} call).
  */

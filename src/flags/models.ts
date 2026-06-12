@@ -152,6 +152,8 @@ export class Flag {
    *
    * `null` means unconstrained. Mutate via {@link addValue} /
    * {@link removeValue} / {@link clearValues}.
+   *
+   * @returns A copy of the constrained values, or `null` when unconstrained.
    */
   get values(): FlagValue[] | null {
     return this._values === null ? null : [...this._values];
@@ -162,6 +164,8 @@ export class Flag {
    *
    * Mutate via {@link addRule} / {@link enableRules} / {@link disableRules} /
    * {@link setDefault} (with `environment` option) / {@link clearRules}.
+   *
+   * @returns A copy of the per-environment configuration keyed by environment name.
    */
   get environments(): Record<string, FlagEnvironment> {
     return { ...this._environments };
@@ -178,6 +182,8 @@ export class Flag {
    * Requires a flags client (i.e. the flag was constructed via
    * `client.flags.newBooleanFlag` etc. or returned from
    * `client.flags.get/list`).
+   *
+   * @throws {@link Error} The flag was constructed without a client.
    */
   async save(): Promise<void> {
     if (this._client === null) {
@@ -192,7 +198,11 @@ export class Flag {
     }
   }
 
-  /** Delete this flag from the server. */
+  /**
+   * Delete this flag from the server.
+   *
+   * @throws {@link Error} The flag was constructed without a client or id.
+   */
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Flag was constructed without a client or id; cannot delete");
@@ -210,7 +220,11 @@ export class Flag {
    * The *builtRule* object must include an `environment` key.
    * Call {@link save} to persist.
    *
-   * Returns *this* for chaining.
+   * @param builtRule - The object produced by
+   *   `new Rule(..., { environment }).when(...).serve(...)`. Must include an
+   *   `environment` key naming the target environment.
+   * @returns This flag, so calls can be chained.
+   * @throws {@link Error} The *builtRule* object has no `environment` key.
    */
   addRule(builtRule: Record<string, any>): this {
     const envKey = builtRule.environment as string | undefined;
@@ -235,6 +249,9 @@ export class Flag {
    *
    * With `environment` set scopes to that single environment; without,
    * enables rules in every environment configured on this flag.
+   *
+   * @param options.environment - Name of the environment to enable. When omitted,
+   *   enables rules in every environment configured on this flag.
    */
   enableRules(options: { environment?: string } = {}): void {
     const env = options.environment;
@@ -255,6 +272,9 @@ export class Flag {
    * disables rules in every environment configured on this flag. When
    * disabled, {@link Flag.get} skips rules and returns the env-specific
    * default (or the flag's base default).
+   *
+   * @param options.environment - Name of the environment to disable. When omitted,
+   *   disables rules in every environment configured on this flag.
    */
   disableRules(options: { environment?: string } = {}): void {
     const env = options.environment;
@@ -277,6 +297,10 @@ export class Flag {
    * rule matches.
    *
    * Call {@link save} to persist.
+   *
+   * @param value - The default value to serve.
+   * @param options.environment - Name of the environment whose default to set. When
+   *   omitted, sets the flag-level base default instead.
    */
   setDefault(value: unknown, options: { environment?: string } = {}): void {
     const env = options.environment;
@@ -293,6 +317,8 @@ export class Flag {
    *
    * After clearing, the environment falls back to the flag's base default
    * when no rule matches. Call {@link save} to persist.
+   *
+   * @param options.environment - Name of the environment whose default override to clear.
    */
   clearDefault(options: { environment: string }): void {
     const env = options.environment;
@@ -306,6 +332,9 @@ export class Flag {
    *
    * With `environment` set scopes to that single environment; without,
    * removes rules from every environment configured on this flag.
+   *
+   * @param options.environment - Name of the environment whose rules to remove. When
+   *   omitted, removes rules from every environment configured on this flag.
    */
   clearRules(options: { environment?: string } = {}): void {
     const env = options.environment;
@@ -319,7 +348,13 @@ export class Flag {
     }
   }
 
-  /** Append a constrained value. Returns `this` for chaining. */
+  /**
+   * Append a constrained value to the flag's values list.
+   *
+   * @param name - Human-readable label for the value entry.
+   * @param value - The value to allow the flag to serve.
+   * @returns This flag, so calls can be chained.
+   */
   addValue(name: string, value: unknown): this {
     if (this._values === null) {
       this._values = [];
@@ -328,7 +363,13 @@ export class Flag {
     return this;
   }
 
-  /** Remove the first values entry whose `value` field matches. Returns `this`. */
+  /**
+   * Remove the first values entry whose `value` field matches.
+   *
+   * @param value - The value to remove. Entries are matched on their `value` field;
+   *   the first match is removed and others are left in place.
+   * @returns This flag, so calls can be chained.
+   */
   removeValue(value: unknown): this {
     if (this._values === null) return this;
     this._values = this._values.filter((v) => v.value !== value);
@@ -344,7 +385,15 @@ export class Flag {
   // Runtime: evaluation
   // -------------------------------------------------------------------
 
-  /** Evaluate this flag and return its current value. */
+  /**
+   * Evaluate this flag and return its current value.
+   *
+   * @param options.context - Optional list of {@link Context} entities to evaluate
+   *   targeting rules against. When omitted, the registered context provider (if any)
+   *   is used.
+   * @returns The evaluated flag value, or this flag's default when no environment
+   *   override or rule applies.
+   */
   get(options?: { context?: Context[] }): unknown {
     if (this._client === null) {
       throw new Error("Flag was constructed without a client; cannot evaluate");
@@ -384,6 +433,15 @@ export class Flag {
 
 /** A boolean flag — .get() returns boolean. */
 export class BooleanFlag extends Flag {
+  /**
+   * Evaluate this flag and return its current boolean value.
+   *
+   * @param options.context - Optional list of {@link Context} entities to evaluate
+   *   targeting rules against. When omitted, the registered context provider (if any)
+   *   is used.
+   * @returns The evaluated boolean value, or this flag's default when no environment
+   *   override or rule applies (or the evaluated value is not a boolean).
+   */
   override get(options?: { context?: Context[] }): boolean {
     const value = super.get(options);
     return typeof value === "boolean" ? value : (this.default as boolean);
@@ -392,6 +450,15 @@ export class BooleanFlag extends Flag {
 
 /** A string flag — .get() returns string. */
 export class StringFlag extends Flag {
+  /**
+   * Evaluate this flag and return its current string value.
+   *
+   * @param options.context - Optional list of {@link Context} entities to evaluate
+   *   targeting rules against. When omitted, the registered context provider (if any)
+   *   is used.
+   * @returns The evaluated string value, or this flag's default when no environment
+   *   override or rule applies (or the evaluated value is not a string).
+   */
   override get(options?: { context?: Context[] }): string {
     const value = super.get(options);
     return typeof value === "string" ? value : (this.default as string);
@@ -400,6 +467,15 @@ export class StringFlag extends Flag {
 
 /** A numeric flag — .get() returns number. */
 export class NumberFlag extends Flag {
+  /**
+   * Evaluate this flag and return its current numeric value.
+   *
+   * @param options.context - Optional list of {@link Context} entities to evaluate
+   *   targeting rules against. When omitted, the registered context provider (if any)
+   *   is used.
+   * @returns The evaluated numeric value, or this flag's default when no environment
+   *   override or rule applies (or the evaluated value is not a number).
+   */
   override get(options?: { context?: Context[] }): number {
     const value = super.get(options);
     return typeof value === "number" && !Number.isNaN(value) ? value : (this.default as number);
@@ -408,6 +484,15 @@ export class NumberFlag extends Flag {
 
 /** A JSON flag — .get() returns object. */
 export class JsonFlag extends Flag {
+  /**
+   * Evaluate this flag and return its current JSON value.
+   *
+   * @param options.context - Optional list of {@link Context} entities to evaluate
+   *   targeting rules against. When omitted, the registered context provider (if any)
+   *   is used.
+   * @returns The evaluated JSON object, or this flag's default when no environment
+   *   override or rule applies (or the evaluated value is not an object).
+   */
   override get(options?: { context?: Context[] }): Record<string, unknown> {
     const value = super.get(options);
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {

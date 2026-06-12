@@ -69,7 +69,10 @@ export class Environment {
     this.updatedAt = fields.updatedAt ?? null;
   }
 
-  /** The environment color, or `null`. Accepts `Color | string | null` on assignment. */
+  /**
+   * Accent color for the environment, or `null` when none is set. Accepts a
+   * {@link Color}, a CSS hex string, or `null` on assignment.
+   */
   get color(): Color | null {
     return this._color;
   }
@@ -110,6 +113,12 @@ export class Environment {
     this.updatedAt = other.updatedAt;
   }
 
+  /**
+   * A debug string identifying this environment by id, name, and
+   * classification.
+   *
+   * @returns A human-readable representation of this environment.
+   */
   toString(): string {
     return `Environment(id=${this.id}, name=${this.name}, classification=${this.classification})`;
   }
@@ -179,6 +188,11 @@ export class Service {
     this.updatedAt = other.updatedAt;
   }
 
+  /**
+   * A debug string identifying this service by id and name.
+   *
+   * @returns A human-readable representation of this service.
+   */
   toString(): string {
     return `Service(id=${this.id}, name=${this.name})`;
   }
@@ -197,7 +211,9 @@ export class ContextType {
   name: string;
   /** Known attribute keys with metadata objects. */
   attributes: Record<string, Record<string, any>>;
+  /** When the context type was created. */
   createdAt: string | null;
+  /** When the context type was last updated. */
   updatedAt: string | null;
 
   /** @internal */
@@ -222,23 +238,41 @@ export class ContextType {
     this.updatedAt = fields.updatedAt ?? null;
   }
 
-  /** Add a known-attribute slot. Local; call {@link save} to persist. */
+  /**
+   * Add a known-attribute slot. Local-only; call {@link save} to persist.
+   *
+   * @param name - Attribute name to declare on this context type.
+   * @param metadata - Arbitrary metadata stored for the attribute slot.
+   */
   addAttribute(name: string, metadata: Record<string, any> = {}): void {
     this.attributes = { ...this.attributes, [name]: metadata };
   }
 
-  /** Remove a known-attribute slot. Local; call {@link save} to persist. */
+  /**
+   * Remove a known-attribute slot. Local-only; call {@link save} to persist.
+   *
+   * @param name - Attribute name to remove. A no-op if the attribute is not
+   *   declared on this context type.
+   */
   removeAttribute(name: string): void {
     const attrs = { ...this.attributes };
     delete attrs[name];
     this.attributes = attrs;
   }
 
-  /** Replace a known-attribute slot's metadata. Local; call {@link save} to persist. */
+  /**
+   * Replace a known-attribute slot's metadata. Local-only; call {@link save} to
+   * persist.
+   *
+   * @param name - Attribute name whose metadata to replace.
+   * @param metadata - New metadata for the attribute slot, replacing any
+   *   existing metadata.
+   */
   updateAttribute(name: string, metadata: Record<string, any>): void {
     this.attributes = { ...this.attributes, [name]: metadata };
   }
 
+  /** Create or update this context type on the server. */
   async save(): Promise<void> {
     if (this._client === null) {
       throw new Error("ContextType was constructed without a client; cannot save");
@@ -269,6 +303,11 @@ export class ContextType {
     this.updatedAt = other.updatedAt;
   }
 
+  /**
+   * A debug string identifying this context type by id and name.
+   *
+   * @returns A human-readable representation of this context type.
+   */
   toString(): string {
     return `ContextType(id=${this.id}, name=${this.name})`;
   }

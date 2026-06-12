@@ -106,22 +106,42 @@ export class LiveConfigProxy {
     return this._client._getCachedConfig(this._key) ?? {};
   }
 
-  /** Dict method: list of resolved item keys. */
+  /**
+   * Dict method: list of resolved item keys.
+   *
+   * @returns The current resolved item keys.
+   */
   keys(): string[] {
     return Object.keys(this._currentValues());
   }
 
-  /** Dict method: list of resolved item values. */
+  /**
+   * Dict method: list of resolved item values.
+   *
+   * @returns The current resolved item values.
+   */
   values(): unknown[] {
     return Object.values(this._currentValues());
   }
 
-  /** Dict method: list of `[key, value]` pairs. */
+  /**
+   * Dict method: list of `[key, value]` pairs.
+   *
+   * @returns The current resolved items as `[key, value]` pairs.
+   */
   items(): Array<[string, unknown]> {
     return Object.entries(this._currentValues());
   }
 
-  /** Dict method: get a value by key, returning `defaultValue` if absent. */
+  /**
+   * Dict method: get a value by key, returning `defaultValue` if absent.
+   *
+   * @param key - The config item key to read.
+   * @param defaultValue - Value returned when `key` is not present. Defaults to
+   *   `undefined`.
+   * @returns The current resolved value for `key`, or `defaultValue` if the key
+   *   is absent.
+   */
   get<V = unknown>(key: string, defaultValue?: V): V | unknown {
     const values = this._currentValues();
     return key in values ? values[key] : defaultValue;

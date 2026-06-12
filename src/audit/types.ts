@@ -159,8 +159,8 @@ export interface CreateEventInput {
 
 /**
  * Parameters accepted by `client.audit.events.list(...)`. Cursor
- * paginated per ADR-014; pass {@link pageAfter} from the prior page's
- * `nextCursor` to walk forward.
+ * paginated; pass {@link pageAfter} from the prior page's `nextCursor` to
+ * walk forward.
  */
 export interface ListEventsParams {
   /** Filter to this event type slug. */
@@ -173,8 +173,15 @@ export interface ListEventsParams {
   actorType?: string;
   /** Filter to this actor id. Matched as a literal string against whatever the recording call stored. */
   actorId?: string;
-  /** Range notation per ADR-014, e.g. `"[2026-01-01T00:00:00Z,*)"`. */
+  /** Range notation, e.g. `"[2026-01-01T00:00:00Z,*)"`. */
   occurredAtRange?: string;
+  /**
+   * Optional free-text filter — returns only events whose `resourceId` or
+   * `description` contains it as a case-insensitive substring. Must be scoped
+   * (combine with `occurredAtRange`, or with both `resourceType` and
+   * `resourceId`) or the request is rejected. Omit to disable text filtering.
+   */
+  search?: string;
   /**
    * Scope the read to a set of environments: pass a list of environment
    * keys and/or the reserved `"smplkit"` control-plane bucket; the values
@@ -210,10 +217,9 @@ export interface ListEventsPage {
  * A distinct resource_type slug seen for the account.
  *
  * The `id` and `resourceType` fields are the same value — JSON:API
- * surfaces the customer-facing key as the resource id (ADR-014 "key as
- * id"). The duplication keeps SDK consumers from having to dig into the
- * id field when filtering UI controls; pick whichever name reads better
- * in context.
+ * surfaces the customer-facing key as the resource id. The duplication
+ * keeps SDK consumers from having to dig into the id field when filtering
+ * UI controls; pick whichever name reads better in context.
  */
 export interface ResourceType {
   /** The resource-type slug, surfaced as the JSON:API resource id. */
@@ -324,10 +330,10 @@ export interface EventTypeListPage {
  * A distinct `category` value seen for the account.
  *
  * Same shape as {@link ResourceType} and {@link EventType} — `id` and
- * `category` are the same value, surfaced as the JSON:API resource id
- * (ADR-014 "key as id"). The duplication keeps SDK consumers from having
- * to dig into the `id` field when populating filter UI controls; pick
- * whichever name reads better in context.
+ * `category` are the same value, surfaced as the JSON:API resource id. The
+ * duplication keeps SDK consumers from having to dig into the `id` field
+ * when populating filter UI controls; pick whichever name reads better in
+ * context.
  */
 export interface Category {
   /** The category value, surfaced as the JSON:API resource id. */
@@ -382,8 +388,8 @@ export interface HttpHeader {
   /** Header name (e.g. `"Authorization"`, `"DD-API-KEY"`). */
   name: string;
   /**
-   * Header value, plaintext on writes. The audit service encrypts values
-   * at rest; reads return them as `"<redacted>"`.
+   * Header value. Returned in plaintext on reads, so a get-mutate-put
+   * round-trip preserves it without re-entering secrets.
    */
   value: string;
 }
@@ -391,15 +397,14 @@ export interface HttpHeader {
 /**
  * Supported SIEM forwarder destination types.
  *
- * The audit service's OpenAPI spec declares `forwarder_type` as a
- * string-with-enum-constraint (per ADR-047 §2.12, refined by ADR-050);
- * this TypeScript-side enum mirrors that constraint so customers get
- * autocomplete and type-checked values instead of stringly-typed inputs.
+ * The audit service declares `forwarder_type` as a string with an enum
+ * constraint; this TypeScript-side enum mirrors that constraint so customers
+ * get autocomplete and type-checked values instead of stringly-typed inputs.
  *
- * The available types are real-time HTTP destinations sharing one
- * outbound plumbing path. Object-storage archival (S3, GCS, etc.) has
- * different operational shape (batching, IAM, lifecycle policies) and
- * will get its own type if customer demand warrants — see ADR-047 §2.12.
+ * The available types are real-time HTTP destinations sharing one outbound
+ * delivery path. Object-storage archival (S3, GCS, etc.) has a different
+ * operational shape (batching, IAM, lifecycle policies) and may get its own
+ * type if customer demand warrants.
  */
 export enum ForwarderType {
   DATADOG = "datadog",
@@ -444,8 +449,9 @@ export class HttpConfiguration {
   /** Destination URL the audit service POSTs each event to. */
   url: string;
   /**
-   * Headers attached to every outbound request. Values carry credentials
-   * and are encrypted at rest server-side; reads return them redacted.
+   * Headers attached to every outbound request. Values often carry
+   * credentials and are returned in plaintext on reads, so a get-mutate-put
+   * round-trip preserves them without re-entering secrets.
    */
   headers: HttpHeader[];
   /**
@@ -505,9 +511,9 @@ export class ForwarderEnvironment {
    * Optional per-environment destination configuration that fully replaces
    * the forwarder's base {@link Forwarder.configuration} for this
    * environment. `null` (the default) inherits the base configuration. As
-   * with the base configuration, header values are plaintext on writes and
-   * returned redacted on reads — re-supply real values before
-   * {@link Forwarder.save}.
+   * with the base configuration, header values are returned in plaintext on
+   * reads, so a get-mutate-put round-trip preserves them without re-entering
+   * secrets.
    */
   configuration: HttpConfiguration | null;
 
@@ -522,10 +528,9 @@ export class ForwarderEnvironment {
  *
  * Active-record style: mutate fields directly and call {@link save} to
  * persist, or {@link delete} to remove. Header values in
- * `configuration.headers` are always returned redacted on reads — the GET
- * path on the audit API replaces every header value with `"<redacted>"`.
- * Re-supply the real values before calling {@link save} (the SDK does not
- * cache them client-side).
+ * `configuration.headers` are returned in plaintext on reads, so fetching a
+ * forwarder, mutating it, and calling {@link save} preserves its header
+ * values without re-entering secrets.
  */
 export class Forwarder {
   /**
@@ -593,7 +598,7 @@ export class Forwarder {
   createdAt: string | null;
   /** When this forwarder was last mutated. */
   updatedAt: string | null;
-  /** Soft-delete timestamp. `null` for live forwarders. */
+  /** Deletion timestamp; `null` for live forwarders. */
   deletedAt: string | null;
   /** Monotonic version counter; bumped on every server-side write. */
   version: number | null;
@@ -601,6 +606,7 @@ export class Forwarder {
   /** @internal */
   _client: ForwarderModelClient | null;
 
+  /** @internal */
   constructor(
     client: ForwarderModelClient | null,
     fields: {
@@ -662,7 +668,7 @@ export class Forwarder {
     this._apply(other);
   }
 
-  /** Soft-delete this forwarder on the server. */
+  /** Delete this forwarder on the server. */
   async delete(): Promise<void> {
     if (this._client === null || this.id === null) {
       throw new Error("Forwarder was constructed without a client or id; cannot delete");

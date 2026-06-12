@@ -29,6 +29,7 @@ export interface PostOutcome {
 
 export type PostFn = (item: PendingItem) => Promise<PostOutcome>;
 
+/** @internal */
 export class AuditEventBuffer {
   private readonly _queue: PendingItem[] = [];
   private readonly _post: PostFn;

@@ -19,10 +19,10 @@
  * a background buffer and returns without awaiting), which is the correct
  * shape for the hot path.
  *
- * By default `record` enqueues onto an in-memory bounded buffer
- * ({@link AuditEventBuffer}) and returns immediately; the buffer retries
- * with exponential backoff on transient failures and drops the oldest item
- * under back pressure. Pass `flush: true` when the caller needs the event
+ * By default `record` enqueues onto an in-memory bounded buffer and returns
+ * immediately; the buffer retries with exponential backoff on transient
+ * failures and drops the oldest item under back pressure. Pass `flush: true`
+ * when the caller needs the event
  * durable before continuing — typically in CLI tools, in-test assertions,
  * or any flow about to terminate the process.
  *
@@ -42,7 +42,7 @@ import {
   SmplkitTimeoutError,
   throwForStatus,
 } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import {
   Forwarder,
@@ -57,7 +57,6 @@ import {
   type CreateEventInput,
   type EventType,
   type EventTypeListPage,
-  type ForwarderModelClient,
   type HttpHeader,
   type ListCategoriesParams,
   type ListEventTypesParams,
@@ -355,7 +354,7 @@ function _forwarderAttrs(forwarder: Forwarder): GenForwarder {
 
 function _forwarderFromResource(
   resource: { id: string; attributes: Record<string, unknown> },
-  client: ForwarderModelClient,
+  client: ForwardersClient,
 ): Forwarder {
   const a = resource.attributes;
   return new Forwarder(client, {
@@ -387,6 +386,7 @@ function _forwarderFromResource(
 
 /** Surface for `client.audit.events.*`. */
 class EventsClient {
+  /** @internal */
   constructor(
     private readonly _http: AuditHttp,
     private readonly _buffer: AuditEventBuffer,
@@ -420,6 +420,13 @@ class EventsClient {
    * cursor (`pageAfter`); the returned page exposes `nextCursor` if more
    * pages are available.
    *
+   * `search` is an optional free-text filter: pass a string to return only
+   * events whose `resourceId` or `description` contains it as a
+   * case-insensitive substring; omit it (the default) to disable text
+   * filtering. A `search` filter must be scoped — combine it with
+   * `occurredAtRange`, or with both `resourceType` and `resourceId` — or the
+   * request is rejected.
+   *
    * `environments` scopes the read to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
    * bucket; the values are sent comma-separated as `filter[environment]`.
@@ -435,6 +442,7 @@ class EventsClient {
     if (params.actorType !== undefined) query["filter[actor_type]"] = params.actorType;
     if (params.actorId !== undefined) query["filter[actor_id]"] = params.actorId;
     if (params.occurredAtRange !== undefined) query["filter[occurred_at]"] = params.occurredAtRange;
+    if (params.search !== undefined) query["filter[search]"] = params.search;
     const environments = _joinEnvironments(params.environments);
     if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
@@ -499,9 +507,8 @@ class ResourceTypesClient {
   /**
    * List the distinct `resource_type` slugs seen in the account.
    *
-   * Backed by a maintain-by-write side table (ADR-047 §2.5), so the
-   * response time is independent of how many years of events the account
-   * has accumulated. Sorted alphabetically; offset paginated per ADR-014.
+   * Response time is independent of how many years of events the account
+   * has accumulated. Sorted alphabetically; offset paginated.
    *
    * `environments` scopes the listing to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
@@ -555,7 +562,8 @@ class EventTypesClient {
    * bucket; the values are sent comma-separated as `filter[environment]`.
    * Omit it (the default) to leave the param off entirely.
    *
-   * ADR-047 §2.5. Sorted alphabetically; offset paginated per ADR-014.
+   * Response time is independent of how many years of events the account
+   * has accumulated. Sorted alphabetically; offset paginated.
    */
   async list(params: ListEventTypesParams = {}): Promise<EventTypeListPage> {
     const query: Record<string, string | number | boolean> = {};
@@ -595,9 +603,8 @@ class CategoriesClient {
   /**
    * List the distinct `category` values seen in the account.
    *
-   * Backed by a maintain-by-write side table (ADR-047 §2.5), so the
-   * response time is independent of how many years of events the account
-   * has accumulated. Sorted alphabetically; offset paginated per ADR-014.
+   * Response time is independent of how many years of events the account
+   * has accumulated. Sorted alphabetically; offset paginated.
    *
    * `environments` scopes the listing to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
@@ -634,7 +641,7 @@ class CategoriesClient {
 // ---------------------------------------------------------------------------
 
 /** Surface for `client.audit.forwarders.*` — active-record CRUD for SIEM forwarders. */
-class ForwardersClient implements ForwarderModelClient {
+class ForwardersClient {
   constructor(private readonly _http: AuditHttp) {}
 
   /**
@@ -652,9 +659,10 @@ class ForwardersClient implements ForwarderModelClient {
    *                               `ForwarderType.DATADOG`).
    * @param fields.configuration   Destination HTTP request configuration —
    *                               an {@link HttpConfiguration} instance.
-   *                               Headers carry credentials and are encrypted
-   *                               at rest server-side; reads return them
-   *                               redacted.
+   *                               Header values carry credentials and are
+   *                               returned in plaintext on reads, so a
+   *                               get-mutate-put round-trip preserves them
+   *                               without re-entering secrets.
    * @param fields.environments    Per-environment overrides keyed by
    *                               environment key (e.g. `"production"`). A
    *                               forwarder delivers in an environment only
@@ -731,7 +739,7 @@ class ForwardersClient implements ForwarderModelClient {
   /**
    * List forwarders for the authenticated account.
    *
-   * Offset paginated per ADR-014: pass `pageNumber` (1-based) and
+   * Offset paginated: pass `pageNumber` (1-based) and
    * `pageSize` (default 1000, max 1000). Pass `metaTotal: true` to populate
    * `total` and `totalPages` in the returned `pagination` (costs an extra
    * COUNT query server-side).
@@ -782,7 +790,11 @@ class ForwardersClient implements ForwarderModelClient {
     return _forwarderFromResource(data.data, this);
   }
 
-  /** Soft-delete a forwarder. */
+  /**
+   * Delete a forwarder.
+   *
+   * @param forwarderId - The id (key) of the forwarder to delete.
+   */
   async delete(forwarderId: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/forwarders/{forwarder_id}", {
@@ -829,9 +841,8 @@ class ForwardersClient implements ForwarderModelClient {
    * `Forwarder.save()` on instances with a `createdAt`; not intended for
    * direct use.
    *
-   * Header values must be re-supplied as plaintext; the GET path redacts
-   * them, so a PUT body containing `"<redacted>"` would persist that
-   * literal. Track real header values client-side and round-trip them.
+   * Header values are returned in plaintext on reads, so a get-mutate-put
+   * round-trip preserves them without re-entering secrets.
    */
   async _updateForwarder(forwarder: Forwarder): Promise<Forwarder> {
     if (forwarder.id === null) {
@@ -1052,7 +1063,7 @@ function resolveAuditCredentials(options: AuditClientOptions): { apiKey: string;
   if (options.apiKey !== undefined && options.baseUrl !== undefined) {
     return { apiKey: options.apiKey, baseUrl: options.baseUrl };
   }
-  const cfg = resolveManagementConfig(options);
+  const cfg = resolveClientConfig(options);
   return {
     apiKey: options.apiKey ?? cfg.apiKey,
     baseUrl: options.baseUrl ?? serviceUrl(cfg.scheme, "audit", cfg.baseDomain) ?? BASE_URL,

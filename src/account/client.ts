@@ -23,7 +23,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { SmplkitConnectionError, throwForStatus } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import { AccountSettings } from "./models.js";
 
 /**
@@ -38,7 +38,7 @@ function resolveAccountTarget(options: AccountClientOptions): {
   apiKey: string;
   headers: Record<string, string>;
 } {
-  const cfg = resolveManagementConfig(options);
+  const cfg = resolveClientConfig(options);
   const apiKey = options.apiKey ?? cfg.apiKey;
   const appUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "app", cfg.baseDomain);
   const headers: Record<string, string> = { ...(options.extraHeaders ?? {}) };
@@ -67,6 +67,12 @@ export class SettingsClient {
     };
   }
 
+  /**
+   * Fetch the authenticated account's current settings.
+   *
+   * @returns An {@link AccountSettings} active record. Mutate its fields and
+   *   call `save()` to persist the changes.
+   */
   async get(): Promise<AccountSettings> {
     const url = `${this._appBaseUrl}/api/v1/accounts/current/settings`;
     let resp: Response;

@@ -6,10 +6,8 @@
  * the public `close()` method, the request-timeout path, and the standalone
  * credential-resolution branch.
  *
- * Drives the one-client `AuditClient` (was `SmplManagementClient` +
- * `management/audit.ts` before the one-client refactor) with a per-instance
- * `fetch` override. Coverage target is 100% lines on src/audit/client.ts and
- * src/audit/types.ts.
+ * Drives the one-client `AuditClient` with a per-instance `fetch` override.
+ * Coverage target is 100% lines on src/audit/client.ts and src/audit/types.ts.
  */
 
 import { describe, expect, test, vi } from "vitest";
@@ -1160,7 +1158,7 @@ describe("AuditClient lifecycle and construction", () => {
 
   test("resolves baseUrl from baseDomain/scheme when baseUrl is omitted", async () => {
     // Omitting baseUrl drives the standalone branch through
-    // resolveManagementConfig + serviceUrl. apiKey is supplied so the
+    // resolveClientConfig + serviceUrl. apiKey is supplied so the
     // resolver doesn't depend on ~/.smplkit, and baseDomain/scheme make the
     // computed URL deterministic.
     const requests: Request[] = [];

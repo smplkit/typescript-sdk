@@ -52,6 +52,10 @@ export interface WinstonAdapterConfig {
 // WinstonAdapter
 // ---------------------------------------------------------------------------
 
+/**
+ * {@link LoggingAdapter} implementation that discovers and controls winston
+ * loggers.
+ */
 export class WinstonAdapter implements LoggingAdapter {
   readonly name = "winston";
 
@@ -59,6 +63,11 @@ export class WinstonAdapter implements LoggingAdapter {
   private _winston: any;
   private _originalAdd: ((...args: any[]) => any) | null = null;
 
+  /**
+   * @param config - Adapter configuration. See {@link WinstonAdapterConfig};
+   *   `discoverDefault` defaults to `true`. When omitted, the adapter requires
+   *   the installed `winston` module.
+   */
   constructor(config?: WinstonAdapterConfig) {
     this._discoverDefault = config?.discoverDefault ?? true;
 

@@ -7,11 +7,9 @@
  * single {@link JobsClient} exposes the full surface and is reachable as
  * `client.jobs` on {@link SmplClient} or constructed directly via
  * {@link JobsClient}.
- *
- * See ADR-049.
  */
 
 export { JobsClient, RunsClient } from "./client.js";
 export type { JobsClientOptions } from "./client.js";
 export { HttpConfig, HttpMethod, Job, Run, Usage } from "./types.js";
-export type { HttpHeader, JobModelClient, ListJobsParams, ListRunsParams } from "./types.js";
+export type { HttpHeader, ListJobsParams, ListRunsParams } from "./types.js";

@@ -53,6 +53,10 @@ export interface PinoAdapterConfig {
 // PinoAdapter
 // ---------------------------------------------------------------------------
 
+/**
+ * {@link LoggingAdapter} implementation that discovers and controls pino
+ * loggers.
+ */
 export class PinoAdapter implements LoggingAdapter {
   readonly name = "pino";
 
@@ -62,6 +66,11 @@ export class PinoAdapter implements LoggingAdapter {
   private _originalPino: ((...args: any[]) => any) | null = null;
   private _pinoModule: any;
 
+  /**
+   * @param config - Adapter configuration. See {@link PinoAdapterConfig};
+   *   `nameField` defaults to `"name"`. When omitted, the adapter requires the
+   *   installed `pino` module.
+   */
   constructor(config?: PinoAdapterConfig) {
     this._nameField = config?.nameField ?? "name";
 

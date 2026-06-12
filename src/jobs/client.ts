@@ -25,7 +25,7 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "../generated/jobs.d.ts";
 import { SmplError, SmplConnectionError, throwForStatus } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import {
   HttpConfig,
   HttpMethod,
@@ -33,7 +33,6 @@ import {
   Run,
   Usage,
   type HttpHeader,
-  type JobModelClient,
   type ListJobsParams,
   type ListRunsParams,
 } from "./types.js";
@@ -127,7 +126,7 @@ function _jobAttrs(job: Job): GenJob {
 
 function _jobFromResource(
   resource: { id: string; attributes: Record<string, unknown> },
-  client: JobModelClient,
+  client: JobsClient,
 ): Job {
   const a = resource.attributes;
   return new Job(client, {
@@ -156,6 +155,17 @@ export class RunsClient {
   /** @internal */
   constructor(private readonly _http: JobsHttp) {}
 
+  /**
+   * List past runs, most recent first.
+   *
+   * @param params.job - Return only runs of the job with this id. Omit to
+   *   list runs across all jobs in the account.
+   * @param params.pageSize - Maximum number of runs to return in this page.
+   *   Omit to use the server default.
+   * @param params.after - Opaque cursor from a previous page; returns the runs
+   *   that follow it. Omit to start from the first page.
+   * @returns The runs in this page.
+   */
   async list(params: ListRunsParams = {}): Promise<Run[]> {
     const query: Record<string, string | number> = {};
     if (params.job !== undefined) query["filter[job]"] = params.job;
@@ -177,14 +187,32 @@ export class RunsClient {
     );
   }
 
+  /**
+   * Fetch a single run by its id.
+   *
+   * @param runId - Identifier of the run to fetch.
+   * @returns The matching run.
+   */
   async get(runId: string): Promise<Run> {
     return this._runAction("GET", "/api/v1/runs/{run_id}", runId);
   }
 
+  /**
+   * Cancel a run that has not finished yet.
+   *
+   * @param runId - Identifier of the run to cancel.
+   * @returns The updated run reflecting the cancellation.
+   */
   async cancel(runId: string): Promise<Run> {
     return this._runAction("POST", "/api/v1/runs/{run_id}/actions/cancel", runId);
   }
 
+  /**
+   * Start a new run that repeats a previous one.
+   *
+   * @param runId - Identifier of the run to repeat.
+   * @returns The new run, with `rerunOf` set to `runId`.
+   */
   async rerun(runId: string): Promise<Run> {
     return this._runAction("POST", "/api/v1/runs/{run_id}/actions/rerun", runId);
   }
@@ -262,7 +290,7 @@ export interface JobsClientOptions {
  * (`runs`), and usage (`usage`) — lives on this one class. Jobs installs no
  * in-process machinery, so there is no live connection and no install step.
  */
-export class JobsClient implements JobModelClient {
+export class JobsClient {
   /** @internal */
   private readonly _http: JobsHttp;
   /** @internal */
@@ -276,7 +304,7 @@ export class JobsClient implements JobModelClient {
       this._http = options.transport;
       this._ownsTransport = false;
     } else {
-      const cfg = resolveManagementConfig(options);
+      const cfg = resolveClientConfig(options);
       const jobsUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "jobs", cfg.baseDomain);
       this._http = createClient<paths>({
         baseUrl: jobsUrl.replace(/\/+$/, ""),
@@ -298,6 +326,21 @@ export class JobsClient implements JobModelClient {
    * @param id - Caller-supplied unique identifier for the job. Unique within
    *   the account and immutable; the service returns 409 if another live job
    *   already uses this id.
+   * @param fields.name - Human-readable name for the job.
+   * @param fields.schedule - When the job runs. One of: a 5-field cron
+   *   expression evaluated in UTC (recurring), an ISO-8601 datetime (a one-off
+   *   run at that instant), or the literal `"now"` (run once, as soon as
+   *   possible). A datetime or `"now"` job disables itself after it fires.
+   * @param fields.configuration - The HTTP request the job sends each time it
+   *   fires.
+   * @param fields.description - Free-text description for the job. Defaults to
+   *   none.
+   * @param fields.enabled - Whether the job schedules runs. Set to `false` to
+   *   pause it without deleting. Defaults to `true`.
+   * @param fields.concurrencyPolicy - How overlapping runs are handled.
+   *   `"ALLOW"` (the default and only value today) permits a new run to start
+   *   while a previous one is still in flight.
+   * @returns An unsaved {@link Job} bound to this client.
    */
   new(
     id: string,
@@ -321,6 +364,16 @@ export class JobsClient implements JobModelClient {
     });
   }
 
+  /**
+   * List jobs in the account.
+   *
+   * @param params.enabled - Return only jobs with this enabled state. Omit to
+   *   list both enabled and paused jobs.
+   * @param params.pageNumber - 1-based page to return. Omit for the first page.
+   * @param params.pageSize - Maximum number of jobs to return in this page.
+   *   Omit to use the server default.
+   * @returns The jobs in this page.
+   */
   async list(params: ListJobsParams = {}): Promise<Job[]> {
     const query: Record<string, string | number | boolean> = {};
     if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
@@ -342,6 +395,12 @@ export class JobsClient implements JobModelClient {
     );
   }
 
+  /**
+   * Fetch a single job by its id.
+   *
+   * @param id - Identifier of the job to fetch.
+   * @returns The matching {@link Job}.
+   */
   async get(id: string): Promise<Job> {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
@@ -357,6 +416,11 @@ export class JobsClient implements JobModelClient {
     return _jobFromResource(data.data, this);
   }
 
+  /**
+   * Delete a job by its id.
+   *
+   * @param id - Identifier of the job to delete.
+   */
   async delete(id: string): Promise<void> {
     try {
       const result = await this._http.DELETE("/api/v1/jobs/{job_id}", {
@@ -368,7 +432,17 @@ export class JobsClient implements JobModelClient {
     }
   }
 
-  /** Trigger one immediate `MANUAL` run of the job. */
+  /**
+   * Trigger one immediate, manual run of a job, ignoring its schedule.
+   *
+   * This starts an ad-hoc run right now in addition to any scheduled runs; it
+   * does not alter the job's schedule. To read or act on existing runs, use
+   * `jobs.runs`.
+   *
+   * @param id - Identifier of the job to run.
+   * @returns The {@link Run} that was started, with `trigger` set to
+   *   `"MANUAL"`.
+   */
   async run(id: string): Promise<Run> {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
@@ -384,7 +458,12 @@ export class JobsClient implements JobModelClient {
     return _runFromResource(data.data);
   }
 
-  /** Current-period usage counters for the account. */
+  /**
+   * Report current-period usage against the account's plan allotments.
+   *
+   * @returns A {@link Usage} snapshot with runs used/included and active-job
+   *   counts for the current period.
+   */
   async usage(): Promise<Usage> {
     let data: { data: { attributes: Record<string, unknown> } } | undefined;
     try {

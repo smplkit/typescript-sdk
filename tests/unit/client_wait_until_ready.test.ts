@@ -20,13 +20,13 @@ describe("SmplClient.waitUntilReady", () => {
   const originalKey = process.env.SMPLKIT_API_KEY;
   const originalEnv = process.env.SMPLKIT_ENVIRONMENT;
   const originalSvc = process.env.SMPLKIT_SERVICE;
-  const originalDisable = process.env.SMPLKIT_DISABLE_TELEMETRY;
+  const originalTelemetry = process.env.SMPLKIT_TELEMETRY;
 
   beforeEach(() => {
     process.env.SMPLKIT_API_KEY = "sk_test_wait_until_ready";
     process.env.SMPLKIT_ENVIRONMENT = "production";
     process.env.SMPLKIT_SERVICE = "test-service";
-    process.env.SMPLKIT_DISABLE_TELEMETRY = "true";
+    process.env.SMPLKIT_TELEMETRY = "false";
   });
 
   afterEach(() => {
@@ -36,8 +36,8 @@ describe("SmplClient.waitUntilReady", () => {
     else process.env.SMPLKIT_ENVIRONMENT = originalEnv;
     if (originalSvc === undefined) delete process.env.SMPLKIT_SERVICE;
     else process.env.SMPLKIT_SERVICE = originalSvc;
-    if (originalDisable === undefined) delete process.env.SMPLKIT_DISABLE_TELEMETRY;
-    else process.env.SMPLKIT_DISABLE_TELEMETRY = originalDisable;
+    if (originalTelemetry === undefined) delete process.env.SMPLKIT_TELEMETRY;
+    else process.env.SMPLKIT_TELEMETRY = originalTelemetry;
   });
 
   it("awaits flags + config connect and resolves when the WS reports connected", async () => {
@@ -112,14 +112,14 @@ describe("SmplClient shared context buffer", () => {
     process.env.SMPLKIT_API_KEY = "sk_test_buffer";
     process.env.SMPLKIT_ENVIRONMENT = "production";
     process.env.SMPLKIT_SERVICE = "test-service";
-    process.env.SMPLKIT_DISABLE_TELEMETRY = "true";
+    process.env.SMPLKIT_TELEMETRY = "false";
   });
 
   afterEach(() => {
     delete process.env.SMPLKIT_API_KEY;
     delete process.env.SMPLKIT_ENVIRONMENT;
     delete process.env.SMPLKIT_SERVICE;
-    delete process.env.SMPLKIT_DISABLE_TELEMETRY;
+    delete process.env.SMPLKIT_TELEMETRY;
   });
 
   it("flags borrows platform.contexts as its evaluation-context registration seam", () => {

@@ -1,5 +1,6 @@
 /**
- * Level resolution algorithm per ADR-034 §3.1.
+ * Level resolution algorithm: pick a logger's effective level from its own
+ * override, its group, its dot-notation ancestors, and the system default.
  *
  * Pure functions — no I/O, no SDK state — kept separate so the chain can
  * be tested exhaustively without spinning up a runtime client.

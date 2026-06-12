@@ -402,7 +402,7 @@ describe("SmplClient", () => {
   });
 
   it("close() with telemetry enabled closes the metrics reporter", () => {
-    const client = new SmplClient({ ...DEFAULT_OPTS, disableTelemetry: false });
+    const client = new SmplClient({ ...DEFAULT_OPTS, telemetry: true });
     const metrics = (client as unknown as { _metrics: { close: () => void } | null })._metrics;
     expect(metrics).not.toBeNull();
     const metricsClose = vi.spyOn(metrics!, "close");
@@ -411,7 +411,7 @@ describe("SmplClient", () => {
   });
 
   it("does not build a metrics reporter when telemetry is disabled", () => {
-    const client = new SmplClient({ ...DEFAULT_OPTS, disableTelemetry: true });
+    const client = new SmplClient({ ...DEFAULT_OPTS, telemetry: false });
     expect((client as unknown as { _metrics: unknown })._metrics).toBeNull();
     client.close();
   });

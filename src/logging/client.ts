@@ -4,8 +4,8 @@
  * Smpl Logging has two surfaces on a single client, mirroring how the config,
  * flags, audit, and jobs clients expose their full surface from one class:
  *
- * - **Management surface** — works immediately, no {@link LoggingClient.install}
- *   required. Two sub-clients (the audit pattern):
+ * - **CRUD surface** — works without {@link LoggingClient.install}. Two
+ *   sub-clients (the audit pattern):
  *
  *   - `client.logging.loggers` — logger CRUD + discovery: `new` / `list` /
  *     `get` / `delete` plus `register` / `flush` / `pendingCount`.
@@ -50,7 +50,7 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveManagementConfig, serviceUrl } from "../config.js";
+import { resolveClientConfig, serviceUrl } from "../config.js";
 import { Logger, LogGroup } from "./models.js";
 import { LogLevel, LoggerChangeEvent, LoggerSource, loggerEnvironmentsToWire } from "./types.js";
 import { resolveLevel, type GroupCacheEntry, type LoggerCacheEntry } from "./_resolution.js";
@@ -319,7 +319,18 @@ export class LoggersClient {
     private readonly _buffer: LoggerRegistrationBuffer,
   ) {}
 
-  /** Buffer logger sources for registration; optionally flush immediately. */
+  /**
+   * Queue one or more logger sources for registration with the server.
+   *
+   * Sources are buffered locally and sent in a batch. The batch is sent
+   * automatically once enough sources accumulate; pass `flush: true` to
+   * send the current batch right away instead of waiting.
+   *
+   * @param items - A single logger source, or an array of them, to queue.
+   * @param options - Registration options.
+   * @param options.flush - When `true`, send the buffered sources immediately
+   *   rather than waiting for the batch to fill.
+   */
   async register(
     items: LoggerSource | LoggerSource[],
     options: { flush?: boolean } = {},
@@ -343,7 +354,12 @@ export class LoggersClient {
     }
   }
 
-  /** Drain the buffer and POST pending logger sources to the bulk endpoint. */
+  /**
+   * Drain the buffer and POST pending logger sources to the bulk endpoint.
+   *
+   * @returns A promise that resolves once the pending batch has been sent
+   *   (or immediately when there is nothing buffered).
+   */
   async flush(): Promise<void> {
     const batch = this._buffer.drain();
     if (batch.length === 0) return;
@@ -359,7 +375,19 @@ export class LoggersClient {
     return this._buffer.pendingCount;
   }
 
-  /** Return a new unsaved {@link Logger}. Call {@link Logger.save} to persist. */
+  /**
+   * Build a new unsaved logger.
+   *
+   * The returned {@link Logger} is local only; call its {@link Logger.save}
+   * to persist it.
+   *
+   * @param id - Identifier for the logger (its normalized name).
+   * @param options - Logger options.
+   * @param options.managed - When `true` (the default), smplkit controls this
+   *   logger's level at runtime. Set `false` to register the logger for
+   *   visibility without taking over its level.
+   * @returns An unsaved {@link Logger} bound to this client.
+   */
   new(id: string, options: { managed?: boolean } = {}): Logger {
     return new Logger(this, {
       id,
@@ -374,7 +402,16 @@ export class LoggersClient {
     });
   }
 
-  /** List loggers for the authenticated account. */
+  /**
+   * List loggers for the authenticated account.
+   *
+   * @param params - Pagination parameters.
+   * @param params.pageNumber - 1-based page index to fetch. When omitted, the
+   *   server returns the first page.
+   * @param params.pageSize - Maximum number of loggers per page. When omitted,
+   *   the server applies its default page size.
+   * @returns The loggers on the requested page as {@link Logger} objects.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<Logger[]> {
     const query: Record<string, number> = {};
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
@@ -393,7 +430,13 @@ export class LoggersClient {
     return data.data.map((r) => resourceToLogger(r, this));
   }
 
-  /** Fetch the editable {@link Logger} resource by id. */
+  /**
+   * Fetch a single logger by id.
+   *
+   * @param id - Identifier of the logger to fetch.
+   * @returns The editable {@link Logger} resource.
+   * @throws {@link SmplkitNotFoundError} If no logger with that id exists.
+   */
   async get(id: string): Promise<Logger> {
     let data: components["schemas"]["LoggerResponse"] | undefined;
     try {
@@ -411,7 +454,11 @@ export class LoggersClient {
     return resourceToLogger(data.data, this);
   }
 
-  /** Delete a logger by id. */
+  /**
+   * Delete a logger by id.
+   *
+   * @param id - Identifier of the logger to delete.
+   */
   async delete(id: string): Promise<void> {
     return this._deleteLogger(id);
   }
@@ -460,7 +507,20 @@ export class LogGroupsClient {
   /** @internal */
   constructor(private readonly _http: LoggingHttp) {}
 
-  /** Return a new unsaved {@link LogGroup}. Call {@link LogGroup.save} to persist. */
+  /**
+   * Build a new unsaved log group.
+   *
+   * The returned {@link LogGroup} is local only; call its
+   * {@link LogGroup.save} to persist it.
+   *
+   * @param id - Identifier for the log group.
+   * @param options - Log-group options.
+   * @param options.name - Human-readable display name. Defaults to a
+   *   title-cased version of `id` when omitted.
+   * @param options.group - Identifier of the parent log group, when nesting
+   *   groups. Omit for a top-level group.
+   * @returns An unsaved {@link LogGroup} bound to this client.
+   */
   new(id: string, options: { name?: string; group?: string } = {}): LogGroup {
     return new LogGroup(this, {
       id,
@@ -473,7 +533,16 @@ export class LogGroupsClient {
     });
   }
 
-  /** List log groups for the authenticated account. */
+  /**
+   * List log groups for the authenticated account.
+   *
+   * @param params - Pagination parameters.
+   * @param params.pageNumber - 1-based page index to fetch. When omitted, the
+   *   server returns the first page.
+   * @param params.pageSize - Maximum number of log groups per page. When
+   *   omitted, the server applies its default page size.
+   * @returns The log groups on the requested page as {@link LogGroup} objects.
+   */
   async list(params: { pageNumber?: number; pageSize?: number } = {}): Promise<LogGroup[]> {
     const query: Record<string, number> = {};
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
@@ -492,7 +561,13 @@ export class LogGroupsClient {
     return data.data.map((r) => resourceToLogGroup(r, this));
   }
 
-  /** Fetch the editable {@link LogGroup} resource by id. */
+  /**
+   * Fetch a single log group by id.
+   *
+   * @param id - Identifier of the log group to fetch.
+   * @returns The editable {@link LogGroup} resource.
+   * @throws {@link SmplkitNotFoundError} If no log group with that id exists.
+   */
   async get(id: string): Promise<LogGroup> {
     let data: components["schemas"]["LogGroupResponse"] | undefined;
     try {
@@ -510,7 +585,11 @@ export class LogGroupsClient {
     return resourceToLogGroup(data.data, this);
   }
 
-  /** Delete a log group by id. */
+  /**
+   * Delete a log group by id.
+   *
+   * @param id - Identifier of the log group to delete.
+   */
   async delete(id: string): Promise<void> {
     return this._deleteGroup(id);
   }
@@ -631,11 +710,11 @@ export interface LoggingClientOptions {
  * await logging.install();
  * ```
  *
- * The management surface (`loggers` / `logGroups` sub-clients) works
- * immediately. {@link registerAdapter} is a pre-install configuration call.
- * The live surface (`install` / `onChange` / `refresh`) requires
+ * The CRUD surface (`loggers` / `logGroups` sub-clients) works without
+ * {@link install}. {@link registerAdapter} is a pre-install configuration
+ * call. The live surface (`install` / `onChange` / `refresh`) requires
  * {@link install} first; calling `onChange` / `refresh` earlier throws
- * {@link SmplNotInstalledError}.
+ * {@link SmplkitNotInstalledError}.
  */
 export class LoggingClient {
   loggers: LoggersClient;
@@ -697,7 +776,7 @@ export class LoggingClient {
       this._appBaseUrl = null;
       this._standaloneApiKey = null;
     } else {
-      const cfg = resolveManagementConfig(options);
+      const cfg = resolveClientConfig(options);
       const loggingUrl =
         options.baseUrl ??
         serviceUrl(cfg.scheme, "logging", cfg.baseDomain) ??
@@ -741,11 +820,15 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   /**
-   * Register a logging adapter. Must be called before install().
+   * Register a logging adapter. Must be called before {@link install}.
    *
-   * If called at least once, auto-loading is disabled — only explicitly
-   * registered adapters are used. This is a pre-install configuration call:
-   * it is intentionally NOT gated by {@link install}.
+   * Registering at least one adapter disables auto-loading — only the
+   * adapters you register explicitly are used. This is a pre-install
+   * configuration call: it is intentionally NOT gated by {@link install}.
+   *
+   * @param adapter - The logging-framework adapter to use for discovering
+   *   loggers and applying levels.
+   * @throws {@link Error} If called after {@link install}.
    */
   registerAdapter(adapter: LoggingAdapter): void {
     if (this._connected) {
@@ -883,13 +966,24 @@ export class LoggingClient {
   // ------------------------------------------------------------------
 
   /**
-   * Register a change listener.
+   * Register a callback fired whenever a logger's effective level changes.
    *
-   * - `onChange(callback)` — registers a global listener.
-   * - `onChange("sqlalchemy.engine", callback)` — registers a key-scoped listener.
+   * Two forms:
    *
-   * Requires {@link install} first; throws {@link SmplNotInstalledError}
-   * otherwise.
+   * - `onChange(callback)` — a global listener fired for every logger whose
+   *   level changes.
+   * - `onChange("sqlalchemy.engine", callback)` — a key-scoped listener fired
+   *   only for the named logger.
+   *
+   * The callback receives a {@link LoggerChangeEvent}.
+   *
+   * Requires {@link install} first.
+   *
+   * @param callbackOrKey - The callback when registering a global listener, or
+   *   the logger id to scope to when registering a key-scoped listener.
+   * @param callback - The callback to register when `callbackOrKey` is a logger
+   *   id; required in the key-scoped form.
+   * @throws {@link SmplkitNotInstalledError} If called before {@link install}.
    */
   onChange(
     callbackOrKey: string | ((event: LoggerChangeEvent) => void),
@@ -913,8 +1007,9 @@ export class LoggingClient {
   /**
    * Re-fetch all loggers and groups and fire listener events for any deltas.
    *
-   * Requires {@link install} first; throws {@link SmplNotInstalledError}
-   * otherwise.
+   * Requires {@link install} first.
+   *
+   * @throws {@link SmplkitNotInstalledError} If called before {@link install}.
    */
   async refresh(): Promise<void> {
     this._requireInstalled();
@@ -1288,9 +1383,12 @@ export class LoggingClient {
    * Release resources — only those this client owns.
    *
    * Uninstalls the adapter hooks, unsubscribes from the WebSocket, and tears
-   * down the owned WebSocket (opened by a standalone client on install). A
-   * wired client borrows the parent's transport and WebSocket and closes
-   * neither.
+   * down the owned WebSocket (opened by a standalone client on install).
+   *
+   * @remarks
+   * A wired client (reached via `client.logging`) borrows the parent's
+   * transport and WebSocket and closes neither; only a standalone client
+   * tears down the WebSocket it opened itself.
    */
   close(): void {
     debug("lifecycle", "LoggingClient.close() called");

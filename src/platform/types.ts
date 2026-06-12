@@ -52,7 +52,16 @@ export class Color {
     Object.freeze(this);
   }
 
-  /** Construct a `Color` from 0–255 RGB components. */
+  /**
+   * Construct a `Color` from 0–255 RGB components.
+   *
+   * @param r - Red component, an integer in the range 0–255.
+   * @param g - Green component, an integer in the range 0–255.
+   * @param b - Blue component, an integer in the range 0–255.
+   * @returns A {@link Color} with the equivalent hex value.
+   * @throws {@link !TypeError} If any component is not an integer.
+   * @throws {@link !Error} If any component is outside the range 0–255.
+   */
   static rgb(r: number, g: number, b: number): Color {
     for (const [name, val] of [
       ["r", r],
@@ -73,11 +82,21 @@ export class Color {
     return new Color(`#${toHex(r)}${toHex(g)}${toHex(b)}`);
   }
 
+  /**
+   * The color's normalized lowercase hex string.
+   *
+   * @returns The hex value of this color.
+   */
   toString(): string {
     return this.hex;
   }
 
-  /** Equality by hex value. */
+  /**
+   * Compare two colors by their normalized hex value.
+   *
+   * @param other - The value to compare against.
+   * @returns `true` when `other` is a {@link Color} with the same hex value.
+   */
   equals(other: unknown): boolean {
     return other instanceof Color && other.hex === this.hex;
   }
