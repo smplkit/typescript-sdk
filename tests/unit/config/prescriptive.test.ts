@@ -507,6 +507,27 @@ describe("onChange()", () => {
     expect(events[0].source).toBe("manual");
   });
 
+  it("fires the initial connect refresh with source 'initial'", async () => {
+    const { client } = makeWired();
+
+    // Register the listener BEFORE the first live call. The first live call
+    // (`subscribe`) lazily connects, and the initial resolve diffs against an
+    // empty cache — so the pre-registered listener sees every resolved value
+    // as an "initial" change (distinct from "manual"/"websocket").
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
+    await client.subscribe("app");
+
+    expect(events).toHaveLength(1);
+    expect(events[0].configId).toBe("app");
+    expect(events[0].itemKey).toBe("retries");
+    expect(events[0].oldValue).toBe(null);
+    expect(events[0].newValue).toBe(3);
+    expect(events[0].source).toBe("initial");
+  });
+
   it("fires a config-scoped listener only for its config", async () => {
     const { client } = makeWired();
     mockListOnce([

@@ -81,15 +81,15 @@ export class ConfigChangeEvent {
   readonly oldValue: unknown;
   /** The updated value. */
   readonly newValue: unknown;
-  /** How the change was delivered (`"websocket"` or `"manual"`). */
-  readonly source: "websocket" | "manual";
+  /** How the change was delivered (`"websocket"`, `"manual"`, or `"initial"`). */
+  readonly source: "websocket" | "manual" | "initial";
 
   constructor(fields: {
     configId: string;
     itemKey: string;
     oldValue: unknown;
     newValue: unknown;
-    source: "websocket" | "manual";
+    source: "websocket" | "manual" | "initial";
   }) {
     this.configId = fields.configId;
     this.itemKey = fields.itemKey;
@@ -1241,7 +1241,7 @@ export class ConfigClient {
     this._configCache = newCache;
     this._rawConfigCache = {};
     for (const cfg of configs) this._rawConfigCache[cfg.id!] = cfg;
-    this._fireChangeListeners(oldCache, newCache, source === "initial" ? "manual" : source);
+    this._fireChangeListeners(oldCache, newCache, source);
   }
 
   /** @internal — re-resolve every config in `rawCache` and fire change listeners. */
@@ -1266,7 +1266,7 @@ export class ConfigClient {
   private _fireChangeListeners(
     oldCache: Record<string, Record<string, unknown>>,
     newCache: Record<string, Record<string, unknown>>,
-    source: "websocket" | "manual",
+    source: "websocket" | "manual" | "initial",
   ): void {
     const allConfigKeys = new Set([...Object.keys(oldCache), ...Object.keys(newCache)]);
     for (const cfgKey of allConfigKeys) {
