@@ -18,6 +18,8 @@ import { SmplTimeoutError } from "./errors.js";
 import { SharedWebSocket } from "./ws.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
+import { ContextScope, setContext as setRequestContext } from "./context.js";
+import type { Context } from "./flags/types.js";
 import { debug, enableDebug } from "./_debug.js";
 
 type AppHttp = ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
@@ -392,6 +394,43 @@ export class SmplClient {
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+  }
+
+  /**
+   * Stash *contexts* as the current request's evaluation context.
+   *
+   * Typical use is from middleware — set the context once at request entry and
+   * every `flag.get()` (and other context-sensitive evaluations) within that
+   * request automatically picks it up. An `AsyncLocalStorage` store provides
+   * per-task isolation, so concurrent requests never cross-contaminate.
+   *
+   * Each unique `(type, key)` is also registered with the platform
+   * (deduplicated; sent in the background).
+   *
+   * Two usage shapes:
+   *
+   * ```typescript
+   * // Fire-and-forget (typical middleware)
+   * client.setContext([new Context("user", "u-1"), new Context("account", "acme")]);
+   *
+   * // Scoped override (e.g. impersonation) — restored when the block exits
+   * using scope = client.setContext([new Context("user", "impersonated")]);
+   * // ...original context restored once `scope` leaves block scope
+   * ```
+   *
+   * @param contexts - The contexts to make active for the current task (e.g.
+   *   the request's user and account). An empty list clears any registration
+   *   step but still returns a scope.
+   * @returns A {@link ContextScope} you can ignore for fire-and-forget use, or
+   *   hold — via a `using` declaration or {@link ContextScope.restore} — to
+   *   restore the previous context.
+   */
+  setContext(contexts: Context[]): ContextScope {
+    this._ensureStarted();
+    if (contexts.length > 0) {
+      void this.platform.contexts.register(contexts);
+    }
+    return setRequestContext(contexts);
   }
 
   /** Release all resources held by this client. */

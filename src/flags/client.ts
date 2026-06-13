@@ -54,6 +54,7 @@ import {
   FlagEnvironment,
 } from "./models.js";
 import { Context, FlagDeclaration } from "./types.js";
+import { getRequestContext } from "../context.js";
 import { keyToDisplayName } from "../helpers.js";
 import { ContextsClient } from "../platform/client.js";
 import { ContextRegistrationBuffer } from "../buffer.js";
@@ -1285,19 +1286,26 @@ export class FlagsClient {
     let evalDict: Record<string, any>;
     if (context !== null) {
       // Explicit context: register here. (Implicit setContext registers at
-      // the entry point, so the provider branch below doesn't need to.)
+      // the entry point, so the request-context branch below doesn't need to.)
       if (this._contexts !== null) {
         void this._contexts.register(context);
       }
       evalDict = contextsToEvalDict(context);
-    } else if (this._contextProvider !== null) {
-      const contexts = this._contextProvider();
-      evalDict = contextsToEvalDict(contexts);
-      if (this._contexts !== null) {
-        void this._contexts.register(contexts);
-      }
     } else {
-      evalDict = {};
+      const requestContext = getRequestContext();
+      if (requestContext.length > 0) {
+        // Per-request context from client.setContext (most specific). Already
+        // registered at the setContext call site, so don't re-register here.
+        evalDict = contextsToEvalDict(requestContext);
+      } else if (this._contextProvider !== null) {
+        const contexts = this._contextProvider();
+        evalDict = contextsToEvalDict(contexts);
+        if (this._contexts !== null) {
+          void this._contexts.register(contexts);
+        }
+      } else {
+        evalDict = {};
+      }
     }
 
     // Auto-inject service context if set and not already provided

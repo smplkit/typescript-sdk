@@ -8,6 +8,9 @@
 export { SmplClient } from "./client.js";
 export type { SmplClientOptions } from "./client.js";
 
+// Per-request evaluation context — restorable scope returned by setContext
+export { ContextScope } from "./context.js";
+
 // Platform — cross-cutting CRUD (environments, services, contexts, context types)
 export { PlatformClient } from "./platform/client.js";
 export type { PlatformClientOptions } from "./platform/client.js";

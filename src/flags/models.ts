@@ -372,7 +372,10 @@ export class Flag {
    */
   removeValue(value: unknown): this {
     if (this._values === null) return this;
-    this._values = this._values.filter((v) => v.value !== value);
+    const index = this._values.findIndex((v) => v.value === value);
+    if (index !== -1) {
+      this._values.splice(index, 1);
+    }
     return this;
   }
 

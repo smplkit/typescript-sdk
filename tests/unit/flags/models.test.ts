@@ -375,11 +375,31 @@ describe("Flag local mutations", () => {
       expect(flag.values?.[0]).toMatchObject({ name: "On", value: true });
     });
 
-    it("removeValue drops entries matching the value", () => {
+    it("removeValue drops the matching entry", () => {
       const flag = makeFlag();
       flag.removeValue(true);
       expect(flag.values).toHaveLength(1);
       expect(flag.values?.[0].value).toBe(false);
+    });
+
+    it("removeValue removes only the first match, leaving later duplicates intact", () => {
+      const flag = makeFlag({
+        values: [
+          { name: "First", value: true } as any,
+          { name: "Middle", value: false } as any,
+          { name: "Second", value: true } as any,
+        ],
+      });
+      flag.removeValue(true);
+      // Only the first `true` (named "First") is dropped; the later one survives.
+      expect(flag.values).toHaveLength(2);
+      expect(flag.values?.map((v) => v.name)).toEqual(["Middle", "Second"]);
+    });
+
+    it("removeValue is a no-op when no entry matches", () => {
+      const flag = makeFlag();
+      expect(flag.removeValue("absent")).toBe(flag);
+      expect(flag.values).toHaveLength(2);
     });
 
     it("removeValue is a no-op when values is null", () => {
