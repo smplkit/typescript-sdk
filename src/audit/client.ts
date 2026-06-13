@@ -132,7 +132,10 @@ function wrapFetchError(err: unknown): never {
 // Wire <-> wrapper conversions (events)
 // ---------------------------------------------------------------------------
 
-function _eventBodyFromInput(input: CreateEventInput): GenEventResponse {
+function _eventBodyFromInput(
+  input: CreateEventInput,
+  environment: string | undefined,
+): GenEventResponse {
   const attrs: GenEvent = {
     event_type: input.eventType,
     resource_type: input.resourceType,
@@ -150,6 +153,11 @@ function _eventBodyFromInput(input: CreateEventInput): GenEventResponse {
   if (input.data !== undefined) {
     attrs.data = input.data as { [key: string]: unknown };
   }
+  // The client's configured environment (if any) is stamped onto the event
+  // body — the body-driven replacement for the old `X-Smplkit-Environment`
+  // header (ADR-055). Omitted when undefined so a single-environment
+  // credential resolves it server-side.
+  if (environment !== undefined) attrs.environment = environment;
   return { data: { id: "", type: "event", attributes: attrs } };
 }
 
@@ -212,6 +220,23 @@ async function _throwForResponse(response: Response): Promise<never> {
 function _joinEnvironments(environments: string[] | undefined): string | undefined {
   if (environments === undefined || environments.length === 0) return undefined;
   return environments.join(",");
+}
+
+/**
+ * Resolve the `filter[environment]` value for a read surface.
+ *
+ * An explicit `environments` list always wins and is comma-joined.
+ * Otherwise the client's configured `defaultEnv` scopes the read — the
+ * body-driven replacement for the old `X-Smplkit-Environment` header, which
+ * previously scoped every read to the client's environment. With no explicit
+ * list and no configured environment this returns `undefined` so the param
+ * is omitted and the credential's own scoping applies server-side.
+ */
+function _resolveEnvironmentFilter(
+  environments: string[] | undefined,
+  defaultEnv: string | undefined,
+): string | undefined {
+  return _joinEnvironments(environments) ?? defaultEnv;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +415,7 @@ class EventsClient {
   constructor(
     private readonly _http: AuditHttp,
     private readonly _buffer: AuditEventBuffer,
+    private readonly _environment: string | undefined,
   ) {}
 
   /**
@@ -406,7 +432,10 @@ class EventsClient {
    * request-handling hot path.
    */
   async record(input: CreateEventInput): Promise<void> {
-    this._buffer.enqueue(_eventBodyFromInput(input), input.idempotencyKey ?? null);
+    this._buffer.enqueue(
+      _eventBodyFromInput(input, this._environment),
+      input.idempotencyKey ?? null,
+    );
     if (input.flush) {
       await this._buffer.flush(input.flushTimeoutMs ?? 5_000);
     }
@@ -430,9 +459,9 @@ class EventsClient {
    * `environments` scopes the read to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
    * bucket; the values are sent comma-separated as `filter[environment]`.
-   * Omit it (the default) to leave the param off entirely and let
-   * environment scope fall back to the `X-Smplkit-Environment` request
-   * header.
+   * Omit it (the default) to scope the read to the client's configured
+   * environment; with no configured environment the filter is left off
+   * entirely.
    */
   async list(params: ListEventsParams = {}): Promise<ListEventsPage> {
     const query: Record<string, string | number> = {};
@@ -443,7 +472,7 @@ class EventsClient {
     if (params.actorId !== undefined) query["filter[actor_id]"] = params.actorId;
     if (params.occurredAtRange !== undefined) query["filter[occurred_at]"] = params.occurredAtRange;
     if (params.search !== undefined) query["filter[search]"] = params.search;
-    const environments = _joinEnvironments(params.environments);
+    const environments = _resolveEnvironmentFilter(params.environments, this._environment);
     if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.pageAfter !== undefined) query["page[after]"] = params.pageAfter;
@@ -502,7 +531,10 @@ class EventsClient {
 
 /** Surface for `client.audit.resourceTypes.*`. */
 class ResourceTypesClient {
-  constructor(private readonly _http: AuditHttp) {}
+  constructor(
+    private readonly _http: AuditHttp,
+    private readonly _environment: string | undefined,
+  ) {}
 
   /**
    * List the distinct `resource_type` slugs seen in the account.
@@ -513,11 +545,13 @@ class ResourceTypesClient {
    * `environments` scopes the listing to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
    * bucket; the values are sent comma-separated as `filter[environment]`.
-   * Omit it (the default) to leave the param off entirely.
+   * Omit it (the default) to scope the listing to the client's configured
+   * environment; with no configured environment the filter is left off
+   * entirely.
    */
   async list(params: ListResourceTypesParams = {}): Promise<ListResourceTypesPage> {
     const query: Record<string, string | number | boolean> = {};
-    const environments = _joinEnvironments(params.environments);
+    const environments = _resolveEnvironmentFilter(params.environments, this._environment);
     if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
@@ -546,7 +580,10 @@ class ResourceTypesClient {
 
 /** Surface for `client.audit.eventTypes.*`. */
 class EventTypesClient {
-  constructor(private readonly _http: AuditHttp) {}
+  constructor(
+    private readonly _http: AuditHttp,
+    private readonly _environment: string | undefined,
+  ) {}
 
   /**
    * List the distinct `event_type` slugs seen in the account.
@@ -560,7 +597,9 @@ class EventTypesClient {
    * `environments` scopes the listing to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
    * bucket; the values are sent comma-separated as `filter[environment]`.
-   * Omit it (the default) to leave the param off entirely.
+   * Omit it (the default) to scope the listing to the client's configured
+   * environment; with no configured environment the filter is left off
+   * entirely.
    *
    * Response time is independent of how many years of events the account
    * has accumulated. Sorted alphabetically; offset paginated.
@@ -569,7 +608,7 @@ class EventTypesClient {
     const query: Record<string, string | number | boolean> = {};
     if (params.filterResourceType !== undefined)
       query["filter[resource_type]"] = params.filterResourceType;
-    const environments = _joinEnvironments(params.environments);
+    const environments = _resolveEnvironmentFilter(params.environments, this._environment);
     if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
@@ -598,7 +637,10 @@ class EventTypesClient {
 
 /** Surface for `client.audit.categories.*`. */
 class CategoriesClient {
-  constructor(private readonly _http: AuditHttp) {}
+  constructor(
+    private readonly _http: AuditHttp,
+    private readonly _environment: string | undefined,
+  ) {}
 
   /**
    * List the distinct `category` values seen in the account.
@@ -609,11 +651,13 @@ class CategoriesClient {
    * `environments` scopes the listing to a set of environments: pass a list
    * of environment keys and/or the reserved `"smplkit"` control-plane
    * bucket; the values are sent comma-separated as `filter[environment]`.
-   * Omit it (the default) to leave the param off entirely.
+   * Omit it (the default) to scope the listing to the client's configured
+   * environment; with no configured environment the filter is left off
+   * entirely.
    */
   async list(params: ListCategoriesParams = {}): Promise<CategoryListPage> {
     const query: Record<string, string | number | boolean> = {};
-    const environments = _joinEnvironments(params.environments);
+    const environments = _resolveEnvironmentFilter(params.environments, this._environment);
     if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
@@ -897,12 +941,14 @@ export interface AuditClientOptions {
   /** API key. When omitted, resolved from `SMPLKIT_API_KEY` or `~/.smplkit`. */
   apiKey?: string;
   /**
-   * Deployment environment to scope recording and reads to, sent as
-   * `X-Smplkit-Environment`. Optional — forwarder CRUD and discovery are
-   * environment-agnostic, and reads accept an explicit `environments`
-   * filter. When reached via {@link SmplClient} this is the SDK's configured
-   * runtime environment; via a standalone client without it, recording
-   * falls back to the server-side default environment.
+   * Deployment environment to scope recording and reads to. Sent on the
+   * event request body when recording and as the default
+   * `filter[environment]` on the read surfaces. Optional — forwarder CRUD
+   * and discovery are environment-agnostic, and reads accept an explicit
+   * `environments` filter that overrides this default. When reached via
+   * {@link SmplClient} this is the SDK's configured runtime environment; via
+   * a standalone client without it, recording falls back to the server-side
+   * default environment.
    */
   environment?: string;
   /**
@@ -919,10 +965,7 @@ export interface AuditClientOptions {
   scheme?: string;
   /** Enable SDK debug logging. */
   debug?: boolean;
-  /**
-   * Extra headers attached to every request. An `X-Smplkit-Environment`
-   * entry here wins over `environment`.
-   */
+  /** Extra headers attached to every request. */
   extraHeaders?: Record<string, string>;
   /** Request timeout in milliseconds (default 30000). */
   timeoutMs?: number;
@@ -978,16 +1021,12 @@ export class AuditClient {
     const { apiKey, baseUrl } = resolveAuditCredentials(options);
     const ms = options.timeoutMs ?? 30_000;
 
-    // Runtime audit ops are environment-scoped: record / list / get /
-    // discovery all resolve their environment from the
-    // `X-Smplkit-Environment` request header (ADR-055). We stamp it once at
-    // the client level from the SDK's configured runtime environment so
-    // every generated call carries it. A caller-supplied `extraHeaders`
-    // entry of the same name wins (explicit override), so the env header
-    // goes in before `extraHeaders`.
-    const headers: Record<string, string> = {};
-    if (options.environment !== undefined) headers["X-Smplkit-Environment"] = options.environment;
-    Object.assign(headers, options.extraHeaders ?? {});
+    // Environment scoping no longer rides on the transport (ADR-055): the
+    // configured environment travels on the event request body when
+    // recording and as the default `filter[environment]` on the read
+    // surfaces, so the transport carries only auth plus any caller-supplied
+    // `extraHeaders`.
+    const headers: Record<string, string> = { ...(options.extraHeaders ?? {}) };
 
     const customFetch = options.fetch;
     // openapi-fetch wraps the runtime fetch and provides typed
@@ -1032,10 +1071,10 @@ export class AuditClient {
       },
     });
 
-    this.events = new EventsClient(this._http, this._buffer);
-    this.resourceTypes = new ResourceTypesClient(this._http);
-    this.eventTypes = new EventTypesClient(this._http);
-    this.categories = new CategoriesClient(this._http);
+    this.events = new EventsClient(this._http, this._buffer, options.environment);
+    this.resourceTypes = new ResourceTypesClient(this._http, options.environment);
+    this.eventTypes = new EventTypesClient(this._http, options.environment);
+    this.categories = new CategoriesClient(this._http, options.environment);
     this.forwarders = new ForwardersClient(this._http);
   }
 

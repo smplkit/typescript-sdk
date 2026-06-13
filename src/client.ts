@@ -274,8 +274,9 @@ export class SmplClient {
       metrics: this._metrics,
     });
     // Audit's full surface on one client; this runtime instance carries the
-    // configured environment as `X-Smplkit-Environment` and owns its own
-    // transport (closed in `close()`).
+    // configured environment on the event body when recording and as the
+    // default `filter[environment]` on reads, and owns its own transport
+    // (closed in `close()`).
     this.audit = new AuditClient({
       apiKey: cfg.apiKey,
       baseUrl: auditBaseUrl,

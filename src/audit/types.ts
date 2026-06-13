@@ -74,8 +74,8 @@ export interface AuditEvent {
    * The environment the event was recorded in. Read-only and always
    * present on reads — the audit service resolves it when the event is
    * recorded (from a single-environment credential, or from the runtime
-   * SDK's configured environment, which the SDK sends on every recording
-   * call). Never set on the recording request body.
+   * SDK's configured environment, which the SDK sends on the recording
+   * request body).
    */
   environment: string | null;
 }
@@ -186,8 +186,8 @@ export interface ListEventsParams {
    * Scope the read to a set of environments: pass a list of environment
    * keys and/or the reserved `"smplkit"` control-plane bucket; the values
    * are sent comma-separated as `filter[environment]`. Omit it (the
-   * default) to leave the param off entirely and let environment scope
-   * fall back to the `X-Smplkit-Environment` request header.
+   * default) to scope the read to the client's configured environment;
+   * with no configured environment the filter is left off entirely.
    */
   environments?: string[];
   /** Items per page (1–1000). Defaults to 1000. */
@@ -238,7 +238,8 @@ export interface ListResourceTypesParams {
    * Scope the listing to a set of environments: pass a list of environment
    * keys and/or the reserved `"smplkit"` control-plane bucket; the values
    * are sent comma-separated as `filter[environment]`. Omit it (the
-   * default) to leave the param off entirely.
+   * default) to scope the listing to the client's configured environment;
+   * with no configured environment the filter is left off entirely.
    */
   environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
@@ -297,7 +298,8 @@ export interface ListEventTypesParams {
    * Scope the listing to a set of environments: pass a list of environment
    * keys and/or the reserved `"smplkit"` control-plane bucket; the values
    * are sent comma-separated as `filter[environment]`. Omit it (the
-   * default) to leave the param off entirely.
+   * default) to scope the listing to the client's configured environment;
+   * with no configured environment the filter is left off entirely.
    */
   environments?: string[];
   /** 1-based page number to return. Defaults to 1. */
@@ -352,7 +354,8 @@ export interface ListCategoriesParams {
    * Scope the listing to a set of environments: pass a list of environment
    * keys and/or the reserved `"smplkit"` control-plane bucket; the values
    * are sent comma-separated as `filter[environment]`. Omit it (the
-   * default) to leave the param off entirely.
+   * default) to scope the listing to the client's configured environment;
+   * with no configured environment the filter is left off entirely.
    */
   environments?: string[];
   /** 1-based page number to return. Defaults to 1. */

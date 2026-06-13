@@ -458,104 +458,175 @@ describe("AuditClient — extraHeaders", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Environment scoping (ADR-055) — X-Smplkit-Environment header injection
+// Environment routing (ADR-055): the configured environment travels on the
+// event request body when recording and as the default `filter[environment]`
+// on reads — never as a request header.
 // ---------------------------------------------------------------------------
 
-describe("AuditClient — environment header injection", () => {
-  function _captureHeaders(seen: Headers[]): typeof fetch {
+describe("AuditClient — environment routing (ADR-055)", () => {
+  const ENV_HEADER = "x-smplkit-environment";
+  // Brackets/commas may arrive percent-encoded; match either form.
+  const FILTER_ENV = /filter(\[|%5B)environment(\]|%5D)=/;
+
+  interface Captured {
+    url: string;
+    headers: Headers;
+    body: string;
+    method: string;
+  }
+
+  // Capture every request and answer with a shape the surface under test
+  // accepts: a single event resource for POST /events and GET /events/{id},
+  // an empty collection for the list/discovery GETs.
+  function _capture(captured: Captured[]): typeof fetch {
     return vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
       const req =
         urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
-      seen.push(req.headers);
+      const body = req.method === "GET" ? "" : await req.clone().text();
+      captured.push({ url: req.url, headers: req.headers, body, method: req.method });
+      const isSingleEvent = req.method === "POST" || /\/events\/[^/?]+/.test(req.url);
       return new Response(
-        JSON.stringify({
-          data: {
-            id: "00000000-0000-0000-0000-000000000001",
-            type: "event",
-            attributes: {
-              event_type: "x",
-              resource_type: "y",
-              resource_id: "1",
-              occurred_at: "2026-05-06T12:00:00+00:00",
-              created_at: "2026-05-06T12:00:01+00:00",
-              actor_type: "API_KEY",
-              actor_id: null,
-              actor_label: "",
-              data: {},
-              idempotency_key: "",
-              environment: "production",
-            },
-          },
-        }),
-        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+        JSON.stringify(
+          isSingleEvent
+            ? {
+                data: {
+                  id: "00000000-0000-0000-0000-000000000001",
+                  type: "event",
+                  attributes: {
+                    event_type: "x",
+                    resource_type: "y",
+                    resource_id: "1",
+                    occurred_at: "2026-05-06T12:00:00+00:00",
+                    created_at: "2026-05-06T12:00:01+00:00",
+                    data: {},
+                    idempotency_key: "",
+                    environment: "production",
+                  },
+                },
+              }
+            : { data: [], meta: { pagination: { page: 1, size: 1000 } } },
+        ),
+        {
+          status: req.method === "POST" ? 201 : 200,
+          headers: { "Content-Type": "application/vnd.api+json" },
+        },
       );
     }) as typeof fetch;
   }
 
-  test("stamps X-Smplkit-Environment on record from the configured environment", async () => {
-    const seen: Headers[] = [];
+  function _bodyEnvironment(body: string): unknown {
+    return (JSON.parse(body) as { data: { attributes: Record<string, unknown> } }).data.attributes
+      .environment;
+  }
+
+  test("never sends the X-Smplkit-Environment header on any runtime op", async () => {
+    const captured: Captured[] = [];
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
       environment: "production",
-      fetch: _captureHeaders(seen),
+      fetch: _capture(captured),
     });
     client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
     await client.events.flush(2_000);
-    expect(seen[0]!.get("x-smplkit-environment")).toBe("production");
+    await client.events.list();
+    expect(captured.length).toBeGreaterThanOrEqual(2);
+    for (const c of captured) expect(c.headers.has(ENV_HEADER)).toBe(false);
     await client._close();
   });
 
-  test("stamps X-Smplkit-Environment on read paths (list / get)", async () => {
-    const seen: Headers[] = [];
+  test("records the configured environment on the event body", async () => {
+    const captured: Captured[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      fetch: _capture(captured),
+    });
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    const post = captured.find((c) => c.method === "POST");
+    expect(post).toBeDefined();
+    expect(_bodyEnvironment(post!.body)).toBe("production");
+    await client._close();
+  });
+
+  test("scopes events.list to the configured environment via filter[environment]", async () => {
+    const captured: Captured[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      fetch: _capture(captured),
+    });
+    await client.events.list();
+    expect(captured[0]!.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=production/);
+    await client._close();
+  });
+
+  test("events.get sends no environment filter (global by-id lookup)", async () => {
+    const captured: Captured[] = [];
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
       environment: "staging",
-      fetch: vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
-        const req =
-          urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
-        seen.push(req.headers);
-        return new Response(JSON.stringify({ data: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/vnd.api+json" },
-        });
-      }) as typeof fetch,
+      fetch: _capture(captured),
     });
-    await client.events.list();
-    expect(seen[0]!.get("x-smplkit-environment")).toBe("staging");
+    await client.events.get("11111111-2222-3333-4444-555555555555");
+    expect(captured[0]!.url).not.toMatch(FILTER_ENV);
     await client._close();
   });
 
-  test("omits the header when no environment is configured", async () => {
-    const seen: Headers[] = [];
-    const client = new AuditClient({
-      apiKey: "sk_api_test",
-      baseUrl: "https://audit.example.com",
-      fetch: _captureHeaders(seen),
-    });
-    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
-    await client.events.flush(2_000);
-    expect(seen[0]!.has("x-smplkit-environment")).toBe(false);
-    await client._close();
-  });
-
-  test("an explicit extraHeaders X-Smplkit-Environment overrides the configured one", async () => {
-    const seen: Headers[] = [];
+  test("scopes discovery listings to the configured environment", async () => {
+    const captured: Captured[] = [];
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
       environment: "production",
-      extraHeaders: { "X-Smplkit-Environment": "override-env" },
-      fetch: _captureHeaders(seen),
+      fetch: _capture(captured),
     });
-    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
-    await client.events.flush(2_000);
-    expect(seen[0]!.get("x-smplkit-environment")).toBe("override-env");
+    await client.resourceTypes.list();
+    await client.eventTypes.list();
+    await client.categories.list();
+    expect(captured).toHaveLength(3);
+    for (const c of captured) {
+      expect(c.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=production/);
+    }
     await client._close();
   });
 
-  test("surfaces the read-only environment field on a parsed event", async () => {
+  test("omits filter[environment] and the body environment when no environment is configured", async () => {
+    const captured: Captured[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: _capture(captured),
+    });
+    await client.events.list();
+    client.events.record({ eventType: "x", resourceType: "y", resourceId: "1" });
+    await client.events.flush(2_000);
+    const list = captured.find((c) => c.method === "GET");
+    const post = captured.find((c) => c.method === "POST");
+    expect(list!.url).not.toMatch(FILTER_ENV);
+    expect(_bodyEnvironment(post!.body)).toBeUndefined();
+    await client._close();
+  });
+
+  test("an explicit environments arg overrides the configured default", async () => {
+    const captured: Captured[] = [];
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      environment: "production",
+      fetch: _capture(captured),
+    });
+    await client.events.list({ environments: ["staging"] });
+    expect(captured[0]!.url).toMatch(/filter(\[|%5B)environment(\]|%5D)=staging/);
+    expect(captured[0]!.url).not.toMatch(/production/);
+    await client._close();
+  });
+
+  test("surfaces the environment field on a parsed event", async () => {
     const client = new AuditClient({
       apiKey: "sk_api_test",
       baseUrl: "https://audit.example.com",
