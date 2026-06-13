@@ -49,10 +49,11 @@ export interface paths {
          * Record Event
          * @description Record an audit event for this account.
          *
-         *     The event is stamped with the environment it occurred in: a
-         *     single-environment credential implies it; a multi-environment or
-         *     unrestricted credential must send the `X-Smplkit-Environment` header.
-         *     The resolved environment must exist and be managed for the account.
+         *     The event is stamped with the environment it occurred in. Name the target
+         *     environment in the request body's `environment` field; omit it and a
+         *     single-environment credential implies it, while a multi-environment or
+         *     unrestricted credential must name it. The named environment must be one
+         *     the caller may access and must exist and be managed for the account.
          *
          *     Returns `201 Created` on first write, `200 OK` if the request was a
          *     duplicate (matched by `Idempotency-Key` or a key derived from the
@@ -83,9 +84,8 @@ export interface paths {
          *     Authorized against the caller's permitted environment set: the event
          *     is returned only if its environment is one the caller may access,
          *     otherwise `404` (the same response as a non-existent id, so existence
-         *     never leaks across environments). The `X-Smplkit-Environment` header is
-         *     ignored here — a single-object lookup names the object by id, it does
-         *     not resolve an ambient environment.
+         *     never leaks across environments). A single-object lookup names the
+         *     object by id; it does not resolve a target environment.
          */
         get: operations["get_event"];
         put?: never;
@@ -149,7 +149,10 @@ export interface paths {
          * @description Mint a short-lived signed URL to stream an events download.
          *
          *     The request body specifies `format` (`CSV` or `JSONL`) and any
-         *     subset of the event filters accepted by `GET /api/v1/events`. The
+         *     subset of the event filters accepted by `GET /api/v1/events`. An
+         *     export is scoped to a single environment: name it in the body's
+         *     `environment` field, or omit it and a single-environment credential
+         *     implies it (a multi-environment credential must name it). The
          *     response returns the signed URL plus its expiry (30 seconds from
          *     mint). Open the URL in a browser to stream the file to disk; no
          *     `Authorization` header is required at download time.
@@ -311,11 +314,13 @@ export interface paths {
          * List Forwarder Deliveries
          * @description List delivery log entries for a forwarder.
          *
-         *     Scoped to the resolved environment — only that environment's deliveries
-         *     for the forwarder are shown. Default sort is `-created_at` (newest
-         *     first). Filter by `status` (`SUCCEEDED` or `FAILED`, case-insensitive),
-         *     by `event`, or by a `created_at` range using interval notation
-         *     (e.g. `[2026-01-01T00:00:00Z,*)`).
+         *     Scoped by environment. Pass `filter[environment]` as a comma-separated
+         *     list of environment keys to restrict results to that subset of the
+         *     environments you can access; omit it to cover every environment you can
+         *     access. Default sort is `-created_at` (newest first). Filter by `status`
+         *     (`SUCCEEDED` or `FAILED`, case-insensitive), by `event`, or by a
+         *     `created_at` range using interval notation (e.g.
+         *     `[2026-01-01T00:00:00Z,*)`).
          */
         get: operations["list_forwarder_deliveries"];
         put?: never;
@@ -362,13 +367,14 @@ export interface paths {
         put?: never;
         /**
          * Retry Failed Forwarder Deliveries
-         * @description Retry every failed delivery for this forwarder in the resolved environment.
+         * @description Retry every failed delivery for this forwarder in the target environment.
          *
-         *     Scoped to the resolved environment (a single-environment credential
-         *     implies it; otherwise send the `X-Smplkit-Environment` header): only
-         *     that environment's failed deliveries are re-attempted, each using the
-         *     forwarder's effective configuration for that environment and the
-         *     original event. Returns the counts.
+         *     Targets a single environment: name it in the request body's `environment`
+         *     field, or omit it and a single-environment credential implies it (a
+         *     multi-environment credential must name it). Only that environment's failed
+         *     deliveries are re-attempted, each using the forwarder's effective
+         *     configuration for that environment and the original event. Returns the
+         *     counts.
          */
         post: operations["retry_failed_forwarder_deliveries"];
         delete?: never;
@@ -644,9 +650,9 @@ export interface components {
             do_not_forward: boolean;
             /**
              * Environment
-             * @description The environment the event occurred in. Always present on read. Resolved when the event is recorded — from a single-environment credential, or the `X-Smplkit-Environment` header for multi-environment credentials — and never set on the request body. The same content recorded in two environments produces two distinct events.
+             * @description The environment the event occurred in. On write, optionally names the target environment: omit it and a single-environment credential implies it (a multi-environment credential must name it), and a named environment must be one the caller may access. Always present on read as the resolved environment. The same content recorded in two environments produces two distinct events.
              */
-            readonly environment?: string | null;
+            environment?: string | null;
             /**
              * Created At
              * @description When the event was received and recorded.
@@ -976,6 +982,11 @@ export interface components {
              * @enum {string}
              */
             format: "CSV" | "JSONL";
+            /**
+             * Environment
+             * @description The single environment the export is scoped to. Omit it and a single-environment credential implies it (a multi-environment credential must name it), and a named environment must be one the caller may access. An export always covers exactly one environment.
+             */
+            environment?: string | null;
             /**
              * Filter[Occurred At]
              * @description Date range using interval notation, e.g. `[2026-04-01T00:00:00Z,2026-04-15T00:00:00Z)`.
@@ -1822,6 +1833,17 @@ export interface components {
             attributes: components["schemas"]["ResourceTypeAttributes"];
         };
         /**
+         * RetryFailedDeliveriesRequest
+         * @description Inputs to the retry-failed-deliveries action.
+         */
+        RetryFailedDeliveriesRequest: {
+            /**
+             * Environment
+             * @description The single environment whose failed deliveries are re-attempted. Omit it and a single-environment credential implies it (a multi-environment credential must name it), and a named environment must be one the caller may access. The action always targets exactly one environment.
+             */
+            environment?: string | null;
+        };
+        /**
          * RetryFailedDeliveriesSummary
          * @description Counts returned by the retry-failed-deliveries action.
          */
@@ -2320,6 +2342,8 @@ export interface operations {
     list_forwarder_deliveries: {
         parameters: {
             query?: {
+                /** @description Comma-separated list of environment keys to scope deliveries to (e.g. `production,staging`). When omitted, results cover every environment you can access. The reserved value `smplkit` selects deliveries of platform change events smplkit records about your own resources; it is included by default when your plan grants change history, and requesting it explicitly without that entitlement returns 402. */
+                "filter[environment]"?: string | null;
                 "filter[status]"?: string | null;
                 "filter[created_at]"?: string | null;
                 "filter[event]"?: string | null;
@@ -2379,7 +2403,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetryFailedDeliveriesRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2387,7 +2415,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/vnd.api+json": components["schemas"]["RetryFailedDeliveriesSummary"];
+                    "application/json": components["schemas"]["RetryFailedDeliveriesSummary"];
                 };
             };
         };
