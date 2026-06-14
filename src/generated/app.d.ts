@@ -3420,6 +3420,13 @@ export interface components {
             limits: {
                 [key: string]: number;
             };
+            /**
+             * Overage Rates
+             * @description For metered products only: map of metered limit key to the per-unit overage price in micro-USD ($0.000001) charged for each unit beyond the plan's included allotment. A rate of `0` means the plan stops at its allotment with no overage. Omitted for products that are not metered.
+             */
+            overage_rates?: {
+                [key: string]: number;
+            } | null;
         };
         /**
          * PlanListResponse
@@ -3491,6 +3498,11 @@ export interface components {
             limits: {
                 [key: string]: components["schemas"]["LimitDefinition"];
             };
+            /**
+             * Metered Limits
+             * @description Limit keys on this product that are metered: each includes a monthly allotment in the plan price and bills per unit beyond it at the plan's `overage_rates` rate, rather than capping hard. Empty for products with no metered limits.
+             */
+            metered_limits?: string[];
             /**
              * Plans
              * @description Map of plan key to plan definition for this product.
