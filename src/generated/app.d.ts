@@ -1012,8 +1012,7 @@ export interface paths {
         };
         /**
          * List Products
-         * @description Return all flag-enabled products with their plans, limits, and
-         *     marketing content.
+         * @description Return all products with their plans, limits, and marketing content.
          *
          *     Default sort is `display_name` ascending.
          */
@@ -3486,12 +3485,6 @@ export interface components {
              */
             features?: string[];
             /**
-             * Coming Soon
-             * @description When `true`, the product is listed but not yet available for subscription.
-             * @default false
-             */
-            coming_soon: boolean;
-            /**
              * Limits
              * @description Map of limit key to limit definition for this product.
              */
@@ -3525,7 +3518,6 @@ export interface components {
          * @description JSON:API resource envelope for a product catalog entry.
          * @example {
          *       "attributes": {
-         *         "coming_soon": false,
          *         "description": "Feature flag management",
          *         "display_name": "Smpl Flags",
          *         "features": [
