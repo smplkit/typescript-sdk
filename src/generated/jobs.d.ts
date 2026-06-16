@@ -13,7 +13,13 @@ export interface paths {
         };
         /**
          * List Jobs
-         * @description List this account's jobs, newest first.
+         * @description List this account's jobs.
+         *
+         *     Default sort is `name` ascending. Sort by `name`, `created_at`,
+         *     `updated_at`, `next_run_at`, or `enabled`, ascending or descending (prefix
+         *     `-` for descending). Filter with `filter[enabled]`, `filter[recurring]`,
+         *     and `filter[name]` (case-insensitive substring match on the name); filters
+         *     compose with AND.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -96,9 +102,23 @@ export interface paths {
         };
         /**
          * List Runs
-         * @description List runs for this account, newest first (cursor paginated).
+         * @description List runs for this account (cursor paginated).
          *
-         *     Use `filter[job]={id}` for a single job's run history.
+         *     Default sort is `-created_at` (newest first). Sort by `created_at`,
+         *     `started_at`, `finished_at`, `scheduled_for`, `status`, `job`, or
+         *     `total_duration_ms`, ascending or descending (prefix `-` for descending).
+         *     Keep the same `sort` value across paginated requests so the cursor stays
+         *     consistent. Runs that have not reached the relevant lifecycle point
+         *     (`started_at`, `finished_at`, `scheduled_for`, `total_duration_ms` unset)
+         *     sort to the end regardless of direction.
+         *
+         *     Filters compose with AND:
+         *
+         *     - `filter[job]={id}` — a single job's run history.
+         *     - `filter[status]` — one state or a comma-separated list (any-of).
+         *     - `filter[created_at]` / `filter[started_at]` / `filter[finished_at]` /
+         *       `filter[scheduled_for]` — half-open `[start,end)` date ranges (see each
+         *       parameter for the interval syntax).
          */
         get: operations["list_runs"];
         put?: never;
@@ -765,6 +785,10 @@ export interface operations {
             query?: {
                 "filter[enabled]"?: boolean | null;
                 "filter[recurring]"?: boolean | null;
+                /** @description Case-insensitive substring match on the job `name` (matches when the name contains the given text). */
+                "filter[name]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `enabled`, `-enabled`, `name`, `-name`, `next_run_at`, `-next_run_at`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "enabled" | "-enabled" | "name" | "-name" | "next_run_at" | "-next_run_at" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
                 "page[number]"?: number;
                 /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
@@ -907,9 +931,21 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[job]"?: string | null;
+                /** @description Restrict to runs in the given lifecycle state. One of `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELED`, or a comma-separated list of them to match any (e.g. `SUCCEEDED,FAILED`). */
+                "filter[status]"?: string | null;
+                /** @description Restrict to runs whose `created_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
+                "filter[created_at]"?: string | null;
+                /** @description Restrict to runs whose `started_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
+                "filter[started_at]"?: string | null;
+                /** @description Restrict to runs whose `finished_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
+                "filter[finished_at]"?: string | null;
+                /** @description Restrict to runs whose `scheduled_for` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
+                "filter[scheduled_for]"?: string | null;
                 /** @description Number of runs per page. Optional; defaults to `50` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `-created_at`. Allowed values: `created_at`, `-created_at`, `finished_at`, `-finished_at`, `job`, `-job`, `scheduled_for`, `-scheduled_for`, `started_at`, `-started_at`, `status`, `-status`, `total_duration_ms`, `-total_duration_ms`. */
+                sort?: "created_at" | "-created_at" | "finished_at" | "-finished_at" | "job" | "-job" | "scheduled_for" | "-scheduled_for" | "started_at" | "-started_at" | "status" | "-status" | "total_duration_ms" | "-total_duration_ms";
             };
             header?: never;
             path?: never;
