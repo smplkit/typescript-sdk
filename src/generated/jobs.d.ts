@@ -901,6 +901,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[job]"?: string | null;
+                /** @description Number of runs per page. Optional; defaults to `50` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
             };
