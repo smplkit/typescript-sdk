@@ -275,6 +275,12 @@ export interface components {
              */
             readonly next_run_at?: string | null;
             /**
+             * Recurring
+             * @description Whether the job runs on a repeating schedule. `true` for a cron schedule; `false` for a one-off datetime or `now` schedule, which runs a single time. Derived from `schedule`.
+             * @default false
+             */
+            readonly recurring: boolean;
+            /**
              * Created At
              * @description When the job was created.
              */
@@ -759,6 +765,7 @@ export interface operations {
         parameters: {
             query?: {
                 "filter[enabled]"?: boolean | null;
+                "filter[recurring]"?: boolean | null;
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
                 "page[number]"?: number;
                 /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
