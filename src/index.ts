@@ -93,7 +93,14 @@ export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 
 // Jobs
 export { JobsClient, RunsClient } from "./jobs/client.js";
-export { HttpConfig, HttpMethod as JobsHttpMethod, Job, Run, Usage } from "./jobs/types.js";
+export {
+  HttpConfig,
+  HttpMethod as JobsHttpMethod,
+  Job,
+  JobEnvironment,
+  Run,
+  Usage,
+} from "./jobs/types.js";
 export type { ListJobsParams, ListRunsParams } from "./jobs/types.js";
 
 // Error hierarchy. `Smpl*` are the canonical class names (TypeScript can't

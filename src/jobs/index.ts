@@ -11,5 +11,5 @@
 
 export { JobsClient, RunsClient } from "./client.js";
 export type { JobsClientOptions } from "./client.js";
-export { HttpConfig, HttpMethod, Job, Run, Usage } from "./types.js";
+export { HttpConfig, HttpMethod, Job, JobEnvironment, Run, Usage } from "./types.js";
 export type { HttpHeader, ListJobsParams, ListRunsParams } from "./types.js";

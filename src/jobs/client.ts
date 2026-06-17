@@ -30,6 +30,7 @@ import {
   HttpConfig,
   HttpMethod,
   Job,
+  JobEnvironment,
   Run,
   Usage,
   type HttpHeader,
@@ -40,10 +41,66 @@ import {
 type JobsHttp = ReturnType<typeof createClient<paths>>;
 type GenJobHttpConfiguration = components["schemas"]["JobHttpConfiguration"];
 type GenJob = components["schemas"]["Job"];
+type GenJobEnvironment = components["schemas"]["JobEnvironment"];
 type GenJobCreateRequest = components["schemas"]["JobCreateRequest"];
 type GenJobRequest = components["schemas"]["JobRequest"];
 
 const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
+
+/**
+ * Comma-join environment keys for the `filter[environment]` read filter.
+ * Returns `undefined` (so the caller omits the param) when the list is absent
+ * or empty.
+ */
+function _joinEnvironments(environments: string[] | undefined): string | undefined {
+  if (environments === undefined || environments.length === 0) return undefined;
+  return environments.join(",");
+}
+
+/**
+ * Resolve the `filter[environment]` value for a runs read: an explicit
+ * `environments` list (comma-joined) wins, else the client's configured
+ * environment, else `undefined` (no filter; the credential's scoping applies).
+ */
+function _resolveEnvironmentFilter(
+  environments: string[] | undefined,
+  defaultEnv: string | undefined,
+): string | undefined {
+  return _joinEnvironments(environments) ?? defaultEnv;
+}
+
+function _environmentsToWire(environments: Record<string, JobEnvironment>): {
+  [key: string]: GenJobEnvironment;
+} {
+  const out: { [key: string]: GenJobEnvironment } = {};
+  for (const [envKey, env] of Object.entries(environments)) {
+    out[envKey] = {
+      enabled: env.enabled,
+      configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
+    };
+  }
+  return out;
+}
+
+function _environmentsFromWire(
+  raw: Record<string, unknown> | undefined,
+): Record<string, JobEnvironment> {
+  const out: Record<string, JobEnvironment> = {};
+  for (const [envKey, value] of Object.entries(raw ?? {})) {
+    const v = (value ?? {}) as {
+      enabled?: unknown;
+      configuration?: Record<string, unknown> | null;
+    };
+    out[envKey] = new JobEnvironment({
+      enabled: Boolean(v.enabled ?? false),
+      configuration:
+        v.configuration == null
+          ? null
+          : _configurationFromWire(v.configuration as Record<string, unknown>),
+    });
+  }
+  return out;
+}
 
 /** @internal */
 async function checkError(response: Response, error?: unknown): Promise<never> {
@@ -113,15 +170,20 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
 }
 
 function _jobAttrs(job: Job): GenJob {
-  return {
+  // The base `enabled` is a server-derived read-only roll-up; we don't send
+  // it. Enablement travels entirely through `environments`.
+  const attrs: GenJob = {
     name: job.name,
     description: job.description,
-    enabled: job.enabled,
     type: job.type as GenJob["type"],
     schedule: job.schedule,
     configuration: _configurationToWire(job.configuration),
     concurrency_policy: job.concurrencyPolicy as GenJob["concurrency_policy"],
-  };
+  } as GenJob;
+  if (Object.keys(job.environments).length > 0) {
+    attrs.environments = _environmentsToWire(job.environments);
+  }
+  return attrs;
 }
 
 function _jobFromResource(
@@ -133,7 +195,9 @@ function _jobFromResource(
     id: resource.id,
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
-    enabled: Boolean(a.enabled ?? true),
+    environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
+    enabled: Boolean(a.enabled ?? false),
+    recurring: (a.recurring as boolean | null) ?? null,
     type: String(a.type ?? "http"),
     schedule: String(a.schedule ?? ""),
     configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
@@ -146,20 +210,29 @@ function _jobFromResource(
   });
 }
 
-function _runFromResource(resource: { id: string; attributes: Record<string, unknown> }): Run {
-  return new Run(resource.attributes, resource.id);
+function _runFromResource(
+  resource: { id: string; attributes: Record<string, unknown> },
+  runs: RunsClient,
+): Run {
+  return new Run(resource.attributes, resource.id, runs);
 }
 
 /** Run history and run actions (`jobs.runs`). */
 export class RunsClient {
   /** @internal */
-  constructor(private readonly _http: JobsHttp) {}
+  constructor(
+    private readonly _http: JobsHttp,
+    private readonly _environment: string | undefined = undefined,
+  ) {}
 
   /**
    * List past runs, most recent first.
    *
    * @param params.job - Return only runs of the job with this id. Omit to
    *   list runs across all jobs in the account.
+   * @param params.environments - Restrict to runs stamped with any of these
+   *   environment keys. Omit to fall back to the client's configured
+   *   environment, otherwise covering every environment you can access.
    * @param params.pageSize - Maximum number of runs to return in this page.
    *   Omit to use the server default.
    * @param params.after - Opaque cursor from a previous page; returns the runs
@@ -169,6 +242,8 @@ export class RunsClient {
   async list(params: ListRunsParams = {}): Promise<Run[]> {
     const query: Record<string, string | number> = {};
     if (params.job !== undefined) query["filter[job]"] = params.job;
+    const environments = _resolveEnvironmentFilter(params.environments, this._environment);
+    if (environments !== undefined) query["filter[environment]"] = environments;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
     if (params.after !== undefined) query["page[after]"] = params.after;
 
@@ -183,7 +258,7 @@ export class RunsClient {
       wrapFetchError(err);
     }
     return ((data?.data ?? []) as Array<{ id: string; attributes: Record<string, unknown> }>).map(
-      _runFromResource,
+      (r) => _runFromResource(r, this),
     );
   }
 
@@ -239,7 +314,7 @@ export class RunsClient {
       wrapFetchError(err);
     }
     if (!data?.data) throw new SmplError("Unexpected empty response from jobs");
-    return _runFromResource(data.data);
+    return _runFromResource(data.data, this);
   }
 }
 
@@ -262,6 +337,14 @@ export interface JobsClientOptions {
   debug?: boolean;
   /** Extra headers attached to every request. */
   extraHeaders?: Record<string, string>;
+  /**
+   * Default environment for environment-scoped operations — the environment a
+   * one-off job created through this client is born in, the default a manual
+   * run executes in, and the default scope for `jobs.runs.list()`. Omit to
+   * leave these unset (the credential's permitted environment is implied where
+   * unambiguous).
+   */
+  environment?: string;
   /**
    * Internal — a pre-built jobs transport supplied by a top-level client so
    * the jobs surface shares one connection pool. Not for direct use.
@@ -295,6 +378,8 @@ export class JobsClient {
   private readonly _http: JobsHttp;
   /** @internal */
   private readonly _ownsTransport: boolean;
+  /** @internal */
+  private readonly _environment: string | undefined;
 
   /** Run history and run actions. */
   readonly runs: RunsClient;
@@ -317,7 +402,8 @@ export class JobsClient {
       });
       this._ownsTransport = true;
     }
-    this.runs = new RunsClient(this._http);
+    this._environment = options.environment;
+    this.runs = new RunsClient(this._http, this._environment);
   }
 
   /**
@@ -335,11 +421,16 @@ export class JobsClient {
    *   fires.
    * @param fields.description - Free-text description for the job. Defaults to
    *   none.
-   * @param fields.enabled - Whether the job schedules runs. Set to `false` to
-   *   pause it without deleting. Defaults to `true`.
+   * @param fields.environments - Per-environment overrides for a recurring
+   *   job, keyed by environment key. A recurring job fires only in
+   *   environments enabled here. Ignored for a one-off job, which is born in
+   *   `fields.environment`.
    * @param fields.concurrencyPolicy - How overlapping runs are handled.
    *   `"ALLOW"` (the default and only value today) permits a new run to start
    *   while a previous one is still in flight.
+   * @param fields.environment - For a one-off job (`"now"` / datetime
+   *   schedule), the environment it is born in. Defaults to the client's
+   *   configured environment. Ignored for a recurring job.
    * @returns An unsaved {@link Job} bound to this client.
    */
   new(
@@ -349,8 +440,9 @@ export class JobsClient {
       schedule: string;
       configuration: HttpConfig;
       description?: string | null;
-      enabled?: boolean;
+      environments?: Record<string, JobEnvironment>;
       concurrencyPolicy?: string;
+      environment?: string;
     },
   ): Job {
     return new Job(this, {
@@ -359,8 +451,9 @@ export class JobsClient {
       schedule: fields.schedule,
       configuration: fields.configuration,
       description: fields.description,
-      enabled: fields.enabled,
+      environments: fields.environments,
       concurrencyPolicy: fields.concurrencyPolicy,
+      birthEnvironment: fields.environment ?? this._environment ?? null,
     });
   }
 
@@ -440,14 +533,23 @@ export class JobsClient {
    * `jobs.runs`.
    *
    * @param id - Identifier of the job to run.
+   * @param params.environment - Environment the manual run executes in.
+   *   Defaults to the client's configured environment; when the job is enabled
+   *   in exactly one environment that environment is used.
    * @returns The {@link Run} that was started, with `trigger` set to
    *   `"MANUAL"`.
    */
-  async run(id: string): Promise<Run> {
+  async run(id: string, params: { environment?: string } = {}): Promise<Run> {
+    const environment = params.environment ?? this._environment;
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.POST("/api/v1/jobs/{job_id}/actions/run", {
-        params: { path: { job_id: id } },
+        params: {
+          path: { job_id: id },
+          ...(environment !== undefined
+            ? { header: { "X-Smplkit-Environment": environment } }
+            : {}),
+        },
       });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
@@ -455,7 +557,7 @@ export class JobsClient {
       wrapFetchError(err);
     }
     if (!data?.data) throw new SmplError("Unexpected empty response from jobs");
-    return _runFromResource(data.data);
+    return _runFromResource(data.data, this.runs);
   }
 
   /**
@@ -482,9 +584,17 @@ export class JobsClient {
     const body: GenJobCreateRequest = {
       data: { id: job.id, type: "job", attributes: _jobAttrs(job) },
     };
+    // A one-off job is born in the environment named here (recurring jobs
+    // ignore it server-side; their environments come from the map).
+    const birthEnv = job._birthEnvironment ?? undefined;
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
-      const result = await this._http.POST("/api/v1/jobs", { body });
+      const result = await this._http.POST("/api/v1/jobs", {
+        ...(birthEnv !== undefined
+          ? { params: { header: { "X-Smplkit-Environment": birthEnv } } }
+          : {}),
+        body,
+      });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
@@ -502,7 +612,12 @@ export class JobsClient {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.PUT("/api/v1/jobs/{job_id}", {
-        params: { path: { job_id: job.id } },
+        params: {
+          path: { job_id: job.id },
+          ...(this._environment !== undefined
+            ? { header: { "X-Smplkit-Environment": this._environment } }
+            : {}),
+        },
         body,
       });
       if (!result.response.ok) await checkError(result.response, result.error);
