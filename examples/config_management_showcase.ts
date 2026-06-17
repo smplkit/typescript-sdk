@@ -84,10 +84,11 @@ async function main(): Promise<void> {
     await shared.delete();
     console.log("Deleted configs");
 
-    // cleanup
-    await cleanupManagementShowcase(client);
     console.log("Done!");
   } finally {
+    // Always tear down — even if an error occurred above — so a failed run
+    // never leaves orphaned configs for the next run.
+    await cleanupManagementShowcase(client);
     client.close();
   }
 }

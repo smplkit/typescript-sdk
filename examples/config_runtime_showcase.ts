@@ -101,9 +101,11 @@ async function main(): Promise<void> {
     );
     assert.equal(slowQueryMs, 500);
 
-    await cleanupRuntimeShowcase(client);
     console.log("Done!");
   } finally {
+    // Always tear down — even if an assertion above failed — so a failed run
+    // never leaves orphaned configs for the next run.
+    await cleanupRuntimeShowcase(client);
     client.close();
   }
 }

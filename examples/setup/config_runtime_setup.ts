@@ -2,7 +2,16 @@
 
 import { SmplClient, SmplkitNotFoundError } from "../../src/index.js";
 
-const DEMO_CONFIG_IDS = ["showcase-billing", "showcase-common", "showcase-database"];
+// Complete, dependency-ordered list of every config the config showcases
+// create. Children are listed before the shared `showcase-common` parent so
+// cleanup never trips the "config referenced as parent" conflict — even when
+// a prior run crashed mid-way and left a sibling showcase's child orphaned.
+const DEMO_CONFIG_IDS = [
+  "showcase-billing", // child of showcase-common (runtime showcase)
+  "showcase-user-service", // child of showcase-common (management showcase)
+  "showcase-database", // root (runtime showcase)
+  "showcase-common", // shared parent — must be deleted last
+];
 
 export async function simulateAdminOverride(client: SmplClient): Promise<void> {
   await client.config.flush();
