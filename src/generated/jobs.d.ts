@@ -17,9 +17,11 @@ export interface paths {
          *
          *     Default sort is `name` ascending. Sort by `name`, `created_at`,
          *     `updated_at`, `next_run_at`, or `enabled`, ascending or descending (prefix
-         *     `-` for descending). Filter with `filter[enabled]`, `filter[recurring]`,
-         *     and `filter[name]` (case-insensitive substring match on the name); filters
-         *     compose with AND.
+         *     `-` for descending). Filter with `filter[enabled]` (enabled in at least one
+         *     environment), `filter[recurring]`, and `filter[name]` (case-insensitive
+         *     substring match on the name); filters compose with AND. A scoped caller
+         *     sees each job's `environments` map narrowed to the environments it may
+         *     access.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -27,9 +29,12 @@ export interface paths {
          * Create Job
          * @description Create a job for this account.
          *
-         *     The caller supplies the job's id as `data.id`. Ids are unique
-         *     within an account and immutable. An enabled job begins scheduling
-         *     immediately.
+         *     The caller supplies the job's id as `data.id`. Ids are unique within an
+         *     account and immutable. A recurring job supplies `environments` to choose
+         *     where it runs and begins scheduling immediately in each enabled
+         *     environment. A one-off job is created in the environment named by the
+         *     `X-Smplkit-Environment` header (implied when the credential is scoped to a
+         *     single environment).
          */
         post: operations["create_job"];
         delete?: never;
@@ -54,8 +59,10 @@ export interface paths {
          * Update Job
          * @description Replace an existing job. Every writable field is overwritten.
          *
-         *     Enabling a paused job is a `PUT` with `enabled: true`; pausing is
-         *     `enabled: false`. Editing the schedule recomputes the next fire time.
+         *     Set enablement per environment via the `environments` map (a recurring
+         *     job), or by recreating a one-off job in the desired environment. Editing
+         *     the schedule recomputes the next fire time; changing only which
+         *     environments are enabled preserves the existing cadence.
          */
         put: operations["update_job"];
         post?: never;
@@ -82,9 +89,13 @@ export interface paths {
          * Run Job Now
          * @description Trigger one immediate run of the job (a `MANUAL` run).
          *
-         *     The job's schedule and enabled state are untouched. The run is enqueued and
-         *     executed by the worker; if the account is over its run allotment the run
-         *     will fail with reason `QUOTA_EXCEEDED` rather than being rejected here.
+         *     The job's schedule and enabled state are untouched. The run executes in the
+         *     environment named by the `X-Smplkit-Environment` header; when the job is
+         *     enabled in exactly one environment that environment is used, and a
+         *     single-environment credential implies it. The run executes the job's
+         *     effective configuration for that environment. It is enqueued and executed
+         *     by the worker; if the account is over its run allotment the run will fail
+         *     with reason `QUOTA_EXCEEDED` rather than being rejected here.
          */
         post: operations["run_job_now"];
         delete?: never;
@@ -116,6 +127,8 @@ export interface paths {
          *
          *     - `filter[job]={id}` — a single job's run history.
          *     - `filter[status]` — one state or a comma-separated list (any-of).
+         *     - `filter[environment]` — one environment key or a comma-separated list
+         *       (any-of); omitted covers every environment you can access.
          *     - `filter[created_at]` / `filter[started_at]` / `filter[finished_at]` /
          *       `filter[scheduled_for]` — half-open `[start,end)` date ranges (see each
          *       parameter for the interval syntax).
@@ -249,7 +262,11 @@ export interface components {
          * @description A scheduled unit of work: an HTTP request run on a schedule.
          *
          *     The job is the definition; each time it fires the service records a run
-         *     capturing the request, response, timing, and outcome.
+         *     capturing the request, response, timing, and outcome. A job is enabled per
+         *     environment: set `environments[<env>].enabled` to schedule runs there. A
+         *     recurring (cron) job may be enabled in several environments at once and
+         *     fires once per enabled environment; a one-off (`now` or future datetime)
+         *     job runs a single time in the environment it was created in.
          */
         Job: {
             /**
@@ -264,10 +281,9 @@ export interface components {
             description?: string | null;
             /**
              * Enabled
-             * @description Whether the job is scheduling runs. Set to `false` to pause without deleting.
-             * @default true
+             * @description Whether the job is enabled in at least one environment. Read-only roll-up of `environments[*].enabled`; set enablement per environment via `environments`.
              */
-            enabled: boolean;
+            readonly enabled?: boolean | null;
             /**
              * Type
              * @description Job type. Only `http` is supported today.
@@ -282,6 +298,13 @@ export interface components {
             schedule: string;
             /** @description The HTTP request to perform, including method, url, headers, body, and timeout. */
             configuration: components["schemas"]["JobHttpConfiguration"];
+            /**
+             * Environments
+             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry sets `enabled` (whether the job schedules runs in that environment) and an optional `configuration` override (omit to inherit the base `configuration`). A job with no entry for an environment is disabled there. For a recurring job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
+             */
+            environments?: {
+                [key: string]: components["schemas"]["JobEnvironment"];
+            };
             /**
              * Concurrency Policy
              * @description How overlapping runs are handled. `ALLOW` (the only value today) permits them.
@@ -348,7 +371,28 @@ export interface components {
          *           "url": "https://api.example.com/cache/warm"
          *         },
          *         "description": "Warms the product cache every night at 02:00 UTC.",
-         *         "enabled": true,
+         *         "environments": {
+         *           "production": {
+         *             "enabled": true
+         *           },
+         *           "staging": {
+         *             "configuration": {
+         *               "body": "{\"scope\":\"all\"}",
+         *               "headers": [
+         *                 {
+         *                   "name": "Authorization",
+         *                   "value": "Bearer staging"
+         *                 }
+         *               ],
+         *               "method": "POST",
+         *               "success_status": "2xx",
+         *               "timeout": 30,
+         *               "tls_verify": true,
+         *               "url": "https://staging.example.com/cache/warm"
+         *             },
+         *             "enabled": true
+         *           }
+         *         },
          *         "name": "Nightly cache warm",
          *         "schedule": "0 2 * * *",
          *         "type": "http"
@@ -370,6 +414,20 @@ export interface components {
              */
             type: "job";
             attributes: components["schemas"]["Job"];
+        };
+        /**
+         * JobEnvironment
+         * @description Per-environment override for a job's enablement and configuration.
+         */
+        JobEnvironment: {
+            /**
+             * Enabled
+             * @description Whether the job schedules runs in this environment. A job runs in an environment only via this field; it is disabled in every environment by default.
+             * @default false
+             */
+            enabled: boolean;
+            /** @description Per-environment HTTP request override. Omit to inherit the job's base `configuration`. When present, it fully replaces the base configuration for runs in this environment. */
+            configuration?: components["schemas"]["JobHttpConfiguration"] | null;
         };
         /**
          * JobHttpConfiguration
@@ -462,7 +520,28 @@ export interface components {
          *           "url": "https://api.example.com/cache/warm"
          *         },
          *         "description": "Warms the product cache every night at 02:00 UTC.",
-         *         "enabled": true,
+         *         "environments": {
+         *           "production": {
+         *             "enabled": true
+         *           },
+         *           "staging": {
+         *             "configuration": {
+         *               "body": "{\"scope\":\"all\"}",
+         *               "headers": [
+         *                 {
+         *                   "name": "Authorization",
+         *                   "value": "Bearer staging"
+         *                 }
+         *               ],
+         *               "method": "POST",
+         *               "success_status": "2xx",
+         *               "timeout": 30,
+         *               "tls_verify": true,
+         *               "url": "https://staging.example.com/cache/warm"
+         *             },
+         *             "enabled": true
+         *           }
+         *         },
          *         "name": "Nightly cache warm",
          *         "schedule": "0 2 * * *",
          *         "type": "http"
@@ -541,6 +620,11 @@ export interface components {
              * @description The job's version at the time the run executed.
              */
             job_version?: number | null;
+            /**
+             * Environment
+             * @description The environment this run executed in. A scheduled run inherits the firing job-environment; a manual run is created in the environment you name with the `X-Smplkit-Environment` header; a rerun copies its source run's environment.
+             */
+            environment: string;
             /**
              * Trigger
              * @description Why the run exists: `SCHEDULE`, `MANUAL` (Run now), or `RERUN`.
@@ -653,6 +737,7 @@ export interface components {
          * @example {
          *       "attributes": {
          *         "created_at": "2026-06-05T02:00:00Z",
+         *         "environment": "production",
          *         "finished_at": "2026-06-05T02:00:00.430Z",
          *         "job": "nightly-cache-warm",
          *         "job_version": 3,
@@ -933,6 +1018,8 @@ export interface operations {
                 "filter[job]"?: string | null;
                 /** @description Restrict to runs in the given lifecycle state. One of `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELED`, or a comma-separated list of them to match any (e.g. `SUCCEEDED,FAILED`). */
                 "filter[status]"?: string | null;
+                /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results cover every environment you can access. */
+                "filter[environment]"?: string | null;
                 /** @description Restrict to runs whose `created_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
                 "filter[created_at]"?: string | null;
                 /** @description Restrict to runs whose `started_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
