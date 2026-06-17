@@ -16,7 +16,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import createClient from "openapi-fetch";
 import type { paths } from "../../../src/generated/jobs.d.ts";
 import { JobsClient, RunsClient } from "../../../src/jobs/client.js";
-import { HttpConfig, HttpMethod, Job, Run, Usage } from "../../../src/jobs/types.js";
+import {
+  HttpConfig,
+  HttpMethod,
+  Job,
+  JobEnvironment,
+  Run,
+  Usage,
+} from "../../../src/jobs/types.js";
 import * as JobsNamespace from "../../../src/jobs/index.js";
 import { SmplNotFoundError, SmplError, SmplConnectionError } from "../../../src/errors.js";
 
@@ -122,7 +129,6 @@ function _newJob(client: JobsClient): Job {
       headers: [{ name: "Authorization", value: "Bearer s3cr3t" }],
       body: '{"scope":"all"}',
     }),
-    enabled: false,
   });
 }
 
@@ -251,7 +257,9 @@ describe("Job model", () => {
       configuration: new HttpConfig({ url: "https://e.com" }),
     });
     expect(job.description).toBeNull();
-    expect(job.enabled).toBe(true);
+    expect(job.enabled).toBe(false);
+    expect(job.environments).toEqual({});
+    expect(job.recurring).toBeNull();
     expect(job.type).toBe("http");
     expect(job.concurrencyPolicy).toBe("ALLOW");
     expect(job.nextRunAt).toBeNull();
@@ -371,7 +379,9 @@ describe("jobs CRUD", () => {
     const job = await client.get(JOB_ID);
     expect(job.name).toBe("");
     expect(job.description).toBeNull();
-    expect(job.enabled).toBe(true);
+    expect(job.enabled).toBe(false);
+    expect(job.environments).toEqual({});
+    expect(job.recurring).toBeNull();
     expect(job.type).toBe("http");
     expect(job.schedule).toBe("");
     expect(job.concurrencyPolicy).toBe("ALLOW");
@@ -760,5 +770,238 @@ describe("JobsClient construction", () => {
     expect(JobsNamespace.Run).toBe(Run);
     expect(JobsNamespace.Usage).toBe(Usage);
     expect(JobsNamespace.HttpMethod).toBe(HttpMethod);
+  });
+});
+
+describe("jobs environment scoping", () => {
+  function envClient(environment?: string): JobsClient {
+    return new JobsClient({
+      apiKey: "sk_jobs_test",
+      baseDomain: "test",
+      scheme: "http",
+      environment,
+    });
+  }
+
+  test("JobEnvironment defaults", () => {
+    const e = new JobEnvironment();
+    expect(e.enabled).toBe(false);
+    expect(e.configuration).toBeNull();
+  });
+
+  test("setEnabled / isEnabled per environment and roll-up", () => {
+    const job = _newJob(makeClient());
+    expect(job.isEnabled()).toBe(false); // roll-up default
+    job.setEnabled(true, "production");
+    expect(job.isEnabled("production")).toBe(true); // per-env present
+    expect(job.isEnabled("staging")).toBe(false); // env absent
+    job.enabled = true; // simulate server roll-up
+    expect(job.isEnabled()).toBe(true);
+  });
+
+  test("setConfiguration / getConfiguration base and per environment", () => {
+    const base = new HttpConfig({ url: "https://base.example.com" });
+    const job = new Job(makeClient(), {
+      id: JOB_ID,
+      name: "x",
+      schedule: "0 2 * * *",
+      configuration: base,
+    });
+    expect(job.getConfiguration()).toBe(base);
+    expect(job.getConfiguration("production")).toBe(base); // no override -> base
+    const override = new HttpConfig({ url: "https://prod.example.com" });
+    job.setConfiguration(override, "production");
+    expect(job.getConfiguration("production")).toBe(override); // override wins
+    // an env entry with no configuration falls back to base
+    job.setEnabled(true, "staging");
+    expect(job.getConfiguration("staging")).toBe(base);
+    // base setter (no environment)
+    const newBase = new HttpConfig({ url: "https://new.example.com" });
+    job.setConfiguration(newBase);
+    expect(job.configuration).toBe(newBase);
+  });
+
+  test("setSchedule sets the (environment-agnostic) schedule", () => {
+    const job = _newJob(makeClient());
+    job.setSchedule("30 2 * * *");
+    expect(job.schedule).toBe("30 2 * * *");
+  });
+
+  test("create sends the environments map and drops base enabled", async () => {
+    const client = makeClient();
+    const job = client.new(JOB_ID, {
+      name: "x",
+      schedule: "0 2 * * *",
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    job.setEnabled(true, "production");
+    job.setConfiguration(new HttpConfig({ url: "https://staging.example.com" }), "staging");
+    job.setEnabled(false, "staging");
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect(sent.data.attributes.enabled).toBeUndefined(); // read-only roll-up not sent
+    expect(sent.data.attributes.environments.production).toEqual({
+      enabled: true,
+      configuration: null,
+    });
+    expect(sent.data.attributes.environments.staging.enabled).toBe(false);
+    expect(sent.data.attributes.environments.staging.configuration.url).toBe(
+      "https://staging.example.com",
+    );
+  });
+
+  test("get parses environments (with and without config override) and recurring", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _jobResource({
+          recurring: true,
+          environments: {
+            production: { enabled: true },
+            staging: {
+              enabled: false,
+              configuration: { method: "POST", url: "https://staging.example.com/x", headers: [] },
+            },
+          },
+        }),
+      }),
+    );
+    const job = await client.get(JOB_ID);
+    expect(job.recurring).toBe(true);
+    expect(job.environments.production.enabled).toBe(true);
+    expect(job.environments.production.configuration).toBeNull();
+    expect(job.environments.staging.configuration?.url).toBe("https://staging.example.com/x");
+  });
+
+  test("one-off birth environment is sent as a header on create", async () => {
+    const client = makeClient();
+    const job = client.new("one-off", {
+      name: "x",
+      schedule: "now",
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+      environment: "staging",
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, "one-off") }, 201));
+    await job.save();
+    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
+      "staging",
+    );
+  });
+
+  test("client-level environment is the default birth header and update header", async () => {
+    const client = envClient("production");
+    const job = client.new(JOB_ID, {
+      name: "x",
+      schedule: "now",
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save(); // create
+    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
+      "production",
+    );
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, JOB_ID) }));
+    job.name = "renamed";
+    await job.save(); // update
+    expect((mockFetch.mock.calls[1][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
+      "production",
+    );
+  });
+
+  test("create with no environment sends no header", async () => {
+    const job = _newJob(makeClient());
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBeNull();
+  });
+
+  test("run-now sends the environment header and the returned run is bound", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _runResource({ environment: "production" }) }),
+    );
+    const run = await client.run(JOB_ID, { environment: "production" });
+    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
+      "production",
+    );
+    expect(run.environment).toBe("production");
+    // returned run is active-record: rerun() works
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _runResource({ trigger: "RERUN" }) }));
+    expect((await run.rerun()).trigger).toBe("RERUN");
+  });
+
+  test("job.trigger sends the run-now header", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }));
+    const job = await client.get(JOB_ID);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _runResource({ environment: "production" }) }),
+    );
+    const run = await job.trigger("production");
+    expect(run.environment).toBe("production");
+    expect((mockFetch.mock.calls[1][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
+      "production",
+    );
+  });
+
+  test("job.listRuns filters by environment", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }));
+    const job = await client.get(JOB_ID);
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await job.listRuns({ environment: "production" });
+    const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
+    expect(url.searchParams.get("filter[environment]")).toBe("production");
+    expect(url.searchParams.get("filter[job]")).toBe(JOB_ID);
+  });
+
+  test("runs.list resolves filter[environment]: explicit, client default, none", async () => {
+    // explicit list wins
+    const c1 = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await c1.runs.list({ environments: ["production", "staging"] });
+    expect(
+      new URL((mockFetch.mock.calls[0][0] as Request).url).searchParams.get("filter[environment]"),
+    ).toBe("production,staging");
+    // client default applies
+    const c2 = envClient("production");
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await c2.runs.list();
+    expect(
+      new URL((mockFetch.mock.calls[1][0] as Request).url).searchParams.get("filter[environment]"),
+    ).toBe("production");
+    // neither -> param omitted
+    const c3 = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await c3.runs.list();
+    expect(
+      new URL((mockFetch.mock.calls[2][0] as Request).url).searchParams.get("filter[environment]"),
+    ).toBeNull();
+  });
+
+  test("runs.get / cancel / rerun return active-record runs", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _runResource({ environment: "staging" }) }),
+    );
+    const run = await client.runs.get(RUN_ID);
+    expect(run.environment).toBe("staging");
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _runResource({ status: "CANCELED" }) }));
+    expect((await run.cancel()).status).toBe("CANCELED");
+  });
+
+  test("active-record methods throw without a client", async () => {
+    const job = new Job(null, {
+      id: JOB_ID,
+      name: "x",
+      schedule: "now",
+      configuration: new HttpConfig({ url: "https://e.com" }),
+    });
+    await expect(job.trigger()).rejects.toThrow(/cannot trigger/);
+    await expect(job.listRuns()).rejects.toThrow(/cannot list runs/);
+    const run = new Run(_runResource().attributes, RUN_ID); // no runs backref
+    await expect(run.rerun()).rejects.toThrow(/cannot rerun/);
+    await expect(run.cancel()).rejects.toThrow(/cannot cancel/);
   });
 });
