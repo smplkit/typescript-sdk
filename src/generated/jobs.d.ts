@@ -901,7 +901,10 @@ export interface operations {
     create_job: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The environment to operate in. Names the single environment a one-off job is born in (or a manual run executes in). Optional when the credential is scoped to a single environment (which is then implied); required when the credential can reach several environments and the choice is otherwise ambiguous. Ignored for a recurring job, whose environments come from its `environments` map. */
+                "X-Smplkit-Environment"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -947,7 +950,10 @@ export interface operations {
     update_job: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The environment to operate in. Names the single environment a one-off job is born in (or a manual run executes in). Optional when the credential is scoped to a single environment (which is then implied); required when the credential can reach several environments and the choice is otherwise ambiguous. Ignored for a recurring job, whose environments come from its `environments` map. */
+                "X-Smplkit-Environment"?: string | null;
+            };
             path: {
                 job_id: string;
             };
@@ -993,7 +999,10 @@ export interface operations {
     run_job_now: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The environment to operate in. Names the single environment a one-off job is born in (or a manual run executes in). Optional when the credential is scoped to a single environment (which is then implied); required when the credential can reach several environments and the choice is otherwise ambiguous. Ignored for a recurring job, whose environments come from its `environments` map. */
+                "X-Smplkit-Environment"?: string | null;
+            };
             path: {
                 job_id: string;
             };
