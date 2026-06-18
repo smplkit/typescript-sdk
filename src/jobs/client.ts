@@ -470,6 +470,8 @@ export class JobsClient {
   async list(params: ListJobsParams = {}): Promise<Job[]> {
     const query: Record<string, string | number | boolean> = {};
     if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
+    if (params.recurring !== undefined) query["filter[recurring]"] = params.recurring;
+    if (params.name !== undefined) query["filter[name]"] = params.name;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
 
