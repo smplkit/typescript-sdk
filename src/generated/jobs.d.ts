@@ -15,13 +15,12 @@ export interface paths {
          * List Jobs
          * @description List this account's jobs.
          *
-         *     Default sort is `name` ascending. Sort by `name`, `created_at`,
-         *     `updated_at`, `next_run_at`, or `enabled`, ascending or descending (prefix
-         *     `-` for descending). Filter with `filter[enabled]` (enabled in at least one
-         *     environment), `filter[recurring]`, and `filter[name]` (case-insensitive
-         *     substring match on the name); filters compose with AND. A scoped caller
-         *     sees each job's `environments` map narrowed to the environments it may
-         *     access.
+         *     Default sort is `name` ascending. Sort by `name`, `created_at`, or
+         *     `updated_at`, ascending or descending (prefix `-` for descending). Filter
+         *     with `filter[recurring]` and `filter[name]` (case-insensitive substring
+         *     match on the name); filters compose with AND. Each job reports its
+         *     per-environment enablement and `next_run_at` inside its `environments` map;
+         *     a scoped caller sees that map narrowed to the environments it may access.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -60,9 +59,10 @@ export interface paths {
          * @description Replace an existing job. Every writable field is overwritten.
          *
          *     Set enablement per environment via the `environments` map (a recurring
-         *     job), or by recreating a one-off job in the desired environment. Editing
-         *     the schedule recomputes the next fire time; changing only which
-         *     environments are enabled preserves the existing cadence.
+         *     job), or by recreating a one-off job in the desired environment. Each
+         *     environment may carry its own cron `schedule` override. Editing an
+         *     environment's effective schedule recomputes its next fire time; an edit that
+         *     leaves an environment's schedule unchanged preserves its existing cadence.
          */
         put: operations["update_job"];
         post?: never;
@@ -220,7 +220,8 @@ export interface paths {
          * @description Report this account's current-period usage against its plan allotments.
          *
          *     `runs_used` is the number of runs metered so far this calendar month;
-         *     `active_jobs` is the number of currently-enabled jobs.
+         *     `active_jobs` is the number of recurring (scheduled) jobs, which is what the
+         *     plan's job limit bounds.
          */
         get: operations["get_usage"];
         put?: never;
@@ -262,11 +263,13 @@ export interface components {
          * @description A scheduled unit of work: an HTTP request run on a schedule.
          *
          *     The job is the definition; each time it fires the service records a run
-         *     capturing the request, response, timing, and outcome. A job is enabled per
-         *     environment: set `environments[<env>].enabled` to schedule runs there. A
+         *     capturing the request, response, timing, and outcome. A job runs per
+         *     environment: set `environments[<env>].enabled` to schedule runs there, and
+         *     optionally give that environment its own `schedule` or `configuration`. A
          *     recurring (cron) job may be enabled in several environments at once and
-         *     fires once per enabled environment; a one-off (`now` or future datetime)
-         *     job runs a single time in the environment it was created in.
+         *     fires once per enabled environment, each on its own next-fire schedule; a
+         *     one-off (`now` or future datetime) job runs a single time in the environment
+         *     it was created in.
          */
         Job: {
             /**
@@ -280,11 +283,6 @@ export interface components {
              */
             description?: string | null;
             /**
-             * Enabled
-             * @description Whether the job is enabled in at least one environment. Read-only roll-up of `environments[*].enabled`; set enablement per environment via `environments`.
-             */
-            readonly enabled?: boolean | null;
-            /**
              * Type
              * @description Job type. Only `http` is supported today.
              * @default http
@@ -293,14 +291,14 @@ export interface components {
             type: "http";
             /**
              * Schedule
-             * @description When the job runs. One of: an ISO-8601 datetime (a one-off run at that instant), a 5-field cron expression evaluated in **UTC** (recurring), or the literal `now` (run once, as soon as possible). A datetime or `now` job disables itself after it fires.
+             * @description The base schedule every environment inherits unless it overrides it. One of: an ISO-8601 datetime (a one-off run at that instant), a 5-field cron expression evaluated in **UTC** (recurring), or the literal `now` (run once, as soon as possible). A datetime or `now` job disables itself after it fires.
              */
             schedule: string;
             /** @description The HTTP request to perform, including method, url, headers, body, and timeout. */
             configuration: components["schemas"]["JobHttpConfiguration"];
             /**
              * Environments
-             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry sets `enabled` (whether the job schedules runs in that environment) and an optional `configuration` override (omit to inherit the base `configuration`). A job with no entry for an environment is disabled there. For a recurring job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
+             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry sets `enabled` (whether the job schedules runs in that environment), an optional `schedule` override (a cron expression for recurring jobs; omit to inherit the base `schedule`), and an optional `configuration` override (omit to inherit the base `configuration`); it also reports the read-only `next_run_at` for that environment. A job with no entry for an environment is disabled there. For a recurring job, supply this map to choose where and how it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
              */
             environments?: {
                 [key: string]: components["schemas"]["JobEnvironment"];
@@ -313,13 +311,8 @@ export interface components {
              */
             concurrency_policy: "ALLOW";
             /**
-             * Next Run At
-             * @description The next scheduled fire time. `null` once a one-off job has fired.
-             */
-            readonly next_run_at?: string | null;
-            /**
              * Recurring
-             * @description Whether the job runs on a repeating schedule. `true` for a cron schedule; `false` for a one-off datetime or `now` schedule, which runs a single time. Derived from `schedule`.
+             * @description Whether the job runs on a repeating schedule. `true` for a cron schedule; `false` for a one-off datetime or `now` schedule, which runs a single time. Derived from the base `schedule`.
              */
             readonly recurring?: boolean | null;
             /**
@@ -390,7 +383,8 @@ export interface components {
          *               "tls_verify": true,
          *               "url": "https://staging.example.com/cache/warm"
          *             },
-         *             "enabled": true
+         *             "enabled": true,
+         *             "schedule": "0 3 * * *"
          *           }
          *         },
          *         "name": "Nightly cache warm",
@@ -417,7 +411,7 @@ export interface components {
         };
         /**
          * JobEnvironment
-         * @description Per-environment override for a job's enablement and configuration.
+         * @description Per-environment override for a job's enablement, schedule, and configuration.
          */
         JobEnvironment: {
             /**
@@ -426,8 +420,18 @@ export interface components {
              * @default false
              */
             enabled: boolean;
+            /**
+             * Schedule
+             * @description Per-environment schedule override. Omit to inherit the job's base `schedule`. When present, it must be a 5-field cron expression evaluated in **UTC** (e.g. `0 3 * * *`), and is only allowed on a recurring (cron) job — it varies the cadence within that environment, it cannot turn a one-off job recurring or vice-versa.
+             */
+            schedule?: string | null;
             /** @description Per-environment HTTP request override. Omit to inherit the job's base `configuration`. When present, it fully replaces the base configuration for runs in this environment. */
             configuration?: components["schemas"]["JobHttpConfiguration"] | null;
+            /**
+             * Next Run At
+             * @description The next scheduled fire time in this environment. `null` when the environment is not enabled, or once a one-off run has fired.
+             */
+            readonly next_run_at?: string | null;
         };
         /**
          * JobHttpConfiguration
@@ -539,7 +543,8 @@ export interface components {
          *               "tls_verify": true,
          *               "url": "https://staging.example.com/cache/warm"
          *             },
-         *             "enabled": true
+         *             "enabled": true,
+         *             "schedule": "0 3 * * *"
          *           }
          *         },
          *         "name": "Nightly cache warm",
@@ -812,12 +817,12 @@ export interface components {
             runs_included: number;
             /**
              * Active Jobs
-             * @description Number of currently-enabled jobs.
+             * @description Number of recurring (scheduled) jobs.
              */
             active_jobs: number;
             /**
              * Active Jobs Limit
-             * @description Maximum enabled jobs the plan allows (`-1` means unlimited).
+             * @description Maximum recurring jobs the plan allows (`-1` means unlimited).
              */
             active_jobs_limit: number;
         };
@@ -868,12 +873,11 @@ export interface operations {
     list_jobs: {
         parameters: {
             query?: {
-                "filter[enabled]"?: boolean | null;
                 "filter[recurring]"?: boolean | null;
                 /** @description Case-insensitive substring match on the job `name` (matches when the name contains the given text). */
                 "filter[name]"?: string | null;
-                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `enabled`, `-enabled`, `name`, `-name`, `next_run_at`, `-next_run_at`, `updated_at`, `-updated_at`. */
-                sort?: "created_at" | "-created_at" | "enabled" | "-enabled" | "name" | "-name" | "next_run_at" | "-next_run_at" | "updated_at" | "-updated_at";
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "name" | "-name" | "updated_at" | "-updated_at";
                 /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
                 "page[number]"?: number;
                 /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
