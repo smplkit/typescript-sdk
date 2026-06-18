@@ -539,6 +539,10 @@ export interface RunModelClient {
 export interface ListJobsParams {
   /** Filter to jobs enabled in at least one environment (the read-only roll-up). */
   enabled?: boolean;
+  /** Filter to recurring (`true`) or one-off (`false`) jobs. Omit to list both. */
+  recurring?: boolean;
+  /** Filter to jobs whose name contains this text (case-insensitive). Omit to list all. */
+  name?: string;
   /** 1-based page number to return. */
   pageNumber?: number;
   /** Items per page. */

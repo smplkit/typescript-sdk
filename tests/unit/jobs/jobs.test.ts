@@ -333,12 +333,20 @@ describe("jobs CRUD", () => {
     expect(all[0]._client).toBe(client);
 
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
-    const filtered = await client.list({ enabled: false, pageNumber: 1, pageSize: 50 });
+    const filtered = await client.list({
+      enabled: false,
+      recurring: true,
+      name: "health",
+      pageNumber: 1,
+      pageSize: 50,
+    });
     expect(filtered).toEqual([]);
-    const url = (mockFetch.mock.calls[1][0] as Request).url;
-    expect(url).toContain("filter[enabled]=false");
-    expect(url).toContain("page[number]=1");
-    expect(url).toContain("page[size]=50");
+    const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
+    expect(url.searchParams.get("filter[enabled]")).toBe("false");
+    expect(url.searchParams.get("filter[recurring]")).toBe("true");
+    expect(url.searchParams.get("filter[name]")).toBe("health");
+    expect(url.searchParams.get("page[number]")).toBe("1");
+    expect(url.searchParams.get("page[size]")).toBe("50");
   });
 
   test("list tolerates a missing data array", async () => {
