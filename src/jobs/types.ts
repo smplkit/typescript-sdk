@@ -106,25 +106,50 @@ export class HttpConfig {
 }
 
 /**
- * Per-environment override for a job's enablement and configuration.
+ * Per-environment override for a job's enablement, schedule, and configuration.
  *
  * A recurring job fires in a given environment only when that environment has
  * an entry in {@link Job.environments} with `enabled` set to `true`; an
- * environment with no entry (or `enabled` false) does not fire there.
+ * environment with no entry (or `enabled` false) does not fire there. An entry
+ * may carry its own cron {@link schedule} override (varying the cadence within
+ * that environment) and exposes the read-only {@link nextRunAt} for it.
  */
 export class JobEnvironment {
   /** Whether the job schedules runs in this environment. Defaults to `false`. */
   enabled: boolean;
+  /**
+   * Optional per-environment cron schedule override. `null` (the default)
+   * inherits the job's base {@link Job.schedule}. When set, it must be a
+   * 5-field cron expression evaluated in UTC; it only applies to a recurring
+   * job and varies that environment's cadence — it cannot turn a one-off job
+   * recurring or vice-versa.
+   */
+  schedule: string | null;
   /**
    * Optional per-environment request configuration that fully replaces the
    * job's base {@link Job.configuration} for this environment. `null` (the
    * default) inherits the base configuration.
    */
   configuration: HttpConfig | null;
+  /**
+   * Read-only: the next scheduled fire time in this environment. `null` when
+   * the environment is not enabled, or once a one-off run has fired. Populated
+   * from the server on reads; never sent on writes.
+   */
+  nextRunAt: string | null;
 
-  constructor(fields: { enabled?: boolean; configuration?: HttpConfig | null } = {}) {
+  constructor(
+    fields: {
+      enabled?: boolean;
+      schedule?: string | null;
+      configuration?: HttpConfig | null;
+      nextRunAt?: string | null;
+    } = {},
+  ) {
     this.enabled = fields.enabled ?? false;
+    this.schedule = fields.schedule ?? null;
     this.configuration = fields.configuration ?? null;
+    this.nextRunAt = fields.nextRunAt ?? null;
   }
 }
 
@@ -146,12 +171,6 @@ export class Job {
   name: string;
   /** Free-text description. `null` when unset. */
   description: string | null;
-  /**
-   * Whether the job is enabled in at least one environment. Read-only roll-up
-   * of `environments[*].enabled`; set enablement per environment via
-   * {@link environments} / {@link setEnabled}.
-   */
-  enabled: boolean;
   /** Job type. Only `"http"` is supported today. */
   type: string;
   /**
@@ -180,8 +199,6 @@ export class Job {
   recurring: boolean | null;
   /** How overlapping runs are handled. `"ALLOW"` (the only value) permits them. */
   concurrencyPolicy: string;
-  /** The next scheduled fire time. `null` once a one-off job has fired. */
-  nextRunAt: string | null;
   /** When the job was created. `null` for an unsaved instance. */
   createdAt: string | null;
   /** When the job was last modified. */
@@ -190,6 +207,16 @@ export class Job {
   deletedAt: string | null;
   /** Monotonic version counter; bumped on every server-side write. */
   version: number | null;
+
+  /**
+   * Whether the job is enabled in at least one environment. Read-only roll-up
+   * derived from {@link environments} — `true` iff any environment override has
+   * `enabled` set. Set enablement per environment via {@link setEnabled}; this
+   * value is never read from the wire.
+   */
+  get enabled(): boolean {
+    return Object.values(this.environments).some((env) => env.enabled);
+  }
 
   /** @internal */
   _client: JobModelClient | null;
@@ -211,11 +238,9 @@ export class Job {
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
-      enabled?: boolean;
       recurring?: boolean | null;
       type?: string;
       concurrencyPolicy?: string;
-      nextRunAt?: string | null;
       createdAt?: string | null;
       updatedAt?: string | null;
       deletedAt?: string | null;
@@ -228,13 +253,11 @@ export class Job {
     this.name = fields.name;
     this.description = fields.description ?? null;
     this.environments = fields.environments ?? {};
-    this.enabled = fields.enabled ?? false;
     this.recurring = fields.recurring ?? null;
     this.type = fields.type ?? "http";
     this.schedule = fields.schedule;
     this.configuration = fields.configuration;
     this.concurrencyPolicy = fields.concurrencyPolicy ?? "ALLOW";
-    this.nextRunAt = fields.nextRunAt ?? null;
     this.createdAt = fields.createdAt ?? null;
     this.updatedAt = fields.updatedAt ?? null;
     this.deletedAt = fields.deletedAt ?? null;
@@ -248,7 +271,8 @@ export class Job {
    * Upsert behavior is driven by {@link createdAt}: a job with no
    * `createdAt` is created (POST); otherwise it's full-replace updated
    * (PUT). After the call, every field is refreshed from the server
-   * response (including newly-assigned `createdAt`, `version`, `nextRunAt`).
+   * response (including newly-assigned `createdAt`, `version`, and each
+   * environment's read-only `nextRunAt`).
    */
   async save(): Promise<void> {
     if (this._client === null) {
@@ -332,13 +356,20 @@ export class Job {
   }
 
   /**
-   * Set the job's schedule in memory. The schedule is **environment-agnostic**
-   * — a job has a single cron / datetime / `"now"` schedule shared across
-   * every environment it runs in, so this takes no `environment`. Call
-   * {@link save} to persist.
+   * Set the job's schedule in memory — the base {@link schedule} with
+   * `environment` omitted, or a per-environment cron override otherwise. A
+   * per-environment override varies the cadence in that environment only and
+   * applies to recurring jobs; omit `environment` to set the schedule every
+   * environment inherits. Setting a per-environment override creates the
+   * override entry if it doesn't exist yet (preserving any already-set
+   * `enabled` / `configuration` on it). Call {@link save} to persist.
    */
-  setSchedule(schedule: string): void {
-    this.schedule = schedule;
+  setSchedule(schedule: string, environment?: string): void {
+    if (environment === undefined) {
+      this.schedule = schedule;
+    } else {
+      this._environmentOverride(environment).schedule = schedule;
+    }
   }
 
   /**
@@ -386,12 +417,10 @@ export class Job {
     this.description = other.description;
     this.environments = other.environments;
     this.recurring = other.recurring;
-    this.enabled = other.enabled;
     this.type = other.type;
     this.schedule = other.schedule;
     this.configuration = other.configuration;
     this.concurrencyPolicy = other.concurrencyPolicy;
-    this.nextRunAt = other.nextRunAt;
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
     this.deletedAt = other.deletedAt;
@@ -537,8 +566,6 @@ export interface RunModelClient {
 
 /** Parameters accepted by `client.jobs.list(...)`. */
 export interface ListJobsParams {
-  /** Filter to jobs enabled in at least one environment (the read-only roll-up). */
-  enabled?: boolean;
   /** Filter to recurring (`true`) or one-off (`false`) jobs. Omit to list both. */
   recurring?: boolean;
   /** Filter to jobs whose name contains this text (case-insensitive). Omit to list all. */

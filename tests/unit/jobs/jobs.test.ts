@@ -66,7 +66,6 @@ function _jobResource(
     attributes: {
       name: "Nightly cache warm",
       description: null,
-      enabled: false,
       type: "http",
       schedule: "0 2 * * *",
       configuration: {
@@ -80,7 +79,6 @@ function _jobResource(
         ca_cert: null,
       },
       concurrency_policy: "ALLOW",
-      next_run_at: "2026-06-06T02:00:00+00:00",
       created_at: "2026-06-05T12:00:00+00:00",
       updated_at: "2026-06-05T12:00:00+00:00",
       deleted_at: null,
@@ -257,12 +255,11 @@ describe("Job model", () => {
       configuration: new HttpConfig({ url: "https://e.com" }),
     });
     expect(job.description).toBeNull();
-    expect(job.enabled).toBe(false);
+    expect(job.enabled).toBe(false); // derived roll-up over an empty environments map
     expect(job.environments).toEqual({});
     expect(job.recurring).toBeNull();
     expect(job.type).toBe("http");
     expect(job.concurrencyPolicy).toBe("ALLOW");
-    expect(job.nextRunAt).toBeNull();
     expect(job.createdAt).toBeNull();
     expect(job.updatedAt).toBeNull();
     expect(job.deletedAt).toBeNull();
@@ -314,13 +311,22 @@ describe("jobs CRUD", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     job.name = "renamed";
-    job.enabled = true;
+    job.setEnabled(true, "production");
     mockFetch.mockResolvedValueOnce(
-      jsonResponse({ data: _jobResource({ name: "renamed", enabled: true, version: 2 }) }),
+      jsonResponse({
+        data: _jobResource({
+          name: "renamed",
+          version: 2,
+          environments: { production: { enabled: true } },
+        }),
+      }),
     );
     await job.save();
     expect(job.version).toBe(2);
+    // `enabled` is the derived roll-up: true because the server echoed an
+    // enabled `production` environment.
     expect(job.enabled).toBe(true);
+    expect(job.isEnabled("production")).toBe(true);
     expect((mockFetch.mock.calls[1][0] as Request).method).toBe("PUT");
   });
 
@@ -334,7 +340,6 @@ describe("jobs CRUD", () => {
 
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
     const filtered = await client.list({
-      enabled: false,
       recurring: true,
       name: "health",
       pageNumber: 1,
@@ -342,7 +347,7 @@ describe("jobs CRUD", () => {
     });
     expect(filtered).toEqual([]);
     const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
-    expect(url.searchParams.get("filter[enabled]")).toBe("false");
+    expect(url.searchParams.has("filter[enabled]")).toBe(false); // param removed from the API
     expect(url.searchParams.get("filter[recurring]")).toBe("true");
     expect(url.searchParams.get("filter[name]")).toBe("health");
     expect(url.searchParams.get("page[number]")).toBe("1");
@@ -387,13 +392,12 @@ describe("jobs CRUD", () => {
     const job = await client.get(JOB_ID);
     expect(job.name).toBe("");
     expect(job.description).toBeNull();
-    expect(job.enabled).toBe(false);
+    expect(job.enabled).toBe(false); // derived: no environments → not enabled anywhere
     expect(job.environments).toEqual({});
     expect(job.recurring).toBeNull();
     expect(job.type).toBe("http");
     expect(job.schedule).toBe("");
     expect(job.concurrencyPolicy).toBe("ALLOW");
-    expect(job.nextRunAt).toBeNull();
     expect(job.createdAt).toBeNull();
     expect(job.version).toBeNull();
     expect(job.configuration.url).toBe("");
@@ -794,17 +798,38 @@ describe("jobs environment scoping", () => {
   test("JobEnvironment defaults", () => {
     const e = new JobEnvironment();
     expect(e.enabled).toBe(false);
+    expect(e.schedule).toBeNull();
     expect(e.configuration).toBeNull();
+    expect(e.nextRunAt).toBeNull();
   });
 
-  test("setEnabled / isEnabled per environment and roll-up", () => {
+  test("JobEnvironment keeps explicit field values", () => {
+    const e = new JobEnvironment({
+      enabled: true,
+      schedule: "0 3 * * *",
+      configuration: new HttpConfig({ url: "https://e.com" }),
+      nextRunAt: "2026-06-07T03:00:00+00:00",
+    });
+    expect(e.enabled).toBe(true);
+    expect(e.schedule).toBe("0 3 * * *");
+    expect(e.configuration?.url).toBe("https://e.com");
+    expect(e.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
+  });
+
+  test("setEnabled / isEnabled per environment and derived roll-up", () => {
     const job = _newJob(makeClient());
-    expect(job.isEnabled()).toBe(false); // roll-up default
+    expect(job.isEnabled()).toBe(false); // roll-up default (no environments)
+    expect(job.enabled).toBe(false);
     job.setEnabled(true, "production");
     expect(job.isEnabled("production")).toBe(true); // per-env present
     expect(job.isEnabled("staging")).toBe(false); // env absent
-    job.enabled = true; // simulate server roll-up
+    // the no-arg roll-up is derived from the environments map — enabling any
+    // environment flips it to true, with nothing read from the wire
+    expect(job.enabled).toBe(true);
     expect(job.isEnabled()).toBe(true);
+    job.setEnabled(false, "production");
+    expect(job.enabled).toBe(false); // back to false once no environment is enabled
+    expect(job.isEnabled()).toBe(false);
   });
 
   test("setConfiguration / getConfiguration base and per environment", () => {
@@ -829,13 +854,24 @@ describe("jobs environment scoping", () => {
     expect(job.configuration).toBe(newBase);
   });
 
-  test("setSchedule sets the (environment-agnostic) schedule", () => {
+  test("setSchedule sets the base schedule and per-environment overrides", () => {
     const job = _newJob(makeClient());
+    // base schedule (no environment)
     job.setSchedule("30 2 * * *");
     expect(job.schedule).toBe("30 2 * * *");
+    expect(job.environments).toEqual({});
+    // per-environment override creates the entry, leaving the base untouched
+    job.setSchedule("0 5 * * *", "production");
+    expect(job.schedule).toBe("30 2 * * *");
+    expect(job.environments.production.schedule).toBe("0 5 * * *");
+    // a per-env schedule override preserves an already-set enabled flag
+    job.setEnabled(true, "staging");
+    job.setSchedule("0 6 * * *", "staging");
+    expect(job.environments.staging.enabled).toBe(true);
+    expect(job.environments.staging.schedule).toBe("0 6 * * *");
   });
 
-  test("create sends the environments map and drops base enabled", async () => {
+  test("create sends the environments map (schedule when set, never enabled/next_run_at)", async () => {
     const client = makeClient();
     const job = client.new(JOB_ID, {
       name: "x",
@@ -843,33 +879,46 @@ describe("jobs environment scoping", () => {
       configuration: new HttpConfig({ url: "https://api.example.com" }),
     });
     job.setEnabled(true, "production");
+    job.setSchedule("0 5 * * *", "production"); // per-env cron override
     job.setConfiguration(new HttpConfig({ url: "https://staging.example.com" }), "staging");
     job.setEnabled(false, "staging");
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
     expect(sent.data.attributes.enabled).toBeUndefined(); // read-only roll-up not sent
+    // production carries its per-environment schedule override
     expect(sent.data.attributes.environments.production).toEqual({
       enabled: true,
       configuration: null,
+      schedule: "0 5 * * *",
     });
+    // the read-only next_run_at is never serialized onto the wire
+    expect(sent.data.attributes.environments.production.next_run_at).toBeUndefined();
+    // staging has no schedule override, so the key is omitted entirely
     expect(sent.data.attributes.environments.staging.enabled).toBe(false);
+    expect("schedule" in sent.data.attributes.environments.staging).toBe(false);
     expect(sent.data.attributes.environments.staging.configuration.url).toBe(
       "https://staging.example.com",
     );
   });
 
-  test("get parses environments (with and without config override) and recurring", async () => {
+  test("get parses environments (schedule, config override, next_run_at) and recurring", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: _jobResource({
           recurring: true,
           environments: {
-            production: { enabled: true },
+            production: {
+              enabled: true,
+              schedule: "0 3 * * *", // per-env cron override
+              next_run_at: "2026-06-07T03:00:00+00:00", // read-only
+            },
             staging: {
               enabled: false,
               configuration: { method: "POST", url: "https://staging.example.com/x", headers: [] },
+              // no schedule override, next_run_at null while disabled
+              next_run_at: null,
             },
           },
         }),
@@ -877,8 +926,14 @@ describe("jobs environment scoping", () => {
     );
     const job = await client.get(JOB_ID);
     expect(job.recurring).toBe(true);
+    expect(job.enabled).toBe(true); // derived roll-up: production is enabled
     expect(job.environments.production.enabled).toBe(true);
+    expect(job.environments.production.schedule).toBe("0 3 * * *");
+    expect(job.environments.production.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
     expect(job.environments.production.configuration).toBeNull();
+    // staging: no schedule override → null; disabled → null next_run_at
+    expect(job.environments.staging.schedule).toBeNull();
+    expect(job.environments.staging.nextRunAt).toBeNull();
     expect(job.environments.staging.configuration?.url).toBe("https://staging.example.com/x");
   });
 

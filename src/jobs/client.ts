@@ -74,10 +74,14 @@ function _environmentsToWire(environments: Record<string, JobEnvironment>): {
 } {
   const out: { [key: string]: GenJobEnvironment } = {};
   for (const [envKey, env] of Object.entries(environments)) {
-    out[envKey] = {
+    const wire: GenJobEnvironment = {
       enabled: env.enabled,
       configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
     };
+    // `schedule` is a customer-settable per-environment cron override; send it
+    // only when set. `nextRunAt` is read-only — never sent.
+    if (env.schedule !== null) wire.schedule = env.schedule;
+    out[envKey] = wire;
   }
   return out;
 }
@@ -89,14 +93,18 @@ function _environmentsFromWire(
   for (const [envKey, value] of Object.entries(raw ?? {})) {
     const v = (value ?? {}) as {
       enabled?: unknown;
+      schedule?: unknown;
       configuration?: Record<string, unknown> | null;
+      next_run_at?: unknown;
     };
     out[envKey] = new JobEnvironment({
       enabled: Boolean(v.enabled ?? false),
+      schedule: v.schedule == null ? null : String(v.schedule),
       configuration:
         v.configuration == null
           ? null
           : _configurationFromWire(v.configuration as Record<string, unknown>),
+      nextRunAt: v.next_run_at == null ? null : String(v.next_run_at),
     });
   }
   return out;
@@ -191,18 +199,19 @@ function _jobFromResource(
   client: JobsClient,
 ): Job {
   const a = resource.attributes;
+  // The base `enabled` roll-up is derived from `environments` on the model and
+  // each environment's `next_run_at` is read inside `_environmentsFromWire`;
+  // there are no top-level `enabled` / `next_run_at` attributes to read.
   return new Job(client, {
     id: resource.id,
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
     environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
-    enabled: Boolean(a.enabled ?? false),
     recurring: (a.recurring as boolean | null) ?? null,
     type: String(a.type ?? "http"),
     schedule: String(a.schedule ?? ""),
     configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
     concurrencyPolicy: String(a.concurrency_policy ?? "ALLOW"),
-    nextRunAt: (a.next_run_at as string | null) ?? null,
     createdAt: (a.created_at as string | null) ?? null,
     updatedAt: (a.updated_at as string | null) ?? null,
     deletedAt: (a.deleted_at as string | null) ?? null,
@@ -460,8 +469,10 @@ export class JobsClient {
   /**
    * List jobs in the account.
    *
-   * @param params.enabled - Return only jobs with this enabled state. Omit to
-   *   list both enabled and paused jobs.
+   * @param params.recurring - Return only recurring (`true`) or one-off
+   *   (`false`) jobs. Omit to list both.
+   * @param params.name - Return only jobs whose name contains this text
+   *   (case-insensitive). Omit to list all.
    * @param params.pageNumber - 1-based page to return. Omit for the first page.
    * @param params.pageSize - Maximum number of jobs to return in this page.
    *   Omit to use the server default.
@@ -469,7 +480,6 @@ export class JobsClient {
    */
   async list(params: ListJobsParams = {}): Promise<Job[]> {
     const query: Record<string, string | number | boolean> = {};
-    if (params.enabled !== undefined) query["filter[enabled]"] = params.enabled;
     if (params.recurring !== undefined) query["filter[recurring]"] = params.recurring;
     if (params.name !== undefined) query["filter[name]"] = params.name;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
