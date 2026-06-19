@@ -4,7 +4,8 @@
  * Unlike Config/Flags/Logging, Jobs has no live "phone-home" agent — no
  * environment registration, no WebSocket — so it has no runtime/management
  * split: a single {@link JobsClient} exposes the full surface. A {@link Job}
- * is an active record: build it with `client.jobs.new(...)`, set fields, and
+ * is an active record: build it with `client.jobs.newRecurringJob(...)` (or
+ * `newManualJob(...)` / `schedule(...)`), set fields, and
  * call {@link Job.save} (create when new, full-replace update when it already
  * exists) or {@link Job.delete}. Runs are read-only views; run actions live
  * on `client.jobs.runs`.
@@ -33,6 +34,33 @@ export enum HttpMethod {
   PATCH = "PATCH",
   POST = "POST",
   PUT = "PUT",
+}
+
+/**
+ * How a job runs, derived from its schedule (read-only).
+ *
+ * - {@link MANUAL}: no schedule — never auto-fires; runs only when triggered.
+ * - {@link ONE_OFF}: a `"now"` or datetime schedule — runs a single time, then
+ *   is spent.
+ * - {@link RECURRING}: a cron schedule — fires on a repeating cadence.
+ */
+export enum JobKind {
+  MANUAL = "manual",
+  ONE_OFF = "one_off",
+  RECURRING = "recurring",
+}
+
+/**
+ * What started a run (read-only).
+ *
+ * - {@link MANUAL}: a `run`/`trigger` call started it on demand.
+ * - {@link RERUN}: it repeats an earlier run.
+ * - {@link SCHEDULE}: the job's schedule fired.
+ */
+export enum RunTrigger {
+  MANUAL = "MANUAL",
+  RERUN = "RERUN",
+  SCHEDULE = "SCHEDULE",
 }
 
 /**
@@ -108,21 +136,22 @@ export class HttpConfig {
 /**
  * Per-environment override for a job's enablement, schedule, and configuration.
  *
- * A recurring job fires in a given environment only when that environment has
- * an entry in {@link Job.environments} with `enabled` set to `true`; an
- * environment with no entry (or `enabled` false) does not fire there. An entry
- * may carry its own cron {@link schedule} override (varying the cadence within
- * that environment) and exposes the read-only {@link nextRunAt} for it.
+ * A job runs in a given environment only when that environment has an entry in
+ * {@link Job.environments} with `enabled` set to `true` (scheduled there for a
+ * recurring job, triggerable there for a manual one); an environment with no
+ * entry (or `enabled` false) is disabled there. An entry may carry its own cron
+ * {@link schedule} override (varying the cadence within that environment) and
+ * exposes the read-only {@link nextRunAt} for it.
  */
 export class JobEnvironment {
-  /** Whether the job schedules runs in this environment. Defaults to `false`. */
+  /** Whether the job is enabled in this environment. Defaults to `false`. */
   enabled: boolean;
   /**
    * Optional per-environment cron schedule override. `null` (the default)
    * inherits the job's base {@link Job.schedule}. When set, it must be a
    * 5-field cron expression evaluated in UTC; it only applies to a recurring
-   * job and varies that environment's cadence — it cannot turn a one-off job
-   * recurring or vice-versa.
+   * job and varies that environment's cadence — it cannot appear on a manual or
+   * one-off job, and cannot change a job's kind.
    */
   schedule: string | null;
   /**
@@ -154,12 +183,13 @@ export class JobEnvironment {
 }
 
 /**
- * A scheduled unit of work: an HTTP request run on a schedule.
+ * A unit of work: an HTTP request, run on a schedule or triggered on demand.
  *
  * Active-record style: mutate fields directly and call {@link save} to
  * persist, or {@link delete} to remove. A job is enabled per environment via
- * {@link environments}: a recurring job may be enabled in several environments
- * at once; a one-off job is born in a single environment. Header values in
+ * {@link environments}: a recurring or manual job may be enabled in several
+ * environments at once; a one-off job is born in a single environment. A job's
+ * {@link kind} follows from its {@link schedule}. Header values in
  * `configuration.headers` are returned in plaintext on reads, so fetching a
  * job, mutating it, and calling {@link save} preserves its header values
  * without re-entering secrets.
@@ -174,12 +204,14 @@ export class Job {
   /** Job type. Only `"http"` is supported today. */
   type: string;
   /**
-   * When the job runs: an ISO-8601 datetime (a one-off run), a 5-field cron
-   * expression evaluated in UTC (recurring), or the literal `"now"` (run
-   * once, as soon as possible). A datetime or `"now"` job disables itself
+   * The base schedule that determines the job's {@link kind}, inherited by
+   * every environment unless it overrides it. `null` (no schedule) is a manual
+   * job that never auto-fires and runs only when triggered; a 5-field cron
+   * expression evaluated in UTC is recurring; an ISO-8601 datetime or the
+   * literal `"now"` is a one-off run. A datetime or `"now"` job disables itself
    * after it fires.
    */
-  schedule: string;
+  schedule: string | null;
   /** The HTTP request to perform when the job fires. */
   configuration: HttpConfig;
   /**
@@ -193,10 +225,11 @@ export class Job {
    */
   environments: Record<string, JobEnvironment>;
   /**
-   * Read-only: `true` for a recurring (cron) schedule, `false` for a one-off
-   * datetime / `"now"` schedule. Derived from {@link schedule} by the server.
+   * Read-only server-derived kind (see {@link JobKind}): `RECURRING` for a cron
+   * schedule, `ONE_OFF` for a datetime / `"now"` schedule, `MANUAL` for no
+   * schedule. Derived from {@link schedule} by the server.
    */
-  recurring: boolean | null;
+  kind: JobKind | null;
   /** How overlapping runs are handled. `"ALLOW"` (the only value) permits them. */
   concurrencyPolicy: string;
   /** When the job was created. `null` for an unsaved instance. */
@@ -218,13 +251,29 @@ export class Job {
     return Object.values(this.environments).some((env) => env.enabled);
   }
 
+  /** Whether this is a recurring (cron-scheduled) job. */
+  isRecurring(): boolean {
+    return this.kind === JobKind.RECURRING;
+  }
+
+  /** Whether this is a manual job — no schedule; runs only when triggered. */
+  isManual(): boolean {
+    return this.kind === JobKind.MANUAL;
+  }
+
+  /** Whether this is a one-off job — a single `"now"` / datetime run. */
+  isOneOff(): boolean {
+    return this.kind === JobKind.ONE_OFF;
+  }
+
   /** @internal */
   _client: JobModelClient | null;
 
   /**
    * @internal Creation-time only: the environment a one-off job is born in,
-   * sent as the `X-Smplkit-Environment` header by `_createJob`. Ignored for a
-   * recurring job, whose environments come from {@link environments}.
+   * sent as the `X-Smplkit-Environment` header by `_createJob`. Ignored for
+   * recurring and manual jobs, whose environments come from
+   * {@link environments}.
    */
   _birthEnvironment: string | null;
 
@@ -234,11 +283,11 @@ export class Job {
     fields: {
       id: string;
       name: string;
-      schedule: string;
+      schedule: string | null;
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
-      recurring?: boolean | null;
+      kind?: JobKind | null;
       type?: string;
       concurrencyPolicy?: string;
       createdAt?: string | null;
@@ -253,7 +302,7 @@ export class Job {
     this.name = fields.name;
     this.description = fields.description ?? null;
     this.environments = fields.environments ?? {};
-    this.recurring = fields.recurring ?? null;
+    this.kind = fields.kind ?? null;
     this.type = fields.type ?? "http";
     this.schedule = fields.schedule;
     this.configuration = fields.configuration;
@@ -416,7 +465,7 @@ export class Job {
     this.name = other.name;
     this.description = other.description;
     this.environments = other.environments;
-    this.recurring = other.recurring;
+    this.kind = other.kind;
     this.type = other.type;
     this.schedule = other.schedule;
     this.configuration = other.configuration;
@@ -448,7 +497,10 @@ export class Run {
    * environment.
    */
   environment: string;
-  /** Why the run exists: `SCHEDULE`, `MANUAL` (run now), or `RERUN`. */
+  /**
+   * Why the run exists. A raw string; compare against the {@link RunTrigger}
+   * constants — `SCHEDULE`, `MANUAL` (run now), or `RERUN`.
+   */
   trigger: string;
   /** The source run's id; set only when `trigger` is `RERUN`. */
   rerunOf: string | null;
@@ -528,9 +580,9 @@ export class Usage {
   runsUsed: number;
   /** Runs included in the plan this period (`-1` means unlimited). */
   runsIncluded: number;
-  /** Number of currently-enabled jobs. */
+  /** Number of permanent jobs (recurring and manual) counted against the plan's job limit. */
   activeJobs: number;
-  /** Maximum enabled jobs the plan allows (`-1` means unlimited). */
+  /** Maximum permanent jobs the plan allows (`-1` means unlimited). */
   activeJobsLimit: number;
 
   constructor(attributes: Record<string, unknown>) {
@@ -566,8 +618,17 @@ export interface RunModelClient {
 
 /** Parameters accepted by `client.jobs.list(...)`. */
 export interface ListJobsParams {
-  /** Filter to recurring (`true`) or one-off (`false`) jobs. Omit to list both. */
-  recurring?: boolean;
+  /**
+   * Filter to jobs of this {@link JobKind}. Omit to list recurring and manual
+   * jobs; one-off jobs are omitted unless you pass {@link JobKind.ONE_OFF}.
+   */
+  kind?: JobKind;
+  /**
+   * Filter to jobs that have an upcoming fire in some environment (`true`) or
+   * none (`false`) — the feed for an upcoming-runs view, which includes
+   * one-offs. Omit to not filter on scheduling.
+   */
+  scheduled?: boolean;
   /** Filter to jobs whose name contains this text (case-insensitive). Omit to list all. */
   name?: string;
   /** 1-based page number to return. */
