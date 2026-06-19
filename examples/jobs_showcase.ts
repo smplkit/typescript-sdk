@@ -15,11 +15,12 @@
 import { strict as assert } from "node:assert";
 
 import { JobsClient, SmplConflictError } from "../src/index.js";
-import { HttpConfig, JobsHttpMethod } from "../src/index.js";
+import { HttpConfig, JobKind, JobsHttpMethod, RunTrigger } from "../src/index.js";
 
 import { cleanupShowcase, setupShowcase } from "./setup/jobs_setup.js";
 
 const RECURRING_JOB_ID = "showcase-recurring";
+const MANUAL_JOB_ID = "showcase-manual";
 const ONEOFF_JOB_ID = "showcase-oneoff";
 
 async function main(): Promise<void> {
@@ -27,8 +28,9 @@ async function main(): Promise<void> {
   const jobs = new JobsClient();
   await setupShowcase(jobs);
   try {
-    // create a recurring job, enabled in production with a development override
-    const job = jobs.new(RECURRING_JOB_ID, {
+    // create a recurring job: a base schedule and configuration every
+    // environment inherits, with per-environment overrides
+    const job = jobs.newRecurringJob(RECURRING_JOB_ID, {
       name: "Nightly cache warm",
       description: "Warms the product cache every night at 02:00 UTC.",
       schedule: "0 2 * * *",
@@ -40,6 +42,9 @@ async function main(): Promise<void> {
         timeout: 30,
       }),
     });
+    job.setEnabled(true, "production");
+    job.setEnabled(true, "development");
+    job.setSchedule("0 */6 * * *", "development");
     job.setConfiguration(
       new HttpConfig({
         method: JobsHttpMethod.POST,
@@ -49,36 +54,31 @@ async function main(): Promise<void> {
       }),
       "development",
     );
-    job.setEnabled(false, "development");
-    job.setEnabled(true, "production");
     await job.save();
-    assert.equal(job.version, 1);
-    assert.equal(job.isEnabled("development"), false);
+    assert.equal(job.isRecurring(), true);
     assert.equal(job.isEnabled("production"), true);
+    assert.equal(
+      job.getConfiguration("development").url,
+      "https://development.example.com/cache/warm",
+    );
     console.log(`Created recurring job ${job.id} (v${job.version})`);
 
     // get a job
     const fetched = await jobs.get(RECURRING_JOB_ID);
-    assert.equal(fetched.isEnabled("development"), false);
-    assert.equal(fetched.isEnabled("production"), true);
-    assert.equal(
-      fetched.getConfiguration("development").url,
-      "https://development.example.com/cache/warm",
-    );
+    assert.equal(fetched.environments["development"].schedule, "0 */6 * * *");
     console.log(`Fetched job ${RECURRING_JOB_ID}`);
 
-    // list jobs
-    const listing = await jobs.list();
+    // list jobs, filtered to recurring jobs
+    const listing = await jobs.list({ kind: JobKind.RECURRING });
     assert(listing.some((j) => j.id === RECURRING_JOB_ID));
     console.log(`Found job ${RECURRING_JOB_ID} in the listing`);
 
-    // update a job (the schedule is environment-agnostic)
+    // update a job
     job.name = "Nightly cache warm (v2)";
-    job.setSchedule("30 2 * * *");
-    job.setEnabled(true, "development");
+    job.setSchedule("30 2 * * *", "production");
     await job.save();
-    assert(job.version === 2 && job.isEnabled("development") === true);
-    console.log(`Updated job to v${job.version}: now enabled in production and development`);
+    assert.equal(job.version, 2);
+    console.log(`Updated job to v${job.version}`);
 
     // trigger an immediate run
     let run = await job.trigger("production");
@@ -109,10 +109,26 @@ async function main(): Promise<void> {
       console.log(`Run ${rerun.id} already finished before it could be canceled`);
     }
 
-    // create a one-off job, born in a single environment
-    const oneoff = jobs.new(ONEOFF_JOB_ID, {
+    // create a manual job (no schedule, runs only when triggered)
+    const manual = jobs.newManualJob(MANUAL_JOB_ID, {
+      name: "On-demand reindex",
+      configuration: new HttpConfig({
+        method: JobsHttpMethod.POST,
+        url: "https://httpbin.org/post",
+      }),
+    });
+    manual.setEnabled(true, "production");
+    await manual.save();
+    assert.equal(manual.isManual(), true);
+    const manualRun = await manual.trigger("production");
+    assert.equal(manualRun.trigger, RunTrigger.MANUAL);
+    console.log(`Created manual job ${manual.id} and triggered it on demand`);
+
+    // schedule a one-off job to run tomorrow
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const oneoff = jobs.schedule(ONEOFF_JOB_ID, {
       name: "One-shot reindex",
-      schedule: "now",
+      schedule: tomorrow,
       configuration: new HttpConfig({
         method: JobsHttpMethod.POST,
         url: "https://httpbin.org/post",
@@ -120,8 +136,10 @@ async function main(): Promise<void> {
       environment: "development",
     });
     await oneoff.save();
-    assert(oneoff.version === 1 && oneoff.isEnabled("development") === true);
-    console.log(`Created one-off job ${oneoff.id} born in development`);
+    assert.equal(oneoff.isOneOff(), true);
+    assert.equal(oneoff.isEnabled("development"), true);
+    assert(oneoff.environments["development"].nextRunAt !== null);
+    console.log(`Created one-off job ${oneoff.id} to run in development`);
 
     // delete a job
     await job.delete();

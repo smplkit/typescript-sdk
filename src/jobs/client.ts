@@ -10,10 +10,11 @@
  * - `client.jobs.*` on {@link SmplClient}
  * - directly — `new JobsClient({ apiKey })` — for callers that only need jobs.
  *
- * A {@link Job} is an active record: build it with {@link JobsClient.new},
- * set fields, and call `save()` (create when new, full-replace update when it
- * already exists) or `delete()`. Runs are read-only views; run actions live on
- * `jobs.runs`.
+ * A {@link Job} is an active record: build it with
+ * {@link JobsClient.newRecurringJob} / {@link JobsClient.newManualJob} /
+ * {@link JobsClient.schedule}, set fields, and call `save()` (create when new,
+ * full-replace update when it already exists) or `delete()`. Runs are read-only
+ * views; run actions live on `jobs.runs`.
  *
  * Every call delegates HTTP to the auto-generated openapi-fetch client over
  * `../generated/jobs.d.ts`; this wrapper only shapes models and raises SDK
@@ -31,6 +32,7 @@ import {
   HttpMethod,
   Job,
   JobEnvironment,
+  JobKind,
   Run,
   Usage,
   type HttpHeader,
@@ -207,9 +209,9 @@ function _jobFromResource(
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
     environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
-    recurring: (a.recurring as boolean | null) ?? null,
+    kind: a.kind == null ? null : (a.kind as JobKind),
     type: String(a.type ?? "http"),
-    schedule: String(a.schedule ?? ""),
+    schedule: a.schedule == null ? null : String(a.schedule),
     configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
     concurrencyPolicy: String(a.concurrency_policy ?? "ALLOW"),
     createdAt: (a.created_at as string | null) ?? null,
@@ -377,10 +379,11 @@ export interface JobsClientOptions {
  * }
  * ```
  *
- * The full surface — active-record job CRUD (`new` / `get` / `list` /
- * `delete`), the run-now action (`run`), run history and run actions
- * (`runs`), and usage (`usage`) — lives on this one class. Jobs installs no
- * in-process machinery, so there is no live connection and no install step.
+ * The full surface — active-record job CRUD (`newRecurringJob` /
+ * `newManualJob` / `schedule` / `get` / `list` / `delete`), the run-now action
+ * (`run`), run history and run actions (`runs`), and usage (`usage`) — lives on
+ * this one class. Jobs installs no in-process machinery, so there is no live
+ * connection and no install step.
  */
 export class JobsClient {
   /** @internal */
@@ -415,38 +418,12 @@ export class JobsClient {
     this.runs = new RunsClient(this._http, this._environment);
   }
 
-  /**
-   * Return an unsaved {@link Job}. Call `.save()` to create it.
-   *
-   * @param id - Caller-supplied unique identifier for the job. Unique within
-   *   the account and immutable; the service returns 409 if another live job
-   *   already uses this id.
-   * @param fields.name - Human-readable name for the job.
-   * @param fields.schedule - When the job runs. One of: a 5-field cron
-   *   expression evaluated in UTC (recurring), an ISO-8601 datetime (a one-off
-   *   run at that instant), or the literal `"now"` (run once, as soon as
-   *   possible). A datetime or `"now"` job disables itself after it fires.
-   * @param fields.configuration - The HTTP request the job sends each time it
-   *   fires.
-   * @param fields.description - Free-text description for the job. Defaults to
-   *   none.
-   * @param fields.environments - Per-environment overrides for a recurring
-   *   job, keyed by environment key. A recurring job fires only in
-   *   environments enabled here. Ignored for a one-off job, which is born in
-   *   `fields.environment`.
-   * @param fields.concurrencyPolicy - How overlapping runs are handled.
-   *   `"ALLOW"` (the default and only value today) permits a new run to start
-   *   while a previous one is still in flight.
-   * @param fields.environment - For a one-off job (`"now"` / datetime
-   *   schedule), the environment it is born in. Defaults to the client's
-   *   configured environment. Ignored for a recurring job.
-   * @returns An unsaved {@link Job} bound to this client.
-   */
-  new(
+  /** @internal Shared builder behind the public job constructors. */
+  private _newJob(
     id: string,
     fields: {
       name: string;
-      schedule: string;
+      schedule: string | null;
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
@@ -467,10 +444,125 @@ export class JobsClient {
   }
 
   /**
+   * Return an unsaved recurring {@link Job}. Call `.save()` to create it.
+   *
+   * @param id - Caller-supplied unique identifier for the job. Unique within
+   *   the account and immutable; the service returns 409 if another live job
+   *   already uses this id.
+   * @param fields.name - Human-readable name for the job.
+   * @param fields.schedule - The base cadence — a 5-field cron expression
+   *   evaluated in UTC (e.g. `"0 2 * * *"`) — that every environment inherits
+   *   unless it sets its own override.
+   * @param fields.configuration - The HTTP request the job sends each time it
+   *   fires.
+   * @param fields.description - Free-text description for the job. Defaults to
+   *   none.
+   * @param fields.environments - Per-environment overrides keyed by environment
+   *   key. The job is scheduled only in environments enabled here.
+   * @param fields.concurrencyPolicy - How overlapping runs are handled.
+   *   `"ALLOW"` (the default and only value today) permits a new run to start
+   *   while a previous one is still in flight.
+   * @returns An unsaved recurring {@link Job} bound to this client.
+   */
+  newRecurringJob(
+    id: string,
+    fields: {
+      name: string;
+      schedule: string;
+      configuration: HttpConfig;
+      description?: string | null;
+      environments?: Record<string, JobEnvironment>;
+      concurrencyPolicy?: string;
+    },
+  ): Job {
+    return this._newJob(id, { ...fields });
+  }
+
+  /**
+   * Return an unsaved manual {@link Job}. Call `.save()` to create it.
+   *
+   * A manual job has no schedule — it never auto-fires and runs only when
+   * triggered via {@link run} / {@link Job.trigger}.
+   *
+   * @param id - Caller-supplied unique identifier for the job. Unique within
+   *   the account and immutable; the service returns 409 if another live job
+   *   already uses this id.
+   * @param fields.name - Human-readable name for the job.
+   * @param fields.configuration - The HTTP request the job sends each time it
+   *   runs.
+   * @param fields.description - Free-text description for the job. Defaults to
+   *   none.
+   * @param fields.environments - Per-environment overrides keyed by environment
+   *   key. The job is triggerable only in environments enabled here.
+   * @param fields.concurrencyPolicy - How overlapping runs are handled.
+   *   `"ALLOW"` (the default and only value today) permits a new run to start
+   *   while a previous one is still in flight.
+   * @returns An unsaved manual {@link Job} bound to this client.
+   */
+  newManualJob(
+    id: string,
+    fields: {
+      name: string;
+      configuration: HttpConfig;
+      description?: string | null;
+      environments?: Record<string, JobEnvironment>;
+      concurrencyPolicy?: string;
+    },
+  ): Job {
+    return this._newJob(id, { ...fields, schedule: null });
+  }
+
+  /**
+   * Return an unsaved one-off {@link Job}. Call `.save()` to create it.
+   *
+   * A one-off job runs a single time at `fields.schedule` and is then spent.
+   *
+   * @param id - Caller-supplied unique identifier for the job. Unique within
+   *   the account and immutable; the service returns 409 if another live job
+   *   already uses this id.
+   * @param fields.name - Human-readable name for the job.
+   * @param fields.schedule - The instant the single run fires, as a `Date`.
+   * @param fields.configuration - The HTTP request the job sends when it runs.
+   * @param fields.description - Free-text description for the job. Defaults to
+   *   none.
+   * @param fields.concurrencyPolicy - How overlapping runs are handled.
+   *   `"ALLOW"` (the default and only value today) permits a new run to start
+   *   while a previous one is still in flight.
+   * @param fields.environment - The environment the job is born in. Defaults to
+   *   the client's configured environment.
+   * @returns An unsaved one-off {@link Job} bound to this client.
+   */
+  schedule(
+    id: string,
+    fields: {
+      name: string;
+      schedule: Date;
+      configuration: HttpConfig;
+      description?: string | null;
+      concurrencyPolicy?: string;
+      environment?: string;
+    },
+  ): Job {
+    return this._newJob(id, {
+      name: fields.name,
+      schedule: fields.schedule.toISOString(),
+      configuration: fields.configuration,
+      description: fields.description,
+      concurrencyPolicy: fields.concurrencyPolicy,
+      environment: fields.environment,
+    });
+  }
+
+  /**
    * List jobs in the account.
    *
-   * @param params.recurring - Return only recurring (`true`) or one-off
-   *   (`false`) jobs. Omit to list both.
+   * @param params.kind - Return only jobs of this {@link JobKind}. Omit to list
+   *   recurring and manual jobs; one-off jobs are omitted unless you pass
+   *   {@link JobKind.ONE_OFF}.
+   * @param params.scheduled - Return only jobs that have an upcoming fire in
+   *   some environment (`true`) or none (`false`) — the feed for an
+   *   upcoming-runs view, which includes one-offs. Omit to not filter on
+   *   scheduling.
    * @param params.name - Return only jobs whose name contains this text
    *   (case-insensitive). Omit to list all.
    * @param params.pageNumber - 1-based page to return. Omit for the first page.
@@ -480,7 +572,8 @@ export class JobsClient {
    */
   async list(params: ListJobsParams = {}): Promise<Job[]> {
     const query: Record<string, string | number | boolean> = {};
-    if (params.recurring !== undefined) query["filter[recurring]"] = params.recurring;
+    if (params.kind !== undefined) query["filter[kind]"] = params.kind;
+    if (params.scheduled !== undefined) query["filter[scheduled]"] = params.scheduled;
     if (params.name !== undefined) query["filter[name]"] = params.name;
     if (params.pageNumber !== undefined) query["page[number]"] = params.pageNumber;
     if (params.pageSize !== undefined) query["page[size]"] = params.pageSize;
@@ -547,7 +640,8 @@ export class JobsClient {
    * @param id - Identifier of the job to run.
    * @param params.environment - Environment the manual run executes in.
    *   Defaults to the client's configured environment; when the job is enabled
-   *   in exactly one environment that environment is used.
+   *   in exactly one environment that environment is used. The job must be
+   *   enabled in the chosen environment.
    * @returns The {@link Run} that was started, with `trigger` set to
    *   `"MANUAL"`.
    */
@@ -596,8 +690,8 @@ export class JobsClient {
     const body: GenJobCreateRequest = {
       data: { id: job.id, type: "job", attributes: _jobAttrs(job) },
     };
-    // A one-off job is born in the environment named here (recurring jobs
-    // ignore it server-side; their environments come from the map).
+    // A one-off job is born in the environment named here (recurring and
+    // manual jobs ignore it server-side; their environments come from the map).
     const birthEnv = job._birthEnvironment ?? undefined;
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {

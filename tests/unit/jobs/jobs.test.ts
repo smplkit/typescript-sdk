@@ -21,7 +21,9 @@ import {
   HttpMethod,
   Job,
   JobEnvironment,
+  JobKind,
   Run,
+  RunTrigger,
   Usage,
 } from "../../../src/jobs/types.js";
 import * as JobsNamespace from "../../../src/jobs/index.js";
@@ -118,7 +120,7 @@ function _runResource(
 }
 
 function _newJob(client: JobsClient): Job {
-  return client.new(JOB_ID, {
+  return client.newRecurringJob(JOB_ID, {
     name: "Nightly cache warm",
     schedule: "0 2 * * *",
     configuration: new HttpConfig({
@@ -169,6 +171,9 @@ describe("Run / Usage models", () => {
     const run = new Run({ job: JOB_ID, trigger: "SCHEDULE", status: "SUCCEEDED" }, RUN_ID);
     expect(run.id).toBe(RUN_ID);
     expect(run.job).toBe(JOB_ID);
+    // trigger is a plain string, equal to the RunTrigger constant and the raw value
+    expect(run.trigger).toBe(RunTrigger.SCHEDULE);
+    expect(run.trigger).toBe("SCHEDULE");
     expect(run.jobVersion).toBeNull();
     expect(run.rerunOf).toBeNull();
     expect(run.scheduledFor).toBeNull();
@@ -257,7 +262,7 @@ describe("Job model", () => {
     expect(job.description).toBeNull();
     expect(job.enabled).toBe(false); // derived roll-up over an empty environments map
     expect(job.environments).toEqual({});
-    expect(job.recurring).toBeNull();
+    expect(job.kind).toBeNull();
     expect(job.type).toBe("http");
     expect(job.concurrencyPolicy).toBe("ALLOW");
     expect(job.createdAt).toBeNull();
@@ -265,6 +270,45 @@ describe("Job model", () => {
     expect(job.deletedAt).toBeNull();
     expect(job.version).toBeNull();
     expect(job._client).toBeNull();
+  });
+
+  test("kind predicates reflect the server-derived kind", () => {
+    const cfg = new HttpConfig({ url: "https://e.com" });
+    const rec = new Job(null, {
+      id: "a",
+      name: "a",
+      schedule: "0 * * * *",
+      configuration: cfg,
+      kind: JobKind.RECURRING,
+    });
+    expect(rec.kind).toBe(JobKind.RECURRING);
+    expect(rec.isRecurring()).toBe(true);
+    expect(rec.isManual()).toBe(false);
+    expect(rec.isOneOff()).toBe(false);
+    const man = new Job(null, {
+      id: "b",
+      name: "b",
+      schedule: null,
+      configuration: cfg,
+      kind: JobKind.MANUAL,
+    });
+    expect(man.isManual()).toBe(true);
+    expect(man.isRecurring()).toBe(false);
+    expect(man.isOneOff()).toBe(false);
+    const off = new Job(null, {
+      id: "c",
+      name: "c",
+      schedule: "now",
+      configuration: cfg,
+      kind: JobKind.ONE_OFF,
+    });
+    expect(off.isOneOff()).toBe(true);
+    expect(off.isRecurring()).toBe(false);
+    expect(off.isManual()).toBe(false);
+    // a job with no kind leaves it null — every predicate is false
+    const none = new Job(null, { id: "d", name: "d", schedule: null, configuration: cfg });
+    expect(none.kind).toBeNull();
+    expect(none.isRecurring() || none.isManual() || none.isOneOff()).toBe(false);
   });
 
   test("save without a client throws", async () => {
@@ -340,24 +384,49 @@ describe("jobs CRUD", () => {
 
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
     const filtered = await client.list({
-      recurring: true,
+      kind: JobKind.MANUAL,
+      scheduled: true,
       name: "health",
       pageNumber: 1,
       pageSize: 50,
     });
     expect(filtered).toEqual([]);
     const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
-    expect(url.searchParams.has("filter[enabled]")).toBe(false); // param removed from the API
-    expect(url.searchParams.get("filter[recurring]")).toBe("true");
+    expect(url.searchParams.get("filter[kind]")).toBe("manual"); // JobKind serialized to its value
+    expect(url.searchParams.get("filter[scheduled]")).toBe("true");
     expect(url.searchParams.get("filter[name]")).toBe("health");
     expect(url.searchParams.get("page[number]")).toBe("1");
     expect(url.searchParams.get("page[size]")).toBe("50");
+    // The dropped recurring filter is never emitted.
+    expect(url.searchParams.has("filter[recurring]")).toBe(false);
   });
 
   test("list tolerates a missing data array", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
     expect(await client.list()).toEqual([]);
+  });
+
+  test("newManualJob has no schedule and sends schedule:null on create", async () => {
+    // A manual job is created with no schedule: newManualJob leaves schedule
+    // null, the create body carries schedule: null, and the server echoes back
+    // kind="manual" with no schedule.
+    const client = makeClient();
+    const job = client.newManualJob("manual-job", {
+      name: "Manual",
+      configuration: new HttpConfig({ url: "https://e.com" }),
+    });
+    expect(job.schedule).toBeNull(); // no schedule supplied
+    job.setEnabled(true, "production");
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _jobResource({ kind: "manual", schedule: null }, "manual-job") }, 201),
+    );
+    await job.save();
+    expect(job.isManual()).toBe(true);
+    expect(job.kind).toBe(JobKind.MANUAL);
+    expect(job.schedule).toBeNull();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect(sent.data.attributes.schedule).toBeNull(); // null sent on the wire
   });
 
   test("list surfaces an API error", async () => {
@@ -394,9 +463,9 @@ describe("jobs CRUD", () => {
     expect(job.description).toBeNull();
     expect(job.enabled).toBe(false); // derived: no environments → not enabled anywhere
     expect(job.environments).toEqual({});
-    expect(job.recurring).toBeNull();
+    expect(job.kind).toBeNull();
     expect(job.type).toBe("http");
-    expect(job.schedule).toBe("");
+    expect(job.schedule).toBeNull();
     expect(job.concurrencyPolicy).toBe("ALLOW");
     expect(job.createdAt).toBeNull();
     expect(job.version).toBeNull();
@@ -530,9 +599,9 @@ describe("jobs CRUD", () => {
 
   test("_createJob serializes the full configuration to the wire", async () => {
     const client = makeClient();
-    const job = client.new(JOB_ID, {
+    const job = client.newRecurringJob(JOB_ID, {
       name: "n",
-      schedule: "now",
+      schedule: "0 2 * * *",
       description: "desc",
       concurrencyPolicy: "ALLOW",
       configuration: new HttpConfig({
@@ -782,6 +851,8 @@ describe("JobsClient construction", () => {
     expect(JobsNamespace.Run).toBe(Run);
     expect(JobsNamespace.Usage).toBe(Usage);
     expect(JobsNamespace.HttpMethod).toBe(HttpMethod);
+    expect(JobsNamespace.JobKind).toBe(JobKind);
+    expect(JobsNamespace.RunTrigger).toBe(RunTrigger);
   });
 });
 
@@ -873,7 +944,7 @@ describe("jobs environment scoping", () => {
 
   test("create sends the environments map (schedule when set, never enabled/next_run_at)", async () => {
     const client = makeClient();
-    const job = client.new(JOB_ID, {
+    const job = client.newRecurringJob(JOB_ID, {
       name: "x",
       schedule: "0 2 * * *",
       configuration: new HttpConfig({ url: "https://api.example.com" }),
@@ -902,12 +973,12 @@ describe("jobs environment scoping", () => {
     );
   });
 
-  test("get parses environments (schedule, config override, next_run_at) and recurring", async () => {
+  test("get parses environments (schedule, config override, next_run_at) and kind", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: _jobResource({
-          recurring: true,
+          kind: "recurring",
           environments: {
             production: {
               enabled: true,
@@ -925,7 +996,8 @@ describe("jobs environment scoping", () => {
       }),
     );
     const job = await client.get(JOB_ID);
-    expect(job.recurring).toBe(true);
+    expect(job.kind).toBe(JobKind.RECURRING);
+    expect(job.isRecurring()).toBe(true);
     expect(job.enabled).toBe(true); // derived roll-up: production is enabled
     expect(job.environments.production.enabled).toBe(true);
     expect(job.environments.production.schedule).toBe("0 3 * * *");
@@ -937,26 +1009,28 @@ describe("jobs environment scoping", () => {
     expect(job.environments.staging.configuration?.url).toBe("https://staging.example.com/x");
   });
 
-  test("one-off birth environment is sent as a header on create", async () => {
+  test("schedule() serializes the Date to ISO-8601 and sends the birth environment", async () => {
     const client = makeClient();
-    const job = client.new("one-off", {
-      name: "x",
-      schedule: "now",
+    const when = new Date("2030-01-01T12:30:00.000Z");
+    const job = client.schedule("one-off", {
+      name: "One",
+      schedule: when,
       configuration: new HttpConfig({ url: "https://api.example.com" }),
       environment: "staging",
     });
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, "one-off") }, 201));
     await job.save();
-    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
-      "staging",
-    );
+    const req = mockFetch.mock.calls[0][0] as Request;
+    expect(req.headers.get("X-Smplkit-Environment")).toBe("staging"); // birth environment
+    const sent = JSON.parse(await req.text());
+    expect(sent.data.attributes.schedule).toBe(when.toISOString()); // Date -> ISO-8601
   });
 
   test("client-level environment is the default birth header and update header", async () => {
     const client = envClient("production");
-    const job = client.new(JOB_ID, {
+    const job = client.newRecurringJob(JOB_ID, {
       name: "x",
-      schedule: "now",
+      schedule: "0 2 * * *",
       configuration: new HttpConfig({ url: "https://api.example.com" }),
     });
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));

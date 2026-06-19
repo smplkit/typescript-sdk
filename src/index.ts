@@ -98,7 +98,9 @@ export {
   HttpMethod as JobsHttpMethod,
   Job,
   JobEnvironment,
+  JobKind,
   Run,
+  RunTrigger,
   Usage,
 } from "./jobs/types.js";
 export type { ListJobsParams, ListRunsParams } from "./jobs/types.js";

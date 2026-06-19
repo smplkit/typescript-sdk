@@ -5,7 +5,7 @@ import { JobsClient, SmplNotFoundError } from "../../src/index.js";
 // Every job the jobs showcase creates. Start-of-run cleanup removes residue
 // from a prior run; the matching `finally` cleanup tears the showcase's jobs
 // down even when it fails mid-way, so a failed run never leaves orphans behind.
-const DEMO_JOB_IDS = ["showcase-recurring", "showcase-oneoff"];
+const DEMO_JOB_IDS = ["showcase-recurring", "showcase-manual", "showcase-oneoff"];
 
 export async function setupShowcase(jobs: JobsClient): Promise<void> {
   await cleanupShowcase(jobs);
