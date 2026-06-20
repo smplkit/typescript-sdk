@@ -155,6 +155,15 @@ export class JobEnvironment {
    */
   schedule: string | null;
   /**
+   * Optional per-environment IANA timezone override for evaluating this
+   * environment's cron {@link schedule} (recurring jobs only). `null` (the
+   * default) inherits the job's base {@link Job.timezone}, else UTC. When set,
+   * it must be a valid IANA zone key (e.g. `"America/New_York"`); it may be set
+   * on an environment that inherits the base schedule (it need not also override
+   * {@link schedule}).
+   */
+  timezone: string | null;
+  /**
    * Optional per-environment request configuration that fully replaces the
    * job's base {@link Job.configuration} for this environment. `null` (the
    * default) inherits the base configuration.
@@ -171,12 +180,14 @@ export class JobEnvironment {
     fields: {
       enabled?: boolean;
       schedule?: string | null;
+      timezone?: string | null;
       configuration?: HttpConfig | null;
       nextRunAt?: string | null;
     } = {},
   ) {
     this.enabled = fields.enabled ?? false;
     this.schedule = fields.schedule ?? null;
+    this.timezone = fields.timezone ?? null;
     this.configuration = fields.configuration ?? null;
     this.nextRunAt = fields.nextRunAt ?? null;
   }
@@ -212,6 +223,15 @@ export class Job {
    * after it fires.
    */
   schedule: string | null;
+  /**
+   * The base IANA timezone the cron {@link schedule} is evaluated in (e.g.
+   * `"America/New_York"`); `null` means UTC. The base every environment inherits
+   * unless it sets its own {@link JobEnvironment.timezone}. The cron fires on
+   * this zone's wall clock (DST-aware) while each environment's `nextRunAt` is
+   * still reported as a UTC instant. Only valid on a recurring (cron) job —
+   * `null` for a manual or one-off job. Sent on writes only when set.
+   */
+  timezone: string | null;
   /** The HTTP request to perform when the job fires. */
   configuration: HttpConfig;
   /**
@@ -284,6 +304,7 @@ export class Job {
       id: string;
       name: string;
       schedule: string | null;
+      timezone?: string | null;
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
@@ -305,6 +326,7 @@ export class Job {
     this.kind = fields.kind ?? null;
     this.type = fields.type ?? "http";
     this.schedule = fields.schedule;
+    this.timezone = fields.timezone ?? null;
     this.configuration = fields.configuration;
     this.concurrencyPolicy = fields.concurrencyPolicy ?? "ALLOW";
     this.createdAt = fields.createdAt ?? null;
@@ -422,6 +444,24 @@ export class Job {
   }
 
   /**
+   * Set the IANA timezone the cron schedule is evaluated in — the base
+   * {@link timezone} with `environment` omitted, or a per-environment override
+   * otherwise. A timezone is only valid on a recurring (cron) job; omit
+   * `environment` to set the timezone every environment inherits. A
+   * per-environment override evaluates that environment's cadence on the named
+   * zone's wall clock. Setting a per-environment override creates the override
+   * entry if it doesn't exist yet (preserving any already-set `enabled` /
+   * `schedule` / `configuration` on it). Call {@link save} to persist.
+   */
+  setTimezone(timezone: string, environment?: string): void {
+    if (environment === undefined) {
+      this.timezone = timezone;
+    } else {
+      this._environmentOverride(environment).timezone = timezone;
+    }
+  }
+
+  /**
    * Trigger one immediate, manual run of this job (a `MANUAL` run).
    *
    * @param environment - Environment the run executes in. Defaults to the
@@ -468,6 +508,7 @@ export class Job {
     this.kind = other.kind;
     this.type = other.type;
     this.schedule = other.schedule;
+    this.timezone = other.timezone;
     this.configuration = other.configuration;
     this.concurrencyPolicy = other.concurrencyPolicy;
     this.createdAt = other.createdAt;

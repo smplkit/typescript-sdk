@@ -80,9 +80,10 @@ function _environmentsToWire(environments: Record<string, JobEnvironment>): {
       enabled: env.enabled,
       configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
     };
-    // `schedule` is a customer-settable per-environment cron override; send it
-    // only when set. `nextRunAt` is read-only — never sent.
+    // `schedule` and `timezone` are customer-settable per-environment cron
+    // overrides; send each only when set. `nextRunAt` is read-only — never sent.
     if (env.schedule !== null) wire.schedule = env.schedule;
+    if (env.timezone !== null) wire.timezone = env.timezone;
     out[envKey] = wire;
   }
   return out;
@@ -96,12 +97,14 @@ function _environmentsFromWire(
     const v = (value ?? {}) as {
       enabled?: unknown;
       schedule?: unknown;
+      timezone?: unknown;
       configuration?: Record<string, unknown> | null;
       next_run_at?: unknown;
     };
     out[envKey] = new JobEnvironment({
       enabled: Boolean(v.enabled ?? false),
       schedule: v.schedule == null ? null : String(v.schedule),
+      timezone: v.timezone == null ? null : String(v.timezone),
       configuration:
         v.configuration == null
           ? null
@@ -190,6 +193,9 @@ function _jobAttrs(job: Job): GenJob {
     configuration: _configurationToWire(job.configuration),
     concurrency_policy: job.concurrencyPolicy as GenJob["concurrency_policy"],
   } as GenJob;
+  // `timezone` is the IANA zone the cron is evaluated in (recurring jobs only);
+  // a null timezone is omitted, leaving the server default of UTC.
+  if (job.timezone !== null) attrs.timezone = job.timezone;
   if (Object.keys(job.environments).length > 0) {
     attrs.environments = _environmentsToWire(job.environments);
   }
@@ -212,6 +218,7 @@ function _jobFromResource(
     kind: a.kind == null ? null : (a.kind as JobKind),
     type: String(a.type ?? "http"),
     schedule: a.schedule == null ? null : String(a.schedule),
+    timezone: a.timezone == null ? null : String(a.timezone),
     configuration: _configurationFromWire(a.configuration as Record<string, unknown> | undefined),
     concurrencyPolicy: String(a.concurrency_policy ?? "ALLOW"),
     createdAt: (a.created_at as string | null) ?? null,

@@ -870,6 +870,7 @@ describe("jobs environment scoping", () => {
     const e = new JobEnvironment();
     expect(e.enabled).toBe(false);
     expect(e.schedule).toBeNull();
+    expect(e.timezone).toBeNull();
     expect(e.configuration).toBeNull();
     expect(e.nextRunAt).toBeNull();
   });
@@ -878,11 +879,13 @@ describe("jobs environment scoping", () => {
     const e = new JobEnvironment({
       enabled: true,
       schedule: "0 3 * * *",
+      timezone: "Europe/London",
       configuration: new HttpConfig({ url: "https://e.com" }),
       nextRunAt: "2026-06-07T03:00:00+00:00",
     });
     expect(e.enabled).toBe(true);
     expect(e.schedule).toBe("0 3 * * *");
+    expect(e.timezone).toBe("Europe/London");
     expect(e.configuration?.url).toBe("https://e.com");
     expect(e.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
   });
@@ -942,6 +945,25 @@ describe("jobs environment scoping", () => {
     expect(job.environments.staging.schedule).toBe("0 6 * * *");
   });
 
+  test("setTimezone sets the base timezone and per-environment overrides", () => {
+    const job = _newJob(makeClient());
+    // base timezone (no environment)
+    job.setTimezone("America/New_York");
+    expect(job.timezone).toBe("America/New_York");
+    expect(job.environments).toEqual({});
+    // per-environment override creates the entry, leaving the base untouched
+    job.setSchedule("0 5 * * *", "production");
+    job.setTimezone("Europe/London", "production");
+    expect(job.timezone).toBe("America/New_York");
+    expect(job.environments.production.timezone).toBe("Europe/London");
+    // setting a per-env timezone preserves the already-set schedule override
+    expect(job.environments.production.schedule).toBe("0 5 * * *");
+    // a brand-new environment override is created with the timezone alone
+    job.setTimezone("Asia/Tokyo", "edge");
+    expect(job.environments.edge.timezone).toBe("Asia/Tokyo");
+    expect(job.environments.edge.enabled).toBe(false);
+  });
+
   test("create sends the environments map (schedule when set, never enabled/next_run_at)", async () => {
     const client = makeClient();
     const job = client.newRecurringJob(JOB_ID, {
@@ -951,23 +973,29 @@ describe("jobs environment scoping", () => {
     });
     job.setEnabled(true, "production");
     job.setSchedule("0 5 * * *", "production"); // per-env cron override
+    job.setTimezone("America/New_York"); // base timezone
+    job.setTimezone("Europe/London", "production"); // per-env timezone override
     job.setConfiguration(new HttpConfig({ url: "https://staging.example.com" }), "staging");
     job.setEnabled(false, "staging");
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
     expect(sent.data.attributes.enabled).toBeUndefined(); // read-only roll-up not sent
-    // production carries its per-environment schedule override
+    // the base timezone is sent when set
+    expect(sent.data.attributes.timezone).toBe("America/New_York");
+    // production carries its per-environment schedule + timezone overrides
     expect(sent.data.attributes.environments.production).toEqual({
       enabled: true,
       configuration: null,
       schedule: "0 5 * * *",
+      timezone: "Europe/London",
     });
     // the read-only next_run_at is never serialized onto the wire
     expect(sent.data.attributes.environments.production.next_run_at).toBeUndefined();
-    // staging has no schedule override, so the key is omitted entirely
+    // staging has no schedule/timezone override, so the keys are omitted entirely
     expect(sent.data.attributes.environments.staging.enabled).toBe(false);
     expect("schedule" in sent.data.attributes.environments.staging).toBe(false);
+    expect("timezone" in sent.data.attributes.environments.staging).toBe(false);
     expect(sent.data.attributes.environments.staging.configuration.url).toBe(
       "https://staging.example.com",
     );
@@ -979,16 +1007,18 @@ describe("jobs environment scoping", () => {
       jsonResponse({
         data: _jobResource({
           kind: "recurring",
+          timezone: "America/New_York", // base timezone
           environments: {
             production: {
               enabled: true,
               schedule: "0 3 * * *", // per-env cron override
+              timezone: "Europe/London", // per-env timezone override
               next_run_at: "2026-06-07T03:00:00+00:00", // read-only
             },
             staging: {
               enabled: false,
               configuration: { method: "POST", url: "https://staging.example.com/x", headers: [] },
-              // no schedule override, next_run_at null while disabled
+              // no schedule/timezone override, next_run_at null while disabled
               next_run_at: null,
             },
           },
@@ -999,12 +1029,15 @@ describe("jobs environment scoping", () => {
     expect(job.kind).toBe(JobKind.RECURRING);
     expect(job.isRecurring()).toBe(true);
     expect(job.enabled).toBe(true); // derived roll-up: production is enabled
+    expect(job.timezone).toBe("America/New_York"); // base timezone decodes from the wire
     expect(job.environments.production.enabled).toBe(true);
     expect(job.environments.production.schedule).toBe("0 3 * * *");
+    expect(job.environments.production.timezone).toBe("Europe/London");
     expect(job.environments.production.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
     expect(job.environments.production.configuration).toBeNull();
-    // staging: no schedule override → null; disabled → null next_run_at
+    // staging: no schedule/timezone override → null; disabled → null next_run_at
     expect(job.environments.staging.schedule).toBeNull();
+    expect(job.environments.staging.timezone).toBeNull();
     expect(job.environments.staging.nextRunAt).toBeNull();
     expect(job.environments.staging.configuration?.url).toBe("https://staging.example.com/x");
   });
