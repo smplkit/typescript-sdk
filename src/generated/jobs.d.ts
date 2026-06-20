@@ -117,6 +117,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retry-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Retry Policies
+         * @description List this account's retry policies.
+         *
+         *     Default sort is `name` ascending. Sort by `name`, `created_at`, or
+         *     `updated_at` (prefix `-` for descending). The built-in `Default` policy is
+         *     not included here — it always exists and is retrievable at
+         *     `/retry-policies/Default`.
+         */
+        get: operations["list_retry_policies"];
+        put?: never;
+        /**
+         * Create Retry Policy
+         * @description Create a retry policy for this account.
+         *
+         *     The caller supplies the policy's id as `data.id`. Ids are unique within an
+         *     account and immutable. `Default` is reserved for the built-in policy and
+         *     cannot be created.
+         */
+        post: operations["create_retry_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retry-policies/{policy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retry Policy
+         * @description Retrieve a single retry policy by its id.
+         *
+         *     `Default` returns the built-in do-not-retry policy.
+         */
+        get: operations["get_retry_policy"];
+        /**
+         * Update Retry Policy
+         * @description Replace an existing retry policy. Every writable field is overwritten.
+         *
+         *     The built-in `Default` policy cannot be modified.
+         */
+        put: operations["update_retry_policy"];
+        post?: never;
+        /**
+         * Delete Retry Policy
+         * @description Delete a retry policy.
+         *
+         *     The built-in `Default` policy cannot be deleted (`403`). A policy still
+         *     referenced by any job — at the base level or in a per-environment override —
+         *     cannot be deleted (`409`); the error lists the referencing job ids under
+         *     `meta.referencing_jobs` so they can be reassigned to `Default` first.
+         */
+        delete: operations["delete_retry_policy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -140,6 +210,8 @@ export interface paths {
          *
          *     - `filter[job]={id}` — a single job's run history.
          *     - `filter[status]` — one state or a comma-separated list (any-of).
+         *     - `filter[trigger]` — one trigger (`SCHEDULE`, `MANUAL`, `RERUN`, `RETRY`)
+         *       or a comma-separated list of them (any-of).
          *     - `filter[environment]` — one environment key or a comma-separated list
          *       (any-of); omitted covers every environment you can access.
          *     - `filter[created_at]` / `filter[started_at]` / `filter[finished_at]` /
@@ -340,6 +412,11 @@ export interface components {
              */
             concurrency_policy: "ALLOW";
             /**
+             * Retry Policy
+             * @description The base retry policy for failed runs — the `id` of a retry policy (or the built-in `Default`), overridable per environment. Omit (or send `null`) to use `Default`, which never retries — so a job that sets nothing behaves exactly as before retries existed.
+             */
+            retry_policy?: string | null;
+            /**
              * Kind
              * @description How the job runs, derived from its base `schedule`: `recurring` for a cron schedule (fires on a repeating cadence), `manual` for no schedule (never auto-fires; runs only when triggered), or `one_off` for a `now` or datetime schedule (runs a single time, then is spent).
              */
@@ -418,6 +495,7 @@ export interface components {
          *           }
          *         },
          *         "name": "Nightly cache warm",
+         *         "retry_policy": "retry-on-5xx",
          *         "schedule": "0 2 * * *",
          *         "timezone": "America/New_York",
          *         "type": "http"
@@ -463,6 +541,11 @@ export interface components {
             timezone?: string | null;
             /** @description Per-environment HTTP request override. Omit to inherit the job's base `configuration`. When present, it fully replaces the base configuration for runs in this environment. */
             configuration?: components["schemas"]["JobHttpConfiguration"] | null;
+            /**
+             * Retry Policy
+             * @description Per-environment retry-policy override — the `id` of a retry policy (or `Default`). Omit to inherit the job's base `retry_policy`. When present, runs in this environment retry according to this policy instead of the base.
+             */
+            retry_policy?: string | null;
             /**
              * Next Run At
              * @description The next scheduled fire time in this environment. `null` when the environment is not enabled, or once a one-off run has fired.
@@ -585,6 +668,7 @@ export interface components {
          *           }
          *         },
          *         "name": "Nightly cache warm",
+         *         "retry_policy": "retry-on-5xx",
          *         "schedule": "0 2 * * *",
          *         "timezone": "America/New_York",
          *         "type": "http"
@@ -649,6 +733,186 @@ export interface components {
             total_pages?: number | null;
         };
         /**
+         * RetryOn
+         * @description Which failures a policy retries. An empty policy (both lists empty or
+         *     absent) retries nothing.
+         */
+        RetryOn: {
+            /**
+             * Statuses
+             * @description Response status codes that should be retried when a run fails because the response did not match the job's success status (for example `[429, 503]` to retry on rate-limit and unavailable). Each is a 3-digit HTTP status code. Empty matches no status.
+             */
+            statuses?: number[];
+            /**
+             * Reasons
+             * @description Failure reasons that should be retried: `TIMEOUT` (the run did not complete in time), `CONNECTION_ERROR` (the endpoint could not be reached), or `NON_SUCCESS_STATUS` (any non-success response, regardless of `statuses`). Empty matches no reason.
+             */
+            reasons?: ("TIMEOUT" | "CONNECTION_ERROR" | "NON_SUCCESS_STATUS")[];
+        };
+        /**
+         * RetryPolicy
+         * @description A named, reusable automatic-retry policy.
+         *
+         *     A policy decides whether and how a failed run is retried. Reference it from
+         *     a job's `retry_policy` (and optionally override it per environment). A job
+         *     that references nothing uses the built-in `Default` policy, which never
+         *     retries.
+         */
+        RetryPolicy: {
+            /**
+             * Name
+             * @description Human-readable name for the policy.
+             */
+            name: string;
+            /**
+             * Max Retries
+             * @description How many times a failed run is retried, after the initial attempt — so `max_retries` of 3 means up to 4 attempts in total. `0` disables retries. Maximum 10.
+             */
+            max_retries: number;
+            /**
+             * Backoff
+             * @description How the wait between retries grows. `fixed` waits `delay_seconds` before every retry. `exponential` doubles the wait each time — `delay_seconds`, then `2×`, `4×`, … — capped at `max_delay_seconds`.
+             * @enum {string}
+             */
+            backoff: "fixed" | "exponential";
+            /**
+             * Delay Seconds
+             * @description The wait before a retry, in seconds. For `fixed` backoff it is the constant wait before every retry; for `exponential` it is the base wait that doubles each retry.
+             */
+            delay_seconds: number;
+            /**
+             * Max Delay Seconds
+             * @description The ceiling on the wait between retries, in seconds, for `exponential` backoff — once the doubling reaches it, every subsequent retry waits this long. Only valid with `exponential` backoff; omit it for `fixed`.
+             */
+            max_delay_seconds?: number | null;
+            /** @description Which failures are retried. A run is retried only when its failure matches this set; an empty set retries nothing. Some failures are never retried regardless of this value. */
+            retry_on?: components["schemas"]["RetryOn"];
+            /**
+             * Created At
+             * @description When the policy was created.
+             */
+            readonly created_at?: string | null;
+            /**
+             * Updated At
+             * @description When the policy was last modified.
+             */
+            readonly updated_at?: string | null;
+            /**
+             * Deleted At
+             * @description When the policy was deleted. `null` for active policies.
+             */
+            readonly deleted_at?: string | null;
+            /**
+             * Version
+             * @description Monotonic counter incremented on every update, starting at 1.
+             */
+            readonly version?: number | null;
+        };
+        /**
+         * RetryPolicyCreateRequest
+         * @description JSON:API request envelope for creating a retry policy (caller-supplied `data.id`).
+         */
+        RetryPolicyCreateRequest: {
+            data: components["schemas"]["RetryPolicyCreateResource"];
+        };
+        /**
+         * RetryPolicyCreateResource
+         * @description JSON:API resource envelope for creating a retry policy (id required).
+         * @example {
+         *       "attributes": {
+         *         "backoff": "exponential",
+         *         "delay_seconds": 2,
+         *         "max_delay_seconds": 60,
+         *         "max_retries": 5,
+         *         "name": "Retry on server errors",
+         *         "retry_on": {
+         *           "reasons": [
+         *             "TIMEOUT",
+         *             "CONNECTION_ERROR"
+         *           ],
+         *           "statuses": [
+         *             429,
+         *             503
+         *           ]
+         *         }
+         *       },
+         *       "id": "retry-on-5xx",
+         *       "type": "retry_policy"
+         *     }
+         */
+        RetryPolicyCreateResource: {
+            /**
+             * Id
+             * @description Client-supplied resource id.
+             */
+            id: string;
+            /**
+             * Type
+             * @default retry_policy
+             * @constant
+             */
+            type: "retry_policy";
+            attributes: components["schemas"]["RetryPolicy"];
+        };
+        /**
+         * RetryPolicyListResponse
+         * @description JSON:API collection response for retry policies.
+         */
+        RetryPolicyListResponse: {
+            /** Data */
+            data: components["schemas"]["RetryPolicyResource"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * RetryPolicyRequest
+         * @description JSON:API request envelope for updating a retry policy.
+         */
+        RetryPolicyRequest: {
+            data: components["schemas"]["RetryPolicyResource"];
+        };
+        /**
+         * RetryPolicyResource
+         * @description JSON:API resource envelope for a retry policy. The caller supplies `id` on create.
+         * @example {
+         *       "attributes": {
+         *         "backoff": "exponential",
+         *         "delay_seconds": 2,
+         *         "max_delay_seconds": 60,
+         *         "max_retries": 5,
+         *         "name": "Retry on server errors",
+         *         "retry_on": {
+         *           "reasons": [
+         *             "TIMEOUT",
+         *             "CONNECTION_ERROR"
+         *           ],
+         *           "statuses": [
+         *             429,
+         *             503
+         *           ]
+         *         }
+         *       },
+         *       "id": "retry-on-5xx",
+         *       "type": "retry_policy"
+         *     }
+         */
+        RetryPolicyResource: {
+            /** Id */
+            id?: string | null;
+            /**
+             * Type
+             * @default retry_policy
+             */
+            type: string;
+            attributes: components["schemas"]["RetryPolicy"];
+        };
+        /**
+         * RetryPolicyResponse
+         * @description JSON:API single-resource response for a retry policy.
+         */
+        RetryPolicyResponse: {
+            data: components["schemas"]["RetryPolicyResource"];
+        };
+        /**
          * Run
          * @description One occurrence of a job executing.
          */
@@ -670,15 +934,17 @@ export interface components {
             environment: string;
             /**
              * Trigger
-             * @description Why the run exists: `SCHEDULE`, `MANUAL` (Run now), or `RERUN`.
+             * @description Why the run exists: `SCHEDULE`, `MANUAL` (Run now), `RERUN`, or `RETRY` (an automatic retry of a failed run).
              * @enum {string}
              */
-            trigger: "SCHEDULE" | "MANUAL" | "RERUN";
+            trigger: "SCHEDULE" | "MANUAL" | "RERUN" | "RETRY";
             /**
              * Rerun Of
              * @description The source run's id; set only when `trigger` is `RERUN`.
              */
             rerun_of?: string | null;
+            /** @description Retry-chain position, present only when `trigger` is `RETRY`: the id of the original run the chain retries (`of`) and this run's `attempt` number. */
+            retry?: components["schemas"]["RunRetry"] | null;
             /**
              * Scheduled For
              * @description The intended fire time for a scheduled run; `null` for manual / rerun runs.
@@ -755,7 +1021,7 @@ export interface components {
         };
         /**
          * RunListMeta
-         * @description Cursor-pagination meta for the runs list (ADR-014 high-cardinality exception).
+         * @description Cursor-pagination meta for the runs list.
          */
         RunListMeta: {
             /**
@@ -832,6 +1098,23 @@ export interface components {
          */
         RunResponse: {
             data: components["schemas"]["RunResource"];
+        };
+        /**
+         * RunRetry
+         * @description Where a `RETRY` run sits in its retry chain.
+         */
+        RunRetry: {
+            /**
+             * Of
+             * Format: uuid
+             * @description The id of the chain's original run — the first attempt that failed and started the chain.
+             */
+            of: string;
+            /**
+             * Attempt
+             * @description Which retry this run is: `1` for the first retry, `2` for the second, and so on.
+             */
+            attempt: number;
         };
         /**
          * Usage
@@ -1066,6 +1349,129 @@ export interface operations {
             };
         };
     };
+    list_retry_policies: {
+        parameters: {
+            query?: {
+                /** @description Case-insensitive substring match on the policy `name` (matches when the name contains the given text). */
+                "filter[name]"?: string | null;
+                /** @description Field to sort by. Prefix with `-` for descending order. Default: `name`. Allowed values: `created_at`, `-created_at`, `name`, `-name`, `updated_at`, `-updated_at`. */
+                sort?: "created_at" | "-created_at" | "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description 1-based page number to return. Optional; defaults to `1` when omitted. Must be `>= 1` — requests with a smaller value are rejected with a 400 error. */
+                "page[number]"?: number;
+                /** @description Number of items per page. Optional; defaults to `1000` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
+                "page[size]"?: number;
+                /** @description When `true`, the response's `meta.pagination` block includes `total` (the total number of matching items across all pages) and `total_pages`. Computing these requires an extra `COUNT` query, so omit (or pass `false`) when the totals are not needed. Defaults to `false`. */
+                "meta[total]"?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RetryPolicyListResponse"];
+                };
+            };
+        };
+    };
+    create_retry_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["RetryPolicyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RetryPolicyResponse"];
+                };
+            };
+        };
+    };
+    get_retry_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RetryPolicyResponse"];
+                };
+            };
+        };
+    };
+    update_retry_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.api+json": components["schemas"]["RetryPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RetryPolicyResponse"];
+                };
+            };
+        };
+    };
+    delete_retry_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_runs: {
         parameters: {
             query?: {
@@ -1074,6 +1480,8 @@ export interface operations {
                 "filter[status]"?: string | null;
                 /** @description Comma-separated list of environment keys to scope results to (e.g. `production,staging`). When omitted, results cover every environment you can access. */
                 "filter[environment]"?: string | null;
+                /** @description Restrict to runs with the given trigger. One of `SCHEDULE`, `MANUAL`, `RERUN`, `RETRY`, or a comma-separated list of them to match any (e.g. `SCHEDULE,RETRY` to see a job's automatic runs). */
+                "filter[trigger]"?: string | null;
                 /** @description Restrict to runs whose `created_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
                 "filter[created_at]"?: string | null;
                 /** @description Restrict to runs whose `started_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
