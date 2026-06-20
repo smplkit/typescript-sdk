@@ -92,18 +92,23 @@ export { PinoAdapter } from "./logging/adapters/pino.js";
 export type { PinoAdapterConfig } from "./logging/adapters/pino.js";
 
 // Jobs
-export { JobsClient, RunsClient } from "./jobs/client.js";
+export { JobsClient, RunsClient, RetryPoliciesClient } from "./jobs/client.js";
 export {
+  Backoff,
   HttpConfig,
   HttpMethod as JobsHttpMethod,
   Job,
   JobEnvironment,
   JobKind,
+  RetryOn,
+  RetryPolicy,
+  RetryReason,
   Run,
+  RunRetry,
   RunTrigger,
   Usage,
 } from "./jobs/types.js";
-export type { ListJobsParams, ListRunsParams } from "./jobs/types.js";
+export type { ListJobsParams, ListRetryPoliciesParams, ListRunsParams } from "./jobs/types.js";
 
 // Error hierarchy. `Smpl*` are the canonical class names (TypeScript can't
 // use bare `Error`/`TypeError`/etc. — those are JS built-ins). The

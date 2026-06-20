@@ -55,12 +55,40 @@ export enum JobKind {
  *
  * - {@link MANUAL}: a `run`/`trigger` call started it on demand.
  * - {@link RERUN}: it repeats an earlier run.
+ * - {@link RETRY}: an automatic retry of a failed run, per the job's retry policy.
  * - {@link SCHEDULE}: the job's schedule fired.
  */
 export enum RunTrigger {
   MANUAL = "MANUAL",
   RERUN = "RERUN",
+  RETRY = "RETRY",
   SCHEDULE = "SCHEDULE",
+}
+
+/**
+ * How the wait between retries grows (a retry policy's backoff strategy).
+ *
+ * - {@link EXPONENTIAL}: double the wait each retry — `delaySeconds`, then `2×`,
+ *   `4×`, … — capped at `maxDelaySeconds`.
+ * - {@link FIXED}: wait a constant `delaySeconds` before every retry.
+ */
+export enum Backoff {
+  EXPONENTIAL = "exponential",
+  FIXED = "fixed",
+}
+
+/**
+ * A failure category a retry policy can retry on.
+ *
+ * - {@link CONNECTION_ERROR}: the endpoint could not be reached.
+ * - {@link NON_SUCCESS_STATUS}: any non-success response, regardless of
+ *   `statuses`.
+ * - {@link TIMEOUT}: the run did not complete in time.
+ */
+export enum RetryReason {
+  CONNECTION_ERROR = "CONNECTION_ERROR",
+  NON_SUCCESS_STATUS = "NON_SUCCESS_STATUS",
+  TIMEOUT = "TIMEOUT",
 }
 
 /**
@@ -134,6 +162,29 @@ export class HttpConfig {
 }
 
 /**
+ * Which failures a retry policy retries.
+ *
+ * An empty `RetryOn` (both lists empty) retries nothing.
+ */
+export class RetryOn {
+  /**
+   * Response status codes to retry when a run fails because the response did
+   * not match the job's success status (e.g. `[429, 503]` for rate-limit and
+   * unavailable). Each is a 3-digit HTTP code. Defaults to none.
+   */
+  statuses: number[];
+  /**
+   * Failure categories to retry (see {@link RetryReason}). Defaults to none.
+   */
+  reasons: RetryReason[];
+
+  constructor(fields: { statuses?: number[]; reasons?: RetryReason[] } = {}) {
+    this.statuses = fields.statuses ?? [];
+    this.reasons = fields.reasons ?? [];
+  }
+}
+
+/**
  * Per-environment override for a job's enablement, schedule, and configuration.
  *
  * A job runs in a given environment only when that environment has an entry in
@@ -164,6 +215,12 @@ export class JobEnvironment {
    */
   timezone: string | null;
   /**
+   * Optional per-environment retry-policy override — the id of a
+   * {@link RetryPolicy} (or `"Default"`). `null` (the default) inherits the
+   * job's base {@link Job.retryPolicy}. Sent on writes only when set.
+   */
+  retryPolicy: string | null;
+  /**
    * Optional per-environment request configuration that fully replaces the
    * job's base {@link Job.configuration} for this environment. `null` (the
    * default) inherits the base configuration.
@@ -181,6 +238,7 @@ export class JobEnvironment {
       enabled?: boolean;
       schedule?: string | null;
       timezone?: string | null;
+      retryPolicy?: string | null;
       configuration?: HttpConfig | null;
       nextRunAt?: string | null;
     } = {},
@@ -188,6 +246,7 @@ export class JobEnvironment {
     this.enabled = fields.enabled ?? false;
     this.schedule = fields.schedule ?? null;
     this.timezone = fields.timezone ?? null;
+    this.retryPolicy = fields.retryPolicy ?? null;
     this.configuration = fields.configuration ?? null;
     this.nextRunAt = fields.nextRunAt ?? null;
   }
@@ -232,6 +291,13 @@ export class Job {
    * `null` for a manual or one-off job. Sent on writes only when set.
    */
   timezone: string | null;
+  /**
+   * The base retry policy for failed runs — the id of a {@link RetryPolicy} (or
+   * the built-in `"Default"`, which never retries), overridable per environment
+   * via {@link JobEnvironment.retryPolicy}. `null` (omitted on the wire) means
+   * the server default `"Default"` policy. Sent on writes only when set.
+   */
+  retryPolicy: string | null;
   /** The HTTP request to perform when the job fires. */
   configuration: HttpConfig;
   /**
@@ -305,6 +371,7 @@ export class Job {
       name: string;
       schedule: string | null;
       timezone?: string | null;
+      retryPolicy?: string | null;
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
@@ -327,6 +394,7 @@ export class Job {
     this.type = fields.type ?? "http";
     this.schedule = fields.schedule;
     this.timezone = fields.timezone ?? null;
+    this.retryPolicy = fields.retryPolicy ?? null;
     this.configuration = fields.configuration;
     this.concurrencyPolicy = fields.concurrencyPolicy ?? "ALLOW";
     this.createdAt = fields.createdAt ?? null;
@@ -433,13 +501,22 @@ export class Job {
    * applies to recurring jobs; omit `environment` to set the schedule every
    * environment inherits. Setting a per-environment override creates the
    * override entry if it doesn't exist yet (preserving any already-set
-   * `enabled` / `configuration` on it). Call {@link save} to persist.
+   * `enabled` / `configuration` on it).
+   *
+   * Because the timezone is an integral part of a cron cadence, an optional
+   * `timezone` may be supplied alongside the schedule; when given it sets the
+   * same scope's timezone too (equivalent to a follow-up {@link setTimezone}).
+   * Omit it to leave the timezone untouched. For a timezone-only change, use
+   * {@link setTimezone}. Call {@link save} to persist.
    */
-  setSchedule(schedule: string, environment?: string): void {
+  setSchedule(schedule: string, timezone?: string, environment?: string): void {
     if (environment === undefined) {
       this.schedule = schedule;
     } else {
       this._environmentOverride(environment).schedule = schedule;
+    }
+    if (timezone !== undefined) {
+      this.setTimezone(timezone, environment);
     }
   }
 
@@ -458,6 +535,24 @@ export class Job {
       this.timezone = timezone;
     } else {
       this._environmentOverride(environment).timezone = timezone;
+    }
+  }
+
+  /**
+   * Set the retry policy for failed runs in memory — the base
+   * {@link retryPolicy} with `environment` omitted, or a per-environment
+   * override otherwise. Accepts either a {@link RetryPolicy} instance (its id is
+   * used) or a policy id string — pass `"Default"` for the built-in never-retry
+   * policy. Setting a per-environment override creates the override entry if it
+   * doesn't exist yet (preserving any already-set `enabled` / `schedule` /
+   * `timezone` / `configuration` on it). Call {@link save} to persist.
+   */
+  setRetryPolicy(retryPolicy: RetryPolicy | string, environment?: string): void {
+    const policyId = retryPolicy instanceof RetryPolicy ? retryPolicy.id : retryPolicy;
+    if (environment === undefined) {
+      this.retryPolicy = policyId;
+    } else {
+      this._environmentOverride(environment).retryPolicy = policyId;
     }
   }
 
@@ -481,12 +576,23 @@ export class Job {
    *
    * @param params.environment - Restrict to runs stamped with this
    *   environment. Omit to cover every environment you can access.
+   * @param params.triggers - Restrict to runs started by any of these triggers
+   *   (see {@link RunTrigger}) — e.g. `[RunTrigger.RETRY]` for automatic
+   *   retries. Omit to cover every trigger.
+   * @param params.lastRunOnly - When `true`, return only the last completed run
+   *   per environment (in-flight runs excluded). Defaults to `false`.
    * @param params.pageSize - Maximum number of runs to return in this page.
    * @param params.after - Opaque cursor from a previous page.
    * @returns The runs in this page.
    */
   async listRuns(
-    params: { environment?: string; pageSize?: number; after?: string } = {},
+    params: {
+      environment?: string;
+      triggers?: RunTrigger[];
+      lastRunOnly?: boolean;
+      pageSize?: number;
+      after?: string;
+    } = {},
   ): Promise<Run[]> {
     if (this._client === null) {
       throw new Error("Job was constructed without a client; cannot list runs");
@@ -494,6 +600,8 @@ export class Job {
     return this._client.runs.list({
       job: this.id,
       environments: params.environment === undefined ? undefined : [params.environment],
+      triggers: params.triggers,
+      lastRunOnly: params.lastRunOnly,
       pageSize: params.pageSize,
       after: params.after,
     });
@@ -509,12 +617,34 @@ export class Job {
     this.type = other.type;
     this.schedule = other.schedule;
     this.timezone = other.timezone;
+    this.retryPolicy = other.retryPolicy;
     this.configuration = other.configuration;
     this.concurrencyPolicy = other.concurrencyPolicy;
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
     this.deletedAt = other.deletedAt;
     this.version = other.version;
+  }
+}
+
+/**
+ * Where a `RETRY` run sits in its retry chain (read-only).
+ */
+export class RunRetry {
+  /**
+   * Id of the chain's original run — the first attempt that failed and started
+   * the chain.
+   */
+  of: string;
+  /**
+   * Which retry this run is — `1` for the first retry, `2` for the second, and
+   * so on.
+   */
+  attempt: number;
+
+  constructor(of: string, attempt: number) {
+    this.of = of;
+    this.attempt = attempt;
   }
 }
 
@@ -545,6 +675,12 @@ export class Run {
   trigger: string;
   /** The source run's id; set only when `trigger` is `RERUN`. */
   rerunOf: string | null;
+  /**
+   * Retry-chain position, present only when `trigger` is `RETRY` (`null`
+   * otherwise): the original run the chain retries and this run's attempt
+   * number. See {@link RunRetry}.
+   */
+  retry: RunRetry | null;
   /** The intended fire time for a scheduled run; `null` for manual / rerun runs. */
   scheduledFor: string | null;
   /** Lifecycle state of the run. */
@@ -582,6 +718,9 @@ export class Run {
     this.environment = String(attributes.environment ?? "");
     this.trigger = String(attributes.trigger ?? "");
     this.rerunOf = (attributes.rerun_of as string | null) ?? null;
+    // Retry-chain position is sent only on RETRY runs; parse it when present.
+    const retry = attributes.retry as { of?: unknown; attempt?: unknown } | null | undefined;
+    this.retry = retry ? new RunRetry(String(retry.of), Number(retry.attempt)) : null;
     this.scheduledFor = (attributes.scheduled_for as string | null) ?? null;
     this.status = String(attributes.status ?? "");
     this.startedAt = (attributes.started_at as string | null) ?? null;
@@ -636,6 +775,125 @@ export class Usage {
 }
 
 /**
+ * A named, reusable automatic-retry policy.
+ *
+ * Active-record style: build one with `client.jobs.retryPolicies.new(...)`,
+ * mutate fields, and call {@link save} (create when new, full-replace update
+ * when it already exists) or {@link delete}. Reference it from a job's
+ * {@link Job.retryPolicy} (see {@link Job.setRetryPolicy}). Retry policies are
+ * account-global — never environment-scoped.
+ */
+export class RetryPolicy {
+  /** Caller-supplied unique identifier for the policy (the resource `id`); immutable. */
+  id: string;
+  /** Human-readable name for the policy. */
+  name: string;
+  /**
+   * How many times a failed run is retried after the initial attempt — `3`
+   * means up to 4 attempts total. `0` disables retries. Maximum 10.
+   */
+  maxRetries: number;
+  /** How the wait between retries grows (see {@link Backoff}). */
+  backoff: Backoff;
+  /**
+   * The wait before a retry, in seconds — the constant wait for `fixed`
+   * backoff, or the base that doubles each retry for `exponential`.
+   */
+  delaySeconds: number;
+  /**
+   * Ceiling on the wait between retries, for `exponential` backoff only. `null`
+   * (the default) leaves it uncapped and is omitted on the wire; invalid with
+   * `fixed` backoff.
+   */
+  maxDelaySeconds: number | null;
+  /** Which failures to retry (see {@link RetryOn}). An empty `RetryOn` retries nothing. */
+  retryOn: RetryOn;
+  /** When the policy was created. `null` for an unsaved instance. */
+  createdAt: string | null;
+  /** When the policy was last modified. */
+  updatedAt: string | null;
+  /** When the policy was deleted; `null` for live policies. */
+  deletedAt: string | null;
+  /** Monotonic version counter; bumped on every server-side write. */
+  version: number | null;
+
+  /** @internal */
+  _client: RetryPolicyModelClient | null;
+
+  /** @internal */
+  constructor(
+    client: RetryPolicyModelClient | null,
+    fields: {
+      id: string;
+      name: string;
+      maxRetries: number;
+      backoff: Backoff;
+      delaySeconds: number;
+      maxDelaySeconds?: number | null;
+      retryOn?: RetryOn | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+      deletedAt?: string | null;
+      version?: number | null;
+    },
+  ) {
+    this._client = client;
+    this.id = fields.id;
+    this.name = fields.name;
+    this.maxRetries = fields.maxRetries;
+    this.backoff = fields.backoff;
+    this.delaySeconds = fields.delaySeconds;
+    this.maxDelaySeconds = fields.maxDelaySeconds ?? null;
+    this.retryOn = fields.retryOn ?? new RetryOn();
+    this.createdAt = fields.createdAt ?? null;
+    this.updatedAt = fields.updatedAt ?? null;
+    this.deletedAt = fields.deletedAt ?? null;
+    this.version = fields.version ?? null;
+  }
+
+  /**
+   * Create this policy, or full-replace it if it already exists.
+   *
+   * Upsert behavior is driven by {@link createdAt}: a policy with no
+   * `createdAt` is created (POST); otherwise it's full-replace updated (PUT).
+   * After the call, every field is refreshed from the server response.
+   */
+  async save(): Promise<void> {
+    if (this._client === null) {
+      throw new Error("RetryPolicy was constructed without a client; cannot save");
+    }
+    const other =
+      this.createdAt === null
+        ? await this._client._createRetryPolicy(this)
+        : await this._client._updateRetryPolicy(this);
+    this._apply(other);
+  }
+
+  /** Delete this policy on the server. */
+  async delete(): Promise<void> {
+    if (this._client === null) {
+      throw new Error("RetryPolicy was constructed without a client; cannot delete");
+    }
+    await this._client._deleteRetryPolicy(this.id);
+  }
+
+  /** @internal Copy every server-authoritative field from `other` onto self. */
+  _apply(other: RetryPolicy): void {
+    this.id = other.id;
+    this.name = other.name;
+    this.maxRetries = other.maxRetries;
+    this.backoff = other.backoff;
+    this.delaySeconds = other.delaySeconds;
+    this.maxDelaySeconds = other.maxDelaySeconds;
+    this.retryOn = other.retryOn;
+    this.createdAt = other.createdAt;
+    this.updatedAt = other.updatedAt;
+    this.deletedAt = other.deletedAt;
+    this.version = other.version;
+  }
+}
+
+/**
  * @internal Minimal interface that `Job.save()` / `.delete()` / `.trigger()` /
  * `.listRuns()` call back into. Implemented by `JobsClient` in
  * `src/jobs/client.ts`.
@@ -655,6 +913,16 @@ export interface JobModelClient {
 export interface RunModelClient {
   cancel(runId: string): Promise<Run>;
   rerun(runId: string): Promise<Run>;
+}
+
+/**
+ * @internal Minimal interface that `RetryPolicy.save()` / `.delete()` call back
+ * into. Implemented by `RetryPoliciesClient` in `src/jobs/client.ts`.
+ */
+export interface RetryPolicyModelClient {
+  _createRetryPolicy(policy: RetryPolicy): Promise<RetryPolicy>;
+  _updateRetryPolicy(policy: RetryPolicy): Promise<RetryPolicy>;
+  _deleteRetryPolicy(id: string): Promise<void>;
 }
 
 /** Parameters accepted by `client.jobs.list(...)`. */
@@ -688,8 +956,31 @@ export interface ListRunsParams {
    * every environment you can access.
    */
   environments?: string[];
+  /**
+   * Restrict to runs started by any of these triggers (see {@link RunTrigger})
+   * — serialized as a comma-joined `filter[trigger]` (any-of). Omit (or pass an
+   * empty array) to cover every trigger.
+   */
+  triggers?: RunTrigger[];
+  /**
+   * When `true`, collapse the result to the last completed (succeeded / failed
+   * / canceled) run per job-and-environment; in-flight runs are excluded. Other
+   * filters apply first, then the collapse. Defaults to `false`; only sent on
+   * the wire when `true`.
+   */
+  lastRunOnly?: boolean;
   /** Items per page (cursor pagination). */
   pageSize?: number;
   /** Opaque cursor token from a prior page's `next` link. */
   after?: string;
+}
+
+/** Parameters accepted by `client.jobs.retryPolicies.list(...)`. */
+export interface ListRetryPoliciesParams {
+  /** Filter to policies whose name contains this text (case-insensitive). Omit to list all. */
+  name?: string;
+  /** 1-based page number to return. */
+  pageNumber?: number;
+  /** Items per page. */
+  pageSize?: number;
 }

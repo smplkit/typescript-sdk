@@ -15,24 +15,45 @@
 import { strict as assert } from "node:assert";
 
 import { JobsClient, SmplConflictError } from "../src/index.js";
-import { HttpConfig, JobKind, JobsHttpMethod, RunTrigger } from "../src/index.js";
+import {
+  Backoff,
+  HttpConfig,
+  JobKind,
+  JobsHttpMethod,
+  RetryOn,
+  RetryReason,
+  RunTrigger,
+} from "../src/index.js";
 
 import { cleanupShowcase, setupShowcase } from "./setup/jobs_setup.js";
 
 const RECURRING_JOB_ID = "showcase-recurring";
 const MANUAL_JOB_ID = "showcase-manual";
 const ONEOFF_JOB_ID = "showcase-oneoff";
+const RETRY_POLICY_ID = "showcase-retry";
 
 async function main(): Promise<void> {
   // or reached as `client.jobs` on a SmplClient
   const jobs = new JobsClient();
   await setupShowcase(jobs);
   try {
-    // create a recurring job: a base schedule and configuration every
-    // environment inherits, with per-environment overrides
+    // create a retry policy
+    const retryPolicy = jobs.retryPolicies.new(RETRY_POLICY_ID, {
+      name: "Retry on server errors",
+      maxRetries: 5,
+      backoff: Backoff.EXPONENTIAL,
+      delaySeconds: 2,
+      maxDelaySeconds: 60,
+      retryOn: new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] }),
+    });
+    await retryPolicy.save();
+    assert((await jobs.retryPolicies.list()).some((p) => p.id === RETRY_POLICY_ID));
+    console.log(`Created retry policy ${retryPolicy.id}`);
+
+    // create a recurring job
     const job = jobs.newRecurringJob(RECURRING_JOB_ID, {
       name: "Nightly cache warm",
-      description: "Warms the product cache every night at 02:00 UTC.",
+      description: "Warms the product cache nightly.",
       schedule: "0 2 * * *",
       configuration: new HttpConfig({
         method: JobsHttpMethod.POST,
@@ -42,9 +63,9 @@ async function main(): Promise<void> {
         timeout: 30,
       }),
     });
-    job.setEnabled(true, "production");
     job.setEnabled(true, "development");
-    job.setSchedule("0 */6 * * *", "development");
+    job.setEnabled(true, "production");
+    job.setSchedule("0 */6 * * *", "America/New_York", "development");
     job.setConfiguration(
       new HttpConfig({
         method: JobsHttpMethod.POST,
@@ -56,7 +77,9 @@ async function main(): Promise<void> {
     );
     await job.save();
     assert.equal(job.isRecurring(), true);
+    assert.equal(job.isEnabled("development"), true);
     assert.equal(job.isEnabled("production"), true);
+    assert.equal(job.environments["development"].timezone, "America/New_York");
     assert.equal(
       job.getConfiguration("development").url,
       "https://development.example.com/cache/warm",
@@ -75,7 +98,8 @@ async function main(): Promise<void> {
 
     // update a job
     job.name = "Nightly cache warm (v2)";
-    job.setSchedule("30 2 * * *", "production");
+    job.setRetryPolicy(retryPolicy, "production");
+    job.setSchedule("30 2 * * *", "America/Los_Angeles", "production");
     await job.save();
     assert.equal(job.version, 2);
     console.log(`Updated job to v${job.version}`);
@@ -89,6 +113,10 @@ async function main(): Promise<void> {
     const runs = await job.listRuns({ environment: "production" });
     assert(runs.some((r) => r.id === run.id));
     console.log(`Listed ${runs.length} production run(s)`);
+
+    // get the last completed run in production
+    const recent = await job.listRuns({ environment: "production", lastRunOnly: true });
+    console.log(`Last completed production run(s): ${recent.length}`);
 
     // get a run
     run = await jobs.runs.get(run.id);
@@ -144,7 +172,10 @@ async function main(): Promise<void> {
     // delete a job
     await job.delete();
     assert(!(await jobs.list()).some((j) => j.id === RECURRING_JOB_ID));
-    console.log(`Deleted job ${RECURRING_JOB_ID} — jobs showcase complete.`);
+
+    // delete the retry policy
+    await retryPolicy.delete();
+    console.log(`Deleted job ${RECURRING_JOB_ID} and retry policy — jobs showcase complete.`);
   } finally {
     await cleanupShowcase(jobs);
     jobs.close();

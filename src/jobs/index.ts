@@ -10,16 +10,26 @@
  * constructed directly via {@link JobsClient}.
  */
 
-export { JobsClient, RunsClient } from "./client.js";
+export { JobsClient, RunsClient, RetryPoliciesClient } from "./client.js";
 export type { JobsClientOptions } from "./client.js";
 export {
+  Backoff,
   HttpConfig,
   HttpMethod,
   Job,
   JobEnvironment,
   JobKind,
+  RetryOn,
+  RetryPolicy,
+  RetryReason,
   Run,
+  RunRetry,
   RunTrigger,
   Usage,
 } from "./types.js";
-export type { HttpHeader, ListJobsParams, ListRunsParams } from "./types.js";
+export type {
+  HttpHeader,
+  ListJobsParams,
+  ListRetryPoliciesParams,
+  ListRunsParams,
+} from "./types.js";

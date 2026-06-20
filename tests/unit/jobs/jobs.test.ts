@@ -15,14 +15,19 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import createClient from "openapi-fetch";
 import type { paths } from "../../../src/generated/jobs.d.ts";
-import { JobsClient, RunsClient } from "../../../src/jobs/client.js";
+import { JobsClient, RunsClient, RetryPoliciesClient } from "../../../src/jobs/client.js";
 import {
+  Backoff,
   HttpConfig,
   HttpMethod,
   Job,
   JobEnvironment,
   JobKind,
+  RetryOn,
+  RetryPolicy,
+  RetryReason,
   Run,
+  RunRetry,
   RunTrigger,
   Usage,
 } from "../../../src/jobs/types.js";
@@ -114,6 +119,31 @@ function _runResource(
       request: null,
       result: null,
       created_at: "2026-06-05T02:00:00+00:00",
+      ...attrs,
+    },
+  };
+}
+
+const POLICY_ID = "retry-on-5xx";
+
+function _retryPolicyResource(
+  attrs: Record<string, unknown> = {},
+  id: string = POLICY_ID,
+): { id: string; type: string; attributes: Record<string, unknown> } {
+  return {
+    id,
+    type: "retry_policy",
+    attributes: {
+      name: "Retry on server errors",
+      max_retries: 5,
+      backoff: "exponential",
+      delay_seconds: 2,
+      max_delay_seconds: 60,
+      retry_on: { statuses: [429, 503], reasons: ["TIMEOUT"] },
+      created_at: "2026-06-05T12:00:00+00:00",
+      updated_at: "2026-06-05T12:00:00+00:00",
+      deleted_at: null,
+      version: 1,
       ...attrs,
     },
   };
@@ -846,13 +876,19 @@ describe("JobsClient construction", () => {
   test("the jobs namespace barrel re-exports the public surface", () => {
     expect(JobsNamespace.JobsClient).toBe(JobsClient);
     expect(JobsNamespace.RunsClient).toBe(RunsClient);
+    expect(JobsNamespace.RetryPoliciesClient).toBe(RetryPoliciesClient);
     expect(JobsNamespace.HttpConfig).toBe(HttpConfig);
     expect(JobsNamespace.Job).toBe(Job);
     expect(JobsNamespace.Run).toBe(Run);
+    expect(JobsNamespace.RunRetry).toBe(RunRetry);
     expect(JobsNamespace.Usage).toBe(Usage);
+    expect(JobsNamespace.RetryPolicy).toBe(RetryPolicy);
+    expect(JobsNamespace.RetryOn).toBe(RetryOn);
     expect(JobsNamespace.HttpMethod).toBe(HttpMethod);
     expect(JobsNamespace.JobKind).toBe(JobKind);
     expect(JobsNamespace.RunTrigger).toBe(RunTrigger);
+    expect(JobsNamespace.Backoff).toBe(Backoff);
+    expect(JobsNamespace.RetryReason).toBe(RetryReason);
   });
 });
 
@@ -930,19 +966,36 @@ describe("jobs environment scoping", () => {
 
   test("setSchedule sets the base schedule and per-environment overrides", () => {
     const job = _newJob(makeClient());
-    // base schedule (no environment)
+    // base schedule (no environment, no timezone)
     job.setSchedule("30 2 * * *");
     expect(job.schedule).toBe("30 2 * * *");
+    expect(job.timezone).toBeNull(); // timezone untouched when omitted
     expect(job.environments).toEqual({});
     // per-environment override creates the entry, leaving the base untouched
-    job.setSchedule("0 5 * * *", "production");
+    job.setSchedule("0 5 * * *", undefined, "production");
     expect(job.schedule).toBe("30 2 * * *");
     expect(job.environments.production.schedule).toBe("0 5 * * *");
+    expect(job.environments.production.timezone).toBeNull(); // timezone omitted
     // a per-env schedule override preserves an already-set enabled flag
     job.setEnabled(true, "staging");
-    job.setSchedule("0 6 * * *", "staging");
+    job.setSchedule("0 6 * * *", undefined, "staging");
     expect(job.environments.staging.enabled).toBe(true);
     expect(job.environments.staging.schedule).toBe("0 6 * * *");
+  });
+
+  test("setSchedule with a timezone sets the same scope's timezone too", () => {
+    const job = _newJob(makeClient());
+    // base schedule + timezone in one call
+    job.setSchedule("0 2 * * *", "America/New_York");
+    expect(job.schedule).toBe("0 2 * * *");
+    expect(job.timezone).toBe("America/New_York");
+    expect(job.environments).toEqual({});
+    // per-environment schedule + timezone in one call
+    job.setSchedule("0 */6 * * *", "Europe/London", "production");
+    expect(job.environments.production.schedule).toBe("0 */6 * * *");
+    expect(job.environments.production.timezone).toBe("Europe/London");
+    // the base scope is untouched by the per-env call
+    expect(job.timezone).toBe("America/New_York");
   });
 
   test("setTimezone sets the base timezone and per-environment overrides", () => {
@@ -952,7 +1005,7 @@ describe("jobs environment scoping", () => {
     expect(job.timezone).toBe("America/New_York");
     expect(job.environments).toEqual({});
     // per-environment override creates the entry, leaving the base untouched
-    job.setSchedule("0 5 * * *", "production");
+    job.setSchedule("0 5 * * *", undefined, "production");
     job.setTimezone("Europe/London", "production");
     expect(job.timezone).toBe("America/New_York");
     expect(job.environments.production.timezone).toBe("Europe/London");
@@ -972,7 +1025,7 @@ describe("jobs environment scoping", () => {
       configuration: new HttpConfig({ url: "https://api.example.com" }),
     });
     job.setEnabled(true, "production");
-    job.setSchedule("0 5 * * *", "production"); // per-env cron override
+    job.setSchedule("0 5 * * *", undefined, "production"); // per-env cron override
     job.setTimezone("America/New_York"); // base timezone
     job.setTimezone("Europe/London", "production"); // per-env timezone override
     job.setConfiguration(new HttpConfig({ url: "https://staging.example.com" }), "staging");
@@ -1173,5 +1226,415 @@ describe("jobs environment scoping", () => {
     const run = new Run(_runResource().attributes, RUN_ID); // no runs backref
     await expect(run.rerun()).rejects.toThrow(/cannot rerun/);
     await expect(run.cancel()).rejects.toThrow(/cannot cancel/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry value types
+// ---------------------------------------------------------------------------
+
+describe("retry value types", () => {
+  test("RetryOn defaults to two empty lists (retries nothing)", () => {
+    const r = new RetryOn();
+    expect(r.statuses).toEqual([]);
+    expect(r.reasons).toEqual([]);
+  });
+
+  test("RetryOn keeps explicit statuses and reasons", () => {
+    const r = new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] });
+    expect(r.statuses).toEqual([429, 503]);
+    expect(r.reasons).toEqual([RetryReason.TIMEOUT]);
+  });
+
+  test("RunRetry holds the chain origin and attempt number", () => {
+    const rr = new RunRetry("orig-run", 2);
+    expect(rr.of).toBe("orig-run");
+    expect(rr.attempt).toBe(2);
+  });
+
+  test("enum values match the wire", () => {
+    expect(Backoff.EXPONENTIAL).toBe("exponential");
+    expect(Backoff.FIXED).toBe("fixed");
+    expect(RetryReason.CONNECTION_ERROR).toBe("CONNECTION_ERROR");
+    expect(RetryReason.NON_SUCCESS_STATUS).toBe("NON_SUCCESS_STATUS");
+    expect(RetryReason.TIMEOUT).toBe("TIMEOUT");
+    expect(RunTrigger.RETRY).toBe("RETRY");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Run.retry parsing
+// ---------------------------------------------------------------------------
+
+describe("Run.retry", () => {
+  test("parses the retry chain only on a RETRY run", () => {
+    const retry = new Run(
+      { job: JOB_ID, trigger: "RETRY", status: "PENDING", retry: { of: RUN_ID, attempt: 3 } },
+      "retry-run",
+    );
+    expect(retry.trigger).toBe(RunTrigger.RETRY);
+    expect(retry.retry).toBeInstanceOf(RunRetry);
+    expect(retry.retry?.of).toBe(RUN_ID);
+    expect(retry.retry?.attempt).toBe(3);
+
+    // a non-RETRY run carries no retry attribute → null
+    const scheduled = new Run({ job: JOB_ID, trigger: "SCHEDULE", status: "SUCCEEDED" }, RUN_ID);
+    expect(scheduled.retry).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Job ⇄ retry policy
+// ---------------------------------------------------------------------------
+
+describe("job retry policy", () => {
+  test("setRetryPolicy accepts a RetryPolicy instance or a bare id, base and per-env", () => {
+    const client = makeClient();
+    const job = _newJob(client);
+    const policy = client.retryPolicies.new(POLICY_ID, {
+      name: "Retry on server errors",
+      maxRetries: 5,
+      backoff: Backoff.EXPONENTIAL,
+      delaySeconds: 2,
+    });
+    // base: a RetryPolicy instance contributes its id
+    job.setRetryPolicy(policy);
+    expect(job.retryPolicy).toBe(POLICY_ID);
+    // base: a bare id string is used as-is
+    job.setRetryPolicy("Default");
+    expect(job.retryPolicy).toBe("Default");
+    // per-env override (object) creates the entry, preserving an enabled flag
+    job.setEnabled(true, "production");
+    job.setRetryPolicy(policy, "production");
+    expect(job.environments.production.retryPolicy).toBe(POLICY_ID);
+    expect(job.environments.production.enabled).toBe(true);
+    // per-env override (bare id) on a brand-new environment entry
+    job.setRetryPolicy("Default", "edge");
+    expect(job.environments.edge.retryPolicy).toBe("Default");
+    expect(job.environments.edge.enabled).toBe(false);
+  });
+
+  test("create serializes base + per-env retry_policy, omitting it when null", async () => {
+    const client = makeClient();
+    const job = client.newRecurringJob(JOB_ID, {
+      name: "x",
+      schedule: "0 2 * * *",
+      timezone: "America/New_York",
+      retryPolicy: POLICY_ID,
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    job.setEnabled(true, "production");
+    job.setRetryPolicy("Default", "production");
+    job.setEnabled(true, "staging"); // no per-env retry policy
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect(sent.data.attributes.retry_policy).toBe(POLICY_ID); // base policy sent
+    expect(sent.data.attributes.environments.production.retry_policy).toBe("Default");
+    // staging has no override → the key is omitted entirely
+    expect("retry_policy" in sent.data.attributes.environments.staging).toBe(false);
+  });
+
+  test("create omits retry_policy when the base policy is null", async () => {
+    const client = makeClient();
+    const job = _newJob(client); // no retryPolicy
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect("retry_policy" in sent.data.attributes).toBe(false);
+  });
+
+  test("get parses base + per-env retry_policy back from the wire", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _jobResource({
+          retry_policy: POLICY_ID,
+          environments: {
+            production: { enabled: true, retry_policy: "Default" },
+            staging: { enabled: true }, // no per-env policy
+          },
+        }),
+      }),
+    );
+    const job = await client.get(JOB_ID);
+    expect(job.retryPolicy).toBe(POLICY_ID);
+    expect(job.environments.production.retryPolicy).toBe("Default");
+    expect(job.environments.staging.retryPolicy).toBeNull();
+  });
+
+  test("retry_policy survives a save round-trip onto the in-memory job", async () => {
+    const client = makeClient();
+    const job = _newJob(client);
+    job.setRetryPolicy(POLICY_ID);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _jobResource({ retry_policy: POLICY_ID, version: 1 }) }, 201),
+    );
+    await job.save();
+    expect(job.retryPolicy).toBe(POLICY_ID); // _apply copied it back
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Run-list filters: triggers + lastRunOnly
+// ---------------------------------------------------------------------------
+
+describe("run-list filters", () => {
+  test("runs.list joins triggers and sends last_run_only only when true", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await client.runs.list({
+      triggers: [RunTrigger.SCHEDULE, RunTrigger.RETRY],
+      lastRunOnly: true,
+    });
+    const url = new URL((mockFetch.mock.calls[0][0] as Request).url);
+    expect(url.searchParams.get("filter[trigger]")).toBe("SCHEDULE,RETRY");
+    expect(url.searchParams.get("last_run_only")).toBe("true");
+  });
+
+  test("runs.list omits both params by default (no empty triggers, no last_run_only=false)", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.runs.list({ triggers: [], lastRunOnly: false });
+    const url = new URL((mockFetch.mock.calls[0][0] as Request).url);
+    expect(url.searchParams.has("filter[trigger]")).toBe(false); // empty list → omitted
+    expect(url.searchParams.has("last_run_only")).toBe(false); // false → omitted
+  });
+
+  test("Job.listRuns threads triggers + lastRunOnly through to the runs filter", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }));
+    const job = await client.get(JOB_ID);
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_runResource()] }));
+    await job.listRuns({
+      environment: "production",
+      triggers: [RunTrigger.RETRY],
+      lastRunOnly: true,
+    });
+    const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
+    expect(url.searchParams.get("filter[job]")).toBe(JOB_ID);
+    expect(url.searchParams.get("filter[environment]")).toBe("production");
+    expect(url.searchParams.get("filter[trigger]")).toBe("RETRY");
+    expect(url.searchParams.get("last_run_only")).toBe("true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry policies sub-client
+// ---------------------------------------------------------------------------
+
+describe("jobs.retryPolicies", () => {
+  test("retryPolicies namespace is wired", () => {
+    expect(makeClient().retryPolicies).toBeInstanceOf(RetryPoliciesClient);
+  });
+
+  test("new + save creates the policy (POST) and serializes the full attributes", async () => {
+    const client = makeClient();
+    const policy = client.retryPolicies.new(POLICY_ID, {
+      name: "Retry on server errors",
+      maxRetries: 5,
+      backoff: Backoff.EXPONENTIAL,
+      delaySeconds: 2,
+      maxDelaySeconds: 60,
+      retryOn: new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] }),
+    });
+    expect(policy).toBeInstanceOf(RetryPolicy);
+    expect(policy.createdAt).toBeNull();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _retryPolicyResource() }, 201));
+    await policy.save();
+    expect(policy.version).toBe(1);
+    expect(policy.createdAt).not.toBeNull();
+    const req = mockFetch.mock.calls[0][0] as Request;
+    expect(req.method).toBe("POST");
+    expect(req.url).toContain("/api/v1/retry-policies");
+    const sent = JSON.parse(await req.text());
+    expect(sent.data.id).toBe(POLICY_ID);
+    expect(sent.data.type).toBe("retry_policy");
+    expect(sent.data.attributes).toEqual({
+      name: "Retry on server errors",
+      max_retries: 5,
+      backoff: "exponential",
+      delay_seconds: 2,
+      max_delay_seconds: 60,
+      retry_on: { statuses: [429, 503], reasons: ["TIMEOUT"] },
+    });
+  });
+
+  test("new without maxDelaySeconds omits it and defaults retry_on to empty", async () => {
+    const client = makeClient();
+    const policy = client.retryPolicies.new("fixed-retry", {
+      name: "Fixed",
+      maxRetries: 3,
+      backoff: Backoff.FIXED,
+      delaySeconds: 5,
+    });
+    expect(policy.maxDelaySeconds).toBeNull();
+    expect(policy.retryOn).toBeInstanceOf(RetryOn);
+    expect(policy.retryOn.statuses).toEqual([]);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          data: _retryPolicyResource({ backoff: "fixed", max_delay_seconds: null }, "fixed-retry"),
+        },
+        201,
+      ),
+    );
+    await policy.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect("max_delay_seconds" in sent.data.attributes).toBe(false); // omitted when null
+    expect(sent.data.attributes.retry_on).toEqual({ statuses: [], reasons: [] });
+  });
+
+  test("save on an existing policy updates it (PUT) and round-trips fields", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _retryPolicyResource() }));
+    const policy = await client.retryPolicies.get(POLICY_ID);
+    expect(policy.backoff).toBe(Backoff.EXPONENTIAL);
+    expect(policy.maxDelaySeconds).toBe(60);
+    expect(policy.retryOn.statuses).toEqual([429, 503]);
+    expect(policy.retryOn.reasons).toEqual([RetryReason.TIMEOUT]);
+    policy.name = "renamed";
+    policy.maxRetries = 7;
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _retryPolicyResource({ name: "renamed", max_retries: 7, version: 2 }) }),
+    );
+    await policy.save();
+    expect(policy.version).toBe(2);
+    expect(policy.name).toBe("renamed");
+    const req = mockFetch.mock.calls[1][0] as Request;
+    expect(req.method).toBe("PUT");
+    expect(req.url).toContain(`/api/v1/retry-policies/${POLICY_ID}`);
+  });
+
+  test("list with and without params", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [_retryPolicyResource()] }));
+    const all = await client.retryPolicies.list();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toBeInstanceOf(RetryPolicy);
+    expect(all[0].id).toBe(POLICY_ID);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+    await client.retryPolicies.list({ name: "server", pageNumber: 2, pageSize: 10 });
+    const url = new URL((mockFetch.mock.calls[1][0] as Request).url);
+    expect(url.searchParams.get("filter[name]")).toBe("server");
+    expect(url.searchParams.get("page[number]")).toBe("2");
+    expect(url.searchParams.get("page[size]")).toBe("10");
+  });
+
+  test("list tolerates a missing data array", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    expect(await client.retryPolicies.list()).toEqual([]);
+  });
+
+  test("get applies wire fallbacks for a sparse resource", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: { id: "sparse", type: "retry_policy", attributes: {} } }),
+    );
+    const policy = await client.retryPolicies.get("sparse");
+    expect(policy.name).toBe("");
+    expect(policy.maxRetries).toBe(0);
+    expect(policy.backoff).toBe(Backoff.FIXED); // default fallback
+    expect(policy.delaySeconds).toBe(0);
+    expect(policy.maxDelaySeconds).toBeNull();
+    expect(policy.retryOn.statuses).toEqual([]);
+    expect(policy.retryOn.reasons).toEqual([]);
+    expect(policy.createdAt).toBeNull();
+    expect(policy.version).toBeNull();
+  });
+
+  test("get throws on an empty body", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    await expect(client.retryPolicies.get(POLICY_ID)).rejects.toThrow(SmplError);
+  });
+
+  test("get surfaces an API error", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ status: "404" }] }, 404));
+    await expect(client.retryPolicies.get("missing")).rejects.toThrow(SmplNotFoundError);
+  });
+
+  test("delete (204) succeeds; delete via RetryPolicy.delete round-trips", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _retryPolicyResource() }));
+    const policy = await client.retryPolicies.get(POLICY_ID);
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await policy.delete();
+    const req = mockFetch.mock.calls[1][0] as Request;
+    expect(req.method).toBe("DELETE");
+    expect(req.url).toContain(`/api/v1/retry-policies/${POLICY_ID}`);
+  });
+
+  test("delete surfaces a non-204 error status", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ status: "409" }] }, 409));
+    await expect(client.retryPolicies.delete(POLICY_ID)).rejects.toThrow(SmplError);
+  });
+
+  test("delete surfaces a network error", async () => {
+    const client = makeClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(client.retryPolicies.delete(POLICY_ID)).rejects.toThrow(SmplConnectionError);
+  });
+
+  test("list surfaces a network error", async () => {
+    const client = makeClient();
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(client.retryPolicies.list()).rejects.toThrow(SmplConnectionError);
+  });
+
+  test("_createRetryPolicy throws on an empty body", async () => {
+    const client = makeClient();
+    const policy = client.retryPolicies.new(POLICY_ID, {
+      name: "n",
+      maxRetries: 1,
+      backoff: Backoff.FIXED,
+      delaySeconds: 1,
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 201));
+    await expect(policy.save()).rejects.toThrow(SmplError);
+  });
+
+  test("_createRetryPolicy surfaces an API error (409 on duplicate id)", async () => {
+    const client = makeClient();
+    const policy = client.retryPolicies.new(POLICY_ID, {
+      name: "n",
+      maxRetries: 1,
+      backoff: Backoff.FIXED,
+      delaySeconds: 1,
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ errors: [{ status: "409" }] }, 409));
+    await expect(policy.save()).rejects.toThrow(SmplError);
+  });
+
+  test("_updateRetryPolicy throws on an empty body", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _retryPolicyResource() }));
+    const policy = await client.retryPolicies.get(POLICY_ID);
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    await expect(policy.save()).rejects.toThrow(SmplError);
+  });
+
+  test("_updateRetryPolicy surfaces a network error", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _retryPolicyResource() }));
+    const policy = await client.retryPolicies.get(POLICY_ID);
+    mockFetch.mockRejectedValueOnce(new TypeError("connection reset"));
+    await expect(policy.save()).rejects.toThrow(SmplConnectionError);
+  });
+
+  test("save / delete without a client throw", async () => {
+    const policy = new RetryPolicy(null, {
+      id: POLICY_ID,
+      name: "n",
+      maxRetries: 1,
+      backoff: Backoff.FIXED,
+      delaySeconds: 1,
+    });
+    await expect(policy.save()).rejects.toThrow("cannot save");
+    await expect(policy.delete()).rejects.toThrow("cannot delete");
   });
 });
