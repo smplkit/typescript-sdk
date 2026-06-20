@@ -145,6 +145,14 @@ export interface paths {
          *     - `filter[created_at]` / `filter[started_at]` / `filter[finished_at]` /
          *       `filter[scheduled_for]` — half-open `[start,end)` date ranges (see each
          *       parameter for the interval syntax).
+         *
+         *     Set `last_run_only=true` to collapse the result to the last completed run
+         *     for each job-and-environment combination. "Completed" means a terminal state
+         *     — succeeded, failed, or canceled; in-flight runs (pending or running) are
+         *     not included, so a job that is mid-run still surfaces its previous completed
+         *     result and a combination with no completed run yet returns nothing. The
+         *     filters above still apply, evaluated before the collapse, so each row is the
+         *     most recent completed run in its group that also satisfies them.
          */
         get: operations["list_runs"];
         put?: never;
@@ -1074,6 +1082,8 @@ export interface operations {
                 "filter[finished_at]"?: string | null;
                 /** @description Restrict to runs whose `scheduled_for` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,2026-06-08T00:00:00Z)` selects the first week of June; `[2026-06-01T00:00:00Z,*)` is everything from then onward. */
                 "filter[scheduled_for]"?: string | null;
+                /** @description Return only the last completed run for each job-and-environment combination. "Completed" means a terminal state — succeeded, failed, or canceled; runs still in flight (pending or running) are not included, so a job that is currently running still shows its previous completed result. The other filters and date ranges apply first, then the results collapse, so each row is the most recent completed run in its group that also matches them. Defaults to `false`. */
+                last_run_only?: boolean;
                 /** @description Number of runs per page. Optional; defaults to `50` when omitted. Must be between `1` and `1000` inclusive — requests outside that range are rejected with a 400 error. */
                 "page[size]"?: number | null;
                 "page[after]"?: string | null;
