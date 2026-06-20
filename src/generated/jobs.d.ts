@@ -268,9 +268,12 @@ export interface paths {
          * Cancel Run
          * @description Cancel a pending or running run.
          *
-         *     Returns `409` if the run is already in a terminal state. Canceling a
-         *     running run stops us tracking it, but the HTTP request may already be in
-         *     flight — cancel means "stop tracking," not "guaranteed it didn't happen."
+         *     Returns `404` if the run does not exist and `409` if it is already in a
+         *     terminal state. Canceling a running run stops us tracking it, but the HTTP
+         *     request may already be in flight — cancel means "stop tracking," not
+         *     "guaranteed it didn't happen." A run that has already started running still
+         *     counts toward your monthly run allowance even if you cancel it; a run
+         *     canceled while it is still pending does not count.
          */
         post: operations["cancel_run"];
         delete?: never;
@@ -292,7 +295,8 @@ export interface paths {
          * Rerun Run
          * @description Spawn a new run from a prior run, using the job's current configuration.
          *
-         *     Returns `409` if the run's parent job has been deleted.
+         *     Returns `404` if the run does not exist and `409` if the run's parent job
+         *     has been deleted.
          */
         post: operations["rerun_run"];
         delete?: never;
@@ -329,6 +333,30 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Error
+         * @description Single JSON:API error object.
+         */
+        Error: {
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Detail */
+            detail?: string | null;
+            /** Source */
+            source?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ErrorResponse
+         * @description JSON:API error response envelope.
+         */
+        ErrorResponse: {
+            /** Errors */
+            errors: components["schemas"]["Error"][];
+        };
         /**
          * HttpHeader
          * @description A single HTTP header attached to an outbound request.
@@ -1557,6 +1585,24 @@ export interface operations {
                     "application/vnd.api+json": components["schemas"]["RunResponse"];
                 };
             };
+            /** @description Run not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run is already in a terminal state (succeeded, failed, or canceled) and cannot be canceled. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     rerun_run: {
@@ -1577,6 +1623,24 @@ export interface operations {
                 };
                 content: {
                     "application/vnd.api+json": components["schemas"]["RunResponse"];
+                };
+            };
+            /** @description Run not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's parent job has been deleted, so there is no current configuration to run. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
