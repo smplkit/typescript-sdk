@@ -23,9 +23,7 @@ import {
   Job,
   JobEnvironment,
   JobKind,
-  RetryOn,
   RetryPolicy,
-  RetryReason,
   Run,
   RunRetry,
   RunTrigger,
@@ -139,7 +137,10 @@ function _retryPolicyResource(
       backoff: "exponential",
       delay_seconds: 2,
       max_delay_seconds: 60,
-      retry_on: { statuses: [429, 503], reasons: ["TIMEOUT"] },
+      retry_on_timeout: true,
+      retry_on_connection_error: true,
+      retry_statuses: ["429", "5xx"],
+      retry_statuses_except: ["501"],
       created_at: "2026-06-05T12:00:00+00:00",
       updated_at: "2026-06-05T12:00:00+00:00",
       deleted_at: null,
@@ -883,12 +884,10 @@ describe("JobsClient construction", () => {
     expect(JobsNamespace.RunRetry).toBe(RunRetry);
     expect(JobsNamespace.Usage).toBe(Usage);
     expect(JobsNamespace.RetryPolicy).toBe(RetryPolicy);
-    expect(JobsNamespace.RetryOn).toBe(RetryOn);
     expect(JobsNamespace.HttpMethod).toBe(HttpMethod);
     expect(JobsNamespace.JobKind).toBe(JobKind);
     expect(JobsNamespace.RunTrigger).toBe(RunTrigger);
     expect(JobsNamespace.Backoff).toBe(Backoff);
-    expect(JobsNamespace.RetryReason).toBe(RetryReason);
   });
 });
 
@@ -1234,18 +1233,6 @@ describe("jobs environment scoping", () => {
 // ---------------------------------------------------------------------------
 
 describe("retry value types", () => {
-  test("RetryOn defaults to two empty lists (retries nothing)", () => {
-    const r = new RetryOn();
-    expect(r.statuses).toEqual([]);
-    expect(r.reasons).toEqual([]);
-  });
-
-  test("RetryOn keeps explicit statuses and reasons", () => {
-    const r = new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] });
-    expect(r.statuses).toEqual([429, 503]);
-    expect(r.reasons).toEqual([RetryReason.TIMEOUT]);
-  });
-
   test("RunRetry holds the chain origin and attempt number", () => {
     const rr = new RunRetry("orig-run", 2);
     expect(rr.of).toBe("orig-run");
@@ -1255,9 +1242,6 @@ describe("retry value types", () => {
   test("enum values match the wire", () => {
     expect(Backoff.EXPONENTIAL).toBe("exponential");
     expect(Backoff.FIXED).toBe("fixed");
-    expect(RetryReason.CONNECTION_ERROR).toBe("CONNECTION_ERROR");
-    expect(RetryReason.NON_SUCCESS_STATUS).toBe("NON_SUCCESS_STATUS");
-    expect(RetryReason.TIMEOUT).toBe("TIMEOUT");
     expect(RunTrigger.RETRY).toBe("RETRY");
   });
 });
@@ -1436,7 +1420,10 @@ describe("jobs.retryPolicies", () => {
       backoff: Backoff.EXPONENTIAL,
       delaySeconds: 2,
       maxDelaySeconds: 60,
-      retryOn: new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] }),
+      retryOnTimeout: true,
+      retryOnConnectionError: true,
+      retryStatuses: ["429", "5xx"],
+      retryStatusesExcept: ["501"],
     });
     expect(policy).toBeInstanceOf(RetryPolicy);
     expect(policy.createdAt).toBeNull();
@@ -1456,11 +1443,14 @@ describe("jobs.retryPolicies", () => {
       backoff: "exponential",
       delay_seconds: 2,
       max_delay_seconds: 60,
-      retry_on: { statuses: [429, 503], reasons: ["TIMEOUT"] },
+      retry_on_timeout: true,
+      retry_on_connection_error: true,
+      retry_statuses: ["429", "5xx"],
+      retry_statuses_except: ["501"],
     });
   });
 
-  test("new without maxDelaySeconds omits it and defaults retry_on to empty", async () => {
+  test("new without maxDelaySeconds omits it and defaults retry fields to empty/false", async () => {
     const client = makeClient();
     const policy = client.retryPolicies.new("fixed-retry", {
       name: "Fixed",
@@ -1469,8 +1459,10 @@ describe("jobs.retryPolicies", () => {
       delaySeconds: 5,
     });
     expect(policy.maxDelaySeconds).toBeNull();
-    expect(policy.retryOn).toBeInstanceOf(RetryOn);
-    expect(policy.retryOn.statuses).toEqual([]);
+    expect(policy.retryOnTimeout).toBe(false);
+    expect(policy.retryOnConnectionError).toBe(false);
+    expect(policy.retryStatuses).toEqual([]);
+    expect(policy.retryStatusesExcept).toEqual([]);
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
         {
@@ -1482,7 +1474,10 @@ describe("jobs.retryPolicies", () => {
     await policy.save();
     const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
     expect("max_delay_seconds" in sent.data.attributes).toBe(false); // omitted when null
-    expect(sent.data.attributes.retry_on).toEqual({ statuses: [], reasons: [] });
+    expect(sent.data.attributes.retry_on_timeout).toBe(false);
+    expect(sent.data.attributes.retry_on_connection_error).toBe(false);
+    expect(sent.data.attributes.retry_statuses).toEqual([]);
+    expect(sent.data.attributes.retry_statuses_except).toEqual([]);
   });
 
   test("save on an existing policy updates it (PUT) and round-trips fields", async () => {
@@ -1491,8 +1486,10 @@ describe("jobs.retryPolicies", () => {
     const policy = await client.retryPolicies.get(POLICY_ID);
     expect(policy.backoff).toBe(Backoff.EXPONENTIAL);
     expect(policy.maxDelaySeconds).toBe(60);
-    expect(policy.retryOn.statuses).toEqual([429, 503]);
-    expect(policy.retryOn.reasons).toEqual([RetryReason.TIMEOUT]);
+    expect(policy.retryOnTimeout).toBe(true);
+    expect(policy.retryOnConnectionError).toBe(true);
+    expect(policy.retryStatuses).toEqual(["429", "5xx"]);
+    expect(policy.retryStatusesExcept).toEqual(["501"]);
     policy.name = "renamed";
     policy.maxRetries = 7;
     mockFetch.mockResolvedValueOnce(
@@ -1539,8 +1536,10 @@ describe("jobs.retryPolicies", () => {
     expect(policy.backoff).toBe(Backoff.FIXED); // default fallback
     expect(policy.delaySeconds).toBe(0);
     expect(policy.maxDelaySeconds).toBeNull();
-    expect(policy.retryOn.statuses).toEqual([]);
-    expect(policy.retryOn.reasons).toEqual([]);
+    expect(policy.retryOnTimeout).toBe(false);
+    expect(policy.retryOnConnectionError).toBe(false);
+    expect(policy.retryStatuses).toEqual([]);
+    expect(policy.retryStatusesExcept).toEqual([]);
     expect(policy.createdAt).toBeNull();
     expect(policy.version).toBeNull();
   });

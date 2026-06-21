@@ -20,8 +20,6 @@ import {
   HttpConfig,
   JobKind,
   JobsHttpMethod,
-  RetryOn,
-  RetryReason,
   RunTrigger,
 } from "../src/index.js";
 
@@ -44,7 +42,10 @@ async function main(): Promise<void> {
       backoff: Backoff.EXPONENTIAL,
       delaySeconds: 2,
       maxDelaySeconds: 60,
-      retryOn: new RetryOn({ statuses: [429, 503], reasons: [RetryReason.TIMEOUT] }),
+      retryOnTimeout: true,
+      retryOnConnectionError: true,
+      retryStatuses: ["429", "5xx"],
+      retryStatusesExcept: ["501"],
     });
     await retryPolicy.save();
     assert((await jobs.retryPolicies.list()).some((p) => p.id === RETRY_POLICY_ID));
