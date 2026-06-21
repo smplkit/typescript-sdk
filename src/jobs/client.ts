@@ -34,9 +34,7 @@ import {
   Job,
   JobEnvironment,
   JobKind,
-  RetryOn,
   RetryPolicy,
-  RetryReason,
   Run,
   Usage,
   type HttpHeader,
@@ -51,7 +49,6 @@ type GenJob = components["schemas"]["Job"];
 type GenJobEnvironment = components["schemas"]["JobEnvironment"];
 type GenJobCreateRequest = components["schemas"]["JobCreateRequest"];
 type GenJobRequest = components["schemas"]["JobRequest"];
-type GenRetryOn = components["schemas"]["RetryOn"];
 type GenRetryPolicy = components["schemas"]["RetryPolicy"];
 type GenRetryPolicyCreateRequest = components["schemas"]["RetryPolicyCreateRequest"];
 type GenRetryPolicyRequest = components["schemas"]["RetryPolicyRequest"];
@@ -252,31 +249,16 @@ function _runFromResource(
   return new Run(resource.attributes, resource.id, runs);
 }
 
-type GenRetryReason = NonNullable<GenRetryOn["reasons"]>[number];
-
-function _retryOnToWire(retryOn: RetryOn): GenRetryOn {
-  return {
-    statuses: [...retryOn.statuses],
-    // RetryReason members are their string values; serialize them as such.
-    reasons: retryOn.reasons.map((r) => String(r) as GenRetryReason),
-  };
-}
-
-function _retryOnFromWire(raw: Record<string, unknown> | undefined): RetryOn {
-  const r = raw ?? {};
-  return new RetryOn({
-    statuses: ((r.statuses as unknown[]) ?? []).map((s) => Number(s)),
-    reasons: ((r.reasons as unknown[]) ?? []).map((x) => String(x) as RetryReason),
-  });
-}
-
 function _retryPolicyAttrs(policy: RetryPolicy): GenRetryPolicy {
   const attrs: GenRetryPolicy = {
     name: policy.name,
     max_retries: policy.maxRetries,
     backoff: policy.backoff as GenRetryPolicy["backoff"],
     delay_seconds: policy.delaySeconds,
-    retry_on: _retryOnToWire(policy.retryOn),
+    retry_on_timeout: policy.retryOnTimeout,
+    retry_on_connection_error: policy.retryOnConnectionError,
+    retry_statuses: [...policy.retryStatuses],
+    retry_statuses_except: [...policy.retryStatusesExcept],
   };
   // `max_delay_seconds` is valid only with exponential backoff; omit when unset.
   if (policy.maxDelaySeconds !== null) attrs.max_delay_seconds = policy.maxDelaySeconds;
@@ -295,7 +277,10 @@ function _retryPolicyFromResource(
     backoff: (a.backoff as Backoff | undefined) ?? Backoff.FIXED,
     delaySeconds: Number(a.delay_seconds ?? 0),
     maxDelaySeconds: a.max_delay_seconds == null ? null : Number(a.max_delay_seconds),
-    retryOn: _retryOnFromWire(a.retry_on as Record<string, unknown> | undefined),
+    retryOnTimeout: Boolean(a.retry_on_timeout ?? false),
+    retryOnConnectionError: Boolean(a.retry_on_connection_error ?? false),
+    retryStatuses: ((a.retry_statuses as unknown[]) ?? []).map((s) => String(s)),
+    retryStatusesExcept: ((a.retry_statuses_except as unknown[]) ?? []).map((s) => String(s)),
     createdAt: (a.created_at as string | null) ?? null,
     updatedAt: (a.updated_at as string | null) ?? null,
     deletedAt: (a.deleted_at as string | null) ?? null,
@@ -448,8 +433,15 @@ export class RetryPoliciesClient {
    * @param fields.maxDelaySeconds - Ceiling on the wait between retries, for
    *   `exponential` backoff only. Omit to leave it uncapped; omit it for `fixed`
    *   backoff.
-   * @param fields.retryOn - Which failures to retry (see {@link RetryOn}). Omit
-   *   to retry nothing.
+   * @param fields.retryOnTimeout - Retry a run that failed because the request
+   *   did not complete within the job's timeout. Defaults to `false`.
+   * @param fields.retryOnConnectionError - Retry a run that failed because the
+   *   destination could not be reached. Defaults to `false`.
+   * @param fields.retryStatuses - Allowlist of response status patterns to retry
+   *   on a non-success response — each an exact 3-digit code (`"429"`) or a
+   *   status class (`"5xx"`). Defaults to none.
+   * @param fields.retryStatusesExcept - Patterns subtracted from
+   *   `retryStatuses` (`except` wins on overlap). Defaults to none.
    * @returns An unsaved {@link RetryPolicy} bound to this client.
    */
   new(
@@ -460,7 +452,10 @@ export class RetryPoliciesClient {
       backoff: Backoff;
       delaySeconds: number;
       maxDelaySeconds?: number | null;
-      retryOn?: RetryOn;
+      retryOnTimeout?: boolean;
+      retryOnConnectionError?: boolean;
+      retryStatuses?: string[];
+      retryStatusesExcept?: string[];
     },
   ): RetryPolicy {
     return new RetryPolicy(this, {
@@ -470,7 +465,10 @@ export class RetryPoliciesClient {
       backoff: fields.backoff,
       delaySeconds: fields.delaySeconds,
       maxDelaySeconds: fields.maxDelaySeconds,
-      retryOn: fields.retryOn,
+      retryOnTimeout: fields.retryOnTimeout,
+      retryOnConnectionError: fields.retryOnConnectionError,
+      retryStatuses: fields.retryStatuses,
+      retryStatusesExcept: fields.retryStatusesExcept,
     });
   }
 

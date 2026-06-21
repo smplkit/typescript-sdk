@@ -761,23 +761,6 @@ export interface components {
             total_pages?: number | null;
         };
         /**
-         * RetryOn
-         * @description Which failures a policy retries. An empty policy (both lists empty or
-         *     absent) retries nothing.
-         */
-        RetryOn: {
-            /**
-             * Statuses
-             * @description Response status codes that should be retried when a run fails because the response did not match the job's success status (for example `[429, 503]` to retry on rate-limit and unavailable). Each is a 3-digit HTTP status code. Empty matches no status.
-             */
-            statuses?: number[];
-            /**
-             * Reasons
-             * @description Failure reasons that should be retried: `TIMEOUT` (the run did not complete in time), `CONNECTION_ERROR` (the endpoint could not be reached), or `NON_SUCCESS_STATUS` (any non-success response, regardless of `statuses`). Empty matches no reason.
-             */
-            reasons?: ("TIMEOUT" | "CONNECTION_ERROR" | "NON_SUCCESS_STATUS")[];
-        };
-        /**
          * RetryPolicy
          * @description A named, reusable automatic-retry policy.
          *
@@ -813,8 +796,28 @@ export interface components {
              * @description The ceiling on the wait between retries, in seconds, for `exponential` backoff — once the doubling reaches it, every subsequent retry waits this long. Only valid with `exponential` backoff; omit it for `fixed`.
              */
             max_delay_seconds?: number | null;
-            /** @description Which failures are retried. A run is retried only when its failure matches this set; an empty set retries nothing. Some failures are never retried regardless of this value. */
-            retry_on?: components["schemas"]["RetryOn"];
+            /**
+             * Retry On Timeout
+             * @description Retry a run that failed because the request did not complete within the job's timeout. Defaults to `false` (timeouts are not retried).
+             * @default false
+             */
+            retry_on_timeout: boolean;
+            /**
+             * Retry On Connection Error
+             * @description Retry a run that failed because the destination could not be reached (DNS, connection refused, TLS, or transport error). Defaults to `false` (connection errors are not retried).
+             * @default false
+             */
+            retry_on_connection_error: boolean;
+            /**
+             * Retry Statuses
+             * @description Allowlist of response status patterns to retry when a run fails because the response did not match the job's success status. Each element is either an exact 3-digit HTTP code (e.g. `429`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`) — for example `["429", "5xx"]` to retry on rate-limit and any server error. Empty (the default) matches no status, so nothing is retried on a non-success response.
+             */
+            retry_statuses?: string[];
+            /**
+             * Retry Statuses Except
+             * @description Subtractions from `retry_statuses`, using the same exact-code or class syntax. A status that matches both lists is not retried — `except` wins on overlap — so `retry_statuses` of `["5xx"]` with `retry_statuses_except` of `["501"]` retries every server error except `501`. An element that does not overlap `retry_statuses` is allowed and simply has no effect. Empty (the default) subtracts nothing.
+             */
+            retry_statuses_except?: string[];
             /**
              * Created At
              * @description When the policy was created.
@@ -853,16 +856,15 @@ export interface components {
          *         "max_delay_seconds": 60,
          *         "max_retries": 5,
          *         "name": "Retry on server errors",
-         *         "retry_on": {
-         *           "reasons": [
-         *             "TIMEOUT",
-         *             "CONNECTION_ERROR"
-         *           ],
-         *           "statuses": [
-         *             429,
-         *             503
-         *           ]
-         *         }
+         *         "retry_on_connection_error": true,
+         *         "retry_on_timeout": true,
+         *         "retry_statuses": [
+         *           "429",
+         *           "5xx"
+         *         ],
+         *         "retry_statuses_except": [
+         *           "501"
+         *         ]
          *       },
          *       "id": "retry-on-5xx",
          *       "type": "retry_policy"
@@ -908,16 +910,15 @@ export interface components {
          *         "max_delay_seconds": 60,
          *         "max_retries": 5,
          *         "name": "Retry on server errors",
-         *         "retry_on": {
-         *           "reasons": [
-         *             "TIMEOUT",
-         *             "CONNECTION_ERROR"
-         *           ],
-         *           "statuses": [
-         *             429,
-         *             503
-         *           ]
-         *         }
+         *         "retry_on_connection_error": true,
+         *         "retry_on_timeout": true,
+         *         "retry_statuses": [
+         *           "429",
+         *           "5xx"
+         *         ],
+         *         "retry_statuses_except": [
+         *           "501"
+         *         ]
          *       },
          *       "id": "retry-on-5xx",
          *       "type": "retry_policy"

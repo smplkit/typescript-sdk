@@ -78,20 +78,6 @@ export enum Backoff {
 }
 
 /**
- * A failure category a retry policy can retry on.
- *
- * - {@link CONNECTION_ERROR}: the endpoint could not be reached.
- * - {@link NON_SUCCESS_STATUS}: any non-success response, regardless of
- *   `statuses`.
- * - {@link TIMEOUT}: the run did not complete in time.
- */
-export enum RetryReason {
-  CONNECTION_ERROR = "CONNECTION_ERROR",
-  NON_SUCCESS_STATUS = "NON_SUCCESS_STATUS",
-  TIMEOUT = "TIMEOUT",
-}
-
-/**
  * The HTTP request a job performs when it fires (the `http` configuration).
  *
  * Extends the shared forwarder shape with the two fields a scheduled job
@@ -158,29 +144,6 @@ export class HttpConfig {
     this.timeout = fields.timeout ?? 30;
     this.tlsVerify = fields.tlsVerify ?? true;
     this.caCert = fields.caCert ?? null;
-  }
-}
-
-/**
- * Which failures a retry policy retries.
- *
- * An empty `RetryOn` (both lists empty) retries nothing.
- */
-export class RetryOn {
-  /**
-   * Response status codes to retry when a run fails because the response did
-   * not match the job's success status (e.g. `[429, 503]` for rate-limit and
-   * unavailable). Each is a 3-digit HTTP code. Defaults to none.
-   */
-  statuses: number[];
-  /**
-   * Failure categories to retry (see {@link RetryReason}). Defaults to none.
-   */
-  reasons: RetryReason[];
-
-  constructor(fields: { statuses?: number[]; reasons?: RetryReason[] } = {}) {
-    this.statuses = fields.statuses ?? [];
-    this.reasons = fields.reasons ?? [];
   }
 }
 
@@ -806,8 +769,34 @@ export class RetryPolicy {
    * `fixed` backoff.
    */
   maxDelaySeconds: number | null;
-  /** Which failures to retry (see {@link RetryOn}). An empty `RetryOn` retries nothing. */
-  retryOn: RetryOn;
+  /**
+   * Retry a run that failed because the request did not complete within the
+   * job's timeout. Defaults to `false` (timeouts are not retried).
+   */
+  retryOnTimeout: boolean;
+  /**
+   * Retry a run that failed because the destination could not be reached (DNS,
+   * connection refused, TLS, or transport error). Defaults to `false`
+   * (connection errors are not retried).
+   */
+  retryOnConnectionError: boolean;
+  /**
+   * Allowlist of response status patterns to retry when a run fails because the
+   * response did not match the job's success status. Each element is either an
+   * exact 3-digit HTTP code (e.g. `"429"`) or a status class (`"1xx"`, `"2xx"`,
+   * `"3xx"`, `"4xx"`, `"5xx"`) — for example `["429", "5xx"]` to retry on
+   * rate-limit and any server error. Empty (the default) matches no status, so
+   * nothing is retried on a non-success response.
+   */
+  retryStatuses: string[];
+  /**
+   * Subtractions from {@link retryStatuses}, using the same exact-code or class
+   * syntax. A status that matches both lists is not retried — `except` wins on
+   * overlap — so `retryStatuses` of `["5xx"]` with `retryStatusesExcept` of
+   * `["501"]` retries every server error except `501`. Empty (the default)
+   * subtracts nothing.
+   */
+  retryStatusesExcept: string[];
   /** When the policy was created. `null` for an unsaved instance. */
   createdAt: string | null;
   /** When the policy was last modified. */
@@ -830,7 +819,10 @@ export class RetryPolicy {
       backoff: Backoff;
       delaySeconds: number;
       maxDelaySeconds?: number | null;
-      retryOn?: RetryOn | null;
+      retryOnTimeout?: boolean;
+      retryOnConnectionError?: boolean;
+      retryStatuses?: string[];
+      retryStatusesExcept?: string[];
       createdAt?: string | null;
       updatedAt?: string | null;
       deletedAt?: string | null;
@@ -844,7 +836,10 @@ export class RetryPolicy {
     this.backoff = fields.backoff;
     this.delaySeconds = fields.delaySeconds;
     this.maxDelaySeconds = fields.maxDelaySeconds ?? null;
-    this.retryOn = fields.retryOn ?? new RetryOn();
+    this.retryOnTimeout = fields.retryOnTimeout ?? false;
+    this.retryOnConnectionError = fields.retryOnConnectionError ?? false;
+    this.retryStatuses = fields.retryStatuses ?? [];
+    this.retryStatusesExcept = fields.retryStatusesExcept ?? [];
     this.createdAt = fields.createdAt ?? null;
     this.updatedAt = fields.updatedAt ?? null;
     this.deletedAt = fields.deletedAt ?? null;
@@ -885,7 +880,10 @@ export class RetryPolicy {
     this.backoff = other.backoff;
     this.delaySeconds = other.delaySeconds;
     this.maxDelaySeconds = other.maxDelaySeconds;
-    this.retryOn = other.retryOn;
+    this.retryOnTimeout = other.retryOnTimeout;
+    this.retryOnConnectionError = other.retryOnConnectionError;
+    this.retryStatuses = other.retryStatuses;
+    this.retryStatusesExcept = other.retryStatusesExcept;
     this.createdAt = other.createdAt;
     this.updatedAt = other.updatedAt;
     this.deletedAt = other.deletedAt;
