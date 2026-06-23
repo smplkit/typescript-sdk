@@ -1365,9 +1365,10 @@ export interface components {
          * ForwarderHttpConfiguration
          * @description HTTP request a forwarder makes to deliver an event.
          *
-         *     Identical to the shared HTTP configuration except that ``headers`` is a
-         *     name→value object so an individual header can be overridden per environment
-         *     by its name.
+         *     The shared HTTP configuration, unchanged — including the name→value
+         *     ``headers`` object whose entries can be overridden per environment by name.
+         *     It exists as a distinct subclass only so the spec exposes a
+         *     forwarder-specific schema name; it adds no fields of its own.
          */
         ForwarderHttpConfiguration: {
             /**
@@ -1384,7 +1385,7 @@ export interface components {
             url: string;
             /**
              * Headers
-             * @description HTTP headers attached to each delivery, as a name→value object (e.g. `{"DD-API-KEY": "s3cr3t"}`). A header is overridden in a specific environment by its name via a `headers.<name>` entry in that environment's overrides; header names match case-insensitively.
+             * @description HTTP headers attached to each request, as a name→value object (e.g. `{"Authorization": "Bearer s3cr3t"}`). Override an individual header in a specific environment by its name via a `headers.<name>` entry in that environment's overrides; header names match case-insensitively.
              */
             headers?: {
                 [key: string]: string;
