@@ -1,10 +1,17 @@
 /**
  * Tests for the fused {@link AuditClient}'s SIEM forwarder surface —
  * `client.forwarders.*` — plus the active-record {@link Forwarder}
- * model, its per-environment setters, the `HttpConfiguration` /
+ * model, its per-environment overrides, the `HttpConfiguration` /
  * `ForwarderEnvironment` value objects, the `categories` discovery listing,
  * the public `close()` method, the request-timeout path, and the standalone
  * credential-resolution branch.
+ *
+ * ADR-056 reshaped the per-environment surface into a flat sparse overlay:
+ * `HttpConfiguration.headers` is a name→value object (with `setHeader`/
+ * `getHeader`), a {@link ForwarderEnvironment} is a flat sparse override (only
+ * the leaves it sets travel on the wire, each header as a `headers.<name>`
+ * leaf), `Forwarder.enabled` is a read-only roll-up over the environments map,
+ * and per-environment overrides are reached through `forwarder.environment(env)`.
  *
  * Drives the one-client `AuditClient` with a per-instance `fetch` override.
  * Coverage target is 100% lines on src/audit/client.ts and src/audit/types.ts.
@@ -72,8 +79,8 @@ function _forwarderResource(
       name: "Datadog production",
       description: null,
       forwarder_type: ForwarderType.DATADOG,
-      // Base `enabled` is server-pinned false; enablement is per-environment.
-      enabled: false,
+      // A forwarder resource no longer carries a base `enabled` attribute;
+      // enablement is per-environment (ADR-056).
       environments: { production: { enabled: true } },
       forward_smplkit_events: false,
       filter: null,
@@ -82,7 +89,8 @@ function _forwarderResource(
       configuration: {
         method: HttpMethod.POST,
         url: "https://siem.example.com/in",
-        headers: [{ name: "DD-API-KEY", value: "<redacted>" }],
+        // Wire headers are a name→value object.
+        headers: { "DD-API-KEY": "<redacted>" },
         success_status: "2xx",
         tls_verify: true,
         ca_cert: null,
@@ -110,8 +118,17 @@ function _newForwarder(
     description: string | null;
     environments: Record<
       string,
-      ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
-    >;
+      | ForwarderEnvironment
+      | {
+          enabled?: boolean;
+          url?: string | null;
+          method?: HttpMethod | null;
+          successStatus?: string | null;
+          tlsVerify?: boolean | null;
+          caCert?: string | null;
+          headers?: Record<string, string>;
+        }
+    > | null;
   }> = {},
   responses: Array<Response | (() => Response | Promise<Response>)> = [],
   key: string = FWD_ID,
@@ -123,7 +140,7 @@ function _newForwarder(
     configuration: new HttpConfiguration({
       method: HttpMethod.POST,
       url: "https://siem.example.com/in",
-      headers: [{ name: "DD-API-KEY", value: "real-secret" }],
+      headers: { "DD-API-KEY": "real-secret" },
     }),
     ...overrides,
   });
@@ -165,11 +182,11 @@ describe("audit enums", () => {
 // ---------------------------------------------------------------------------
 
 describe("HttpConfiguration", () => {
-  test("defaults method=POST, success_status=2xx, headers=[], tls_verify=true, ca_cert=null", () => {
+  test("defaults method=POST, success_status=2xx, headers={}, tls_verify=true, ca_cert=null", () => {
     const c = new HttpConfiguration({ url: "https://x.example/in" });
     expect(c.method).toBe(HttpMethod.POST);
     expect(c.successStatus).toBe("2xx");
-    expect(c.headers).toEqual([]);
+    expect(c.headers).toEqual({});
     expect(c.tlsVerify).toBe(true);
     expect(c.caCert).toBeNull();
     expect(c.url).toBe("https://x.example/in");
@@ -184,7 +201,7 @@ describe("HttpConfiguration", () => {
     const c = new HttpConfiguration({
       method: HttpMethod.PUT,
       url: "https://x.example/in",
-      headers: [{ name: "A", value: "b" }],
+      headers: { A: "b" },
       successStatus: "204",
       tlsVerify: false,
       caCert: "-----BEGIN CERTIFICATE-----",
@@ -193,26 +210,76 @@ describe("HttpConfiguration", () => {
     expect(c.successStatus).toBe("204");
     expect(c.tlsVerify).toBe(false);
     expect(c.caCert).toBe("-----BEGIN CERTIFICATE-----");
-    expect(c.headers).toEqual([{ name: "A", value: "b" }]);
+    expect(c.headers).toEqual({ A: "b" });
+  });
+
+  test("setHeader / getHeader read and write individual headers by name", () => {
+    const c = new HttpConfiguration({
+      url: "https://x.example/in",
+      headers: { "DD-API-KEY": "k1" },
+    });
+    expect(c.getHeader("DD-API-KEY")).toBe("k1");
+    // getHeader of a missing header returns undefined.
+    expect(c.getHeader("X-Trace")).toBeUndefined();
+    c.setHeader("X-Trace", "abc");
+    expect(c.getHeader("X-Trace")).toBe("abc");
+    c.setHeader("DD-API-KEY", "k2");
+    expect(c.getHeader("DD-API-KEY")).toBe("k2");
+    expect(c.headers).toEqual({ "DD-API-KEY": "k2", "X-Trace": "abc" });
+  });
+
+  test("copies the supplied headers object rather than aliasing it", () => {
+    const source = { "DD-API-KEY": "k1" };
+    const c = new HttpConfiguration({ url: "https://x.example/in", headers: source });
+    c.setHeader("DD-API-KEY", "k2");
+    expect(source["DD-API-KEY"]).toBe("k1");
   });
 });
 
 // ---------------------------------------------------------------------------
-// ForwarderEnvironment value object
+// ForwarderEnvironment value object (flat sparse override, ADR-056)
 // ---------------------------------------------------------------------------
 
 describe("ForwarderEnvironment", () => {
-  test("defaults: disabled, no config override", () => {
+  test("defaults: disabled, every leaf null, headers empty", () => {
     const env = new ForwarderEnvironment();
     expect(env.enabled).toBe(false);
-    expect(env.configuration).toBeNull();
+    expect(env.url).toBeNull();
+    expect(env.method).toBeNull();
+    expect(env.successStatus).toBeNull();
+    expect(env.tlsVerify).toBeNull();
+    expect(env.caCert).toBeNull();
+    expect(env.headers).toEqual({});
+    expect(env.getHeader("anything")).toBeUndefined();
   });
 
-  test("retains explicitly supplied fields", () => {
-    const cfg = new HttpConfiguration({ url: "https://x.example/in" });
-    const env = new ForwarderEnvironment({ enabled: true, configuration: cfg });
+  test("retains explicitly supplied leaf values", () => {
+    const env = new ForwarderEnvironment({
+      enabled: true,
+      url: "https://prod.example/in",
+      method: HttpMethod.PUT,
+      successStatus: "204",
+      tlsVerify: false,
+      caCert: "PEM",
+      headers: { "DD-API-KEY": "prod-secret" },
+    });
     expect(env.enabled).toBe(true);
-    expect(env.configuration).toBe(cfg);
+    expect(env.url).toBe("https://prod.example/in");
+    expect(env.method).toBe(HttpMethod.PUT);
+    expect(env.successStatus).toBe("204");
+    expect(env.tlsVerify).toBe(false);
+    expect(env.caCert).toBe("PEM");
+    expect(env.getHeader("DD-API-KEY")).toBe("prod-secret");
+  });
+
+  test("setHeader / getHeader read and write individual header overrides", () => {
+    const env = new ForwarderEnvironment();
+    expect(env.getHeader("DD-API-KEY")).toBeUndefined();
+    env.setHeader("DD-API-KEY", "prod-secret");
+    expect(env.getHeader("DD-API-KEY")).toBe("prod-secret");
+    env.setHeader("DD-API-KEY", "prod-secret-2");
+    expect(env.getHeader("DD-API-KEY")).toBe("prod-secret-2");
+    expect(env.headers).toEqual({ "DD-API-KEY": "prod-secret-2" });
   });
 });
 
@@ -253,7 +320,7 @@ describe("client.forwarders.new", () => {
 
   test("defaults enabled false, environments empty, description/filter/transform null", () => {
     const { forwarder } = _newForwarder();
-    expect(forwarder.enabled).toBe(false);
+    expect(forwarder.enabled).toBe(false); // roll-up over an empty environments map
     expect(forwarder.environments).toEqual({});
     expect(forwarder.description).toBeNull();
     expect(forwarder.filter).toBeNull();
@@ -308,23 +375,26 @@ describe("client.forwarders.new", () => {
     expect(fwd.transformType).toBe(TransformType.JSONATA);
   });
 
-  test("new() normalizes a ForwarderEnvironment instance and a plain object alike", () => {
+  test("new() normalizes a ForwarderEnvironment instance and a plain leaf object alike", () => {
     const { client } = makeClient();
     const fwd = client.forwarders.new(FWD_ID, {
       forwarderType: ForwarderType.HTTP,
       configuration: new HttpConfiguration({ url: "https://x.example/in" }),
       environments: {
         production: new ForwarderEnvironment({ enabled: true }),
-        staging: { enabled: false },
+        staging: { enabled: false, url: "https://staging.example/in" },
         qa: {}, // empty plain object → defaults
       },
     });
+    // The instance branch keeps the same instance; the plain-object branch
+    // wraps it in a ForwarderEnvironment.
     expect(fwd.environments.production).toBeInstanceOf(ForwarderEnvironment);
     expect(fwd.environments.production!.enabled).toBe(true);
     expect(fwd.environments.staging).toBeInstanceOf(ForwarderEnvironment);
     expect(fwd.environments.staging!.enabled).toBe(false);
+    expect(fwd.environments.staging!.url).toBe("https://staging.example/in");
     expect(fwd.environments.qa!.enabled).toBe(false);
-    expect(fwd.environments.qa!.configuration).toBeNull();
+    expect(fwd.environments.qa!.url).toBeNull();
   });
 
   test("new() treats a null environments map as empty", () => {
@@ -450,7 +520,7 @@ describe("Forwarder.save() — create", () => {
     expect(forwarder.forwardSmplkitEvents).toBe(true);
   });
 
-  test("wire body carries the full configuration including tls_verify / ca_cert", async () => {
+  test("wire body carries the full configuration including object headers / tls_verify / ca_cert", async () => {
     const { forwarder, requests } = _newForwarder({}, [
       jsonResponse({ data: _forwarderResource() }, 201),
     ]);
@@ -461,10 +531,8 @@ describe("Forwarder.save() — create", () => {
     expect(body.data.attributes.configuration.url).toBe("https://siem.example.com/in");
     expect(body.data.attributes.configuration.tls_verify).toBe(false);
     expect(body.data.attributes.configuration.ca_cert).toBe("PEM");
-    expect(body.data.attributes.configuration.headers[0]).toEqual({
-      name: "DD-API-KEY",
-      value: "real-secret",
-    });
+    // Configuration headers serialize as a name→value object on the wire.
+    expect(body.data.attributes.configuration.headers).toEqual({ "DD-API-KEY": "real-secret" });
     expect(body.data.attributes).not.toHaveProperty("http");
   });
 
@@ -609,83 +677,80 @@ describe("Forwarder.save() — update", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-environment setters (the NEW behavior)
+// Per-environment overrides (the NEW flat-overlay behavior, ADR-056)
 // ---------------------------------------------------------------------------
 
-describe("Forwarder.setConfiguration / setEnabled", () => {
-  test("setConfiguration with no environment replaces the base configuration", () => {
+describe("Forwarder.environment(env) per-environment overrides", () => {
+  test("base configuration is set by direct assignment, environments untouched", () => {
     const { forwarder } = _newForwarder();
     const next = new HttpConfiguration({ url: "https://new.example/in" });
-    forwarder.setConfiguration(next);
+    forwarder.configuration = next;
     expect(forwarder.configuration).toBe(next);
     expect(forwarder.environments).toEqual({});
   });
 
-  test("setEnabled with no environment sets the base enabled flag", () => {
+  test("environment() lazily creates an override and returns the existing one thereafter", () => {
     const { forwarder } = _newForwarder();
-    forwarder.setEnabled(true);
-    expect(forwarder.enabled).toBe(true);
     expect(forwarder.environments).toEqual({});
-  });
-
-  test("setConfiguration(env) creates the override entry when absent", () => {
-    const { forwarder } = _newForwarder();
-    const cfg = new HttpConfiguration({ url: "https://prod.example/in" });
-    forwarder.setConfiguration(cfg, "production");
-    expect(forwarder.environments.production).toBeInstanceOf(ForwarderEnvironment);
-    expect(forwarder.environments.production!.configuration).toBe(cfg);
+    const prod = forwarder.environment("production");
+    expect(prod).toBeInstanceOf(ForwarderEnvironment);
+    // The freshly-created override is stored in the environments map.
+    expect(forwarder.environments.production).toBe(prod);
     // enabled defaults to false on the freshly-created override.
-    expect(forwarder.environments.production!.enabled).toBe(false);
+    expect(prod.enabled).toBe(false);
+    // A second access returns the SAME instance (create-vs-existing branch).
+    expect(forwarder.environment("production")).toBe(prod);
+    // Mutations through the returned override are visible on the map.
+    prod.enabled = true;
+    expect(forwarder.environments.production.enabled).toBe(true);
   });
 
-  test("setEnabled(env) creates the override entry when absent", () => {
+  test("enabled roll-up is false with no enabled env and true once any env is enabled", () => {
     const { forwarder } = _newForwarder();
-    forwarder.setEnabled(true, "production");
-    expect(forwarder.environments.production).toBeInstanceOf(ForwarderEnvironment);
-    expect(forwarder.environments.production!.enabled).toBe(true);
-    expect(forwarder.environments.production!.configuration).toBeNull();
+    expect(forwarder.enabled).toBe(false);
+    // A present-but-disabled override keeps the roll-up false.
+    forwarder.environment("staging").enabled = false;
+    expect(forwarder.enabled).toBe(false);
+    // Enabling any environment flips the roll-up to true.
+    forwarder.environment("production").enabled = true;
+    expect(forwarder.enabled).toBe(true);
+    // Disabling it again returns the roll-up to false.
+    forwarder.environment("production").enabled = false;
+    expect(forwarder.enabled).toBe(false);
   });
 
-  test("per-env setters preserve the other field on an existing override", () => {
-    const { forwarder } = _newForwarder();
-    forwarder.setEnabled(true, "production");
-    const cfg = new HttpConfiguration({ url: "https://prod.example/in" });
-    forwarder.setConfiguration(cfg, "production");
-    // enabled set earlier must survive the later setConfiguration.
-    expect(forwarder.environments.production!.enabled).toBe(true);
-    expect(forwarder.environments.production!.configuration).toBe(cfg);
-
-    // And the reverse order: config first, then toggling enabled.
-    forwarder.setEnabled(false, "production");
-    expect(forwarder.environments.production!.configuration).toBe(cfg);
-    expect(forwarder.environments.production!.enabled).toBe(false);
-  });
-
-  test("per-env setters round-trip through save()", async () => {
+  test("per-env leaf overrides serialize to a flat snake_case overlay on save", async () => {
     const { client, requests } = makeClient([jsonResponse({ data: _forwarderResource() }, 201)]);
     const fwd = client.forwarders.new(FWD_ID, {
       name: "Datadog production",
       forwarderType: ForwarderType.DATADOG,
       configuration: new HttpConfiguration({ url: "https://siem.example.com/in" }),
     });
-    fwd.setEnabled(true, "production");
-    fwd.setConfiguration(
-      new HttpConfiguration({
-        url: "https://prod.example/in",
-        headers: [{ name: "X-Env", value: "prod-secret" }],
-      }),
-      "production",
-    );
+    const prod = fwd.environment("production");
+    prod.enabled = true;
+    prod.url = "https://prod.example/in";
+    prod.method = HttpMethod.PUT;
+    prod.successStatus = "204";
+    prod.tlsVerify = false;
+    prod.caCert = "PROD-PEM";
+    prod.setHeader("DD-API-KEY", "prod-secret");
+    // staging only flips enabled; every other leaf stays null and is omitted.
+    fwd.environment("staging").enabled = false;
     await fwd.save();
     const body = JSON.parse(await requests[0]!.text());
-    expect(body.data.attributes.environments.production.enabled).toBe(true);
-    expect(body.data.attributes.environments.production.configuration.url).toBe(
-      "https://prod.example/in",
-    );
-    expect(body.data.attributes.environments.production.configuration.headers[0]).toEqual({
-      name: "X-Env",
-      value: "prod-secret",
+    // production carries enabled plus only the overridden snake_case leaves and
+    // its header as a `headers.<name>` entry.
+    expect(body.data.attributes.environments.production).toEqual({
+      enabled: true,
+      url: "https://prod.example/in",
+      method: "PUT",
+      success_status: "204",
+      tls_verify: false,
+      ca_cert: "PROD-PEM",
+      "headers.DD-API-KEY": "prod-secret",
     });
+    // staging overrides nothing else, so only `enabled` rides along.
+    expect(body.data.attributes.environments.staging).toEqual({ enabled: false });
   });
 });
 
@@ -779,7 +844,8 @@ describe("client.forwarders.get", () => {
     const fwd = await client.forwarders.get(FWD_ID);
     expect(fwd).toBeInstanceOf(Forwarder);
     expect(fwd.id).toBe(FWD_ID);
-    expect(fwd.configuration.headers[0]!.value).toBe("<redacted>");
+    // Object headers round-trip onto the base configuration.
+    expect(fwd.configuration.getHeader("DD-API-KEY")).toBe("<redacted>");
     expect(fwd._client).not.toBeNull();
   });
 
@@ -818,7 +884,7 @@ describe("client.forwarders.get", () => {
 // ---------------------------------------------------------------------------
 
 describe("Forwarder.delete() and client.forwarders.delete()", () => {
-  test("Forwarder.delete() soft-deletes the server-side record", async () => {
+  test("Forwarder.delete() removes the server-side record", async () => {
     const { client, requests } = makeClient([
       jsonResponse({ data: _forwarderResource() }),
       new Response(null, { status: 204 }),
@@ -880,14 +946,13 @@ describe("Forwarder defaults from sparse wire shape", () => {
             // intentionally minimal
             name: "x",
             forwarder_type: "http",
-            enabled: false,
           },
         },
       }),
     ]);
     const fwd = await client.forwarders.get(FWD_ID);
     expect(fwd.configuration.method).toBe(HttpMethod.POST);
-    expect(fwd.configuration.headers).toEqual([]);
+    expect(fwd.configuration.headers).toEqual({});
     expect(fwd.configuration.successStatus).toBe("2xx");
     // Absent tls_verify defaults to true (secure default); ca_cert to null.
     expect(fwd.configuration.tlsVerify).toBe(true);
@@ -898,20 +963,21 @@ describe("Forwarder defaults from sparse wire shape", () => {
     expect(fwd.transform).toBeNull();
     expect(fwd.forwardSmplkitEvents).toBe(false);
     expect(fwd.environments).toEqual({});
+    expect(fwd.enabled).toBe(false); // roll-up over an empty environments map
     expect(fwd.createdAt).toBeNull();
     expect(fwd.updatedAt).toBeNull();
     expect(fwd.deletedAt).toBeNull();
     expect(fwd.version).toBeNull();
   });
 
-  test("explicit tls_verify=false and ca_cert survive the read", async () => {
+  test("explicit tls_verify=false and ca_cert survive the read; object headers decode", async () => {
     const { client } = makeClient([
       jsonResponse({
         data: _forwarderResource({
           configuration: {
             method: HttpMethod.PUT,
             url: "https://x.example/in",
-            headers: [{}], // header with neither name nor value → both default empty
+            headers: { "X-Token": "abc", "X-Count": 7 }, // non-string value coerces
             success_status: "204",
             tls_verify: false,
             ca_cert: "PEM",
@@ -924,36 +990,47 @@ describe("Forwarder defaults from sparse wire shape", () => {
     expect(fwd.configuration.successStatus).toBe("204");
     expect(fwd.configuration.tlsVerify).toBe(false);
     expect(fwd.configuration.caCert).toBe("PEM");
-    expect(fwd.configuration.headers[0]).toEqual({ name: "", value: "" });
+    expect(fwd.configuration.headers).toEqual({ "X-Token": "abc", "X-Count": "7" });
+  });
+
+  test("tolerates a non-object headers value on the base configuration", async () => {
+    const { client } = makeClient([
+      jsonResponse({
+        data: _forwarderResource({
+          configuration: { method: HttpMethod.POST, url: "https://x.example/in", headers: 42 },
+        }),
+      }),
+    ]);
+    const fwd = await client.forwarders.get(FWD_ID);
+    expect(fwd.configuration.headers).toEqual({});
   });
 });
 
 // ---------------------------------------------------------------------------
-// Environment scoping (ADR-055): per-environment enablement + config override
+// Environment scoping (ADR-056): flat sparse per-environment overlay
 // ---------------------------------------------------------------------------
 
-describe("Forwarder environments (env scoping)", () => {
-  test("base enabled is read-only/pinned false and never sent on create", async () => {
+describe("Forwarder environments (flat overlay)", () => {
+  test("base enabled has no wire attribute and never rides along on create", async () => {
     const { forwarder, requests } = _newForwarder(
       { environments: { production: { enabled: true } } },
       [jsonResponse({ data: _forwarderResource() }, 201)],
     );
-    expect(forwarder.enabled).toBe(false);
+    // enabled is the roll-up: production is enabled → true.
+    expect(forwarder.enabled).toBe(true);
     await forwarder.save();
     const body = JSON.parse(await requests[0]!.text());
     expect(body.data.attributes).not.toHaveProperty("enabled");
   });
 
-  test("create sends environments map (enabled + optional configuration override)", async () => {
+  test("create sends the environments map with sparse leaf overrides", async () => {
     const { forwarder, requests } = _newForwarder(
       {
         environments: {
           production: {
             enabled: true,
-            configuration: new HttpConfiguration({
-              url: "https://prod.example/in",
-              headers: [{ name: "X-Env", value: "prod-secret" }],
-            }),
+            url: "https://prod.example/in",
+            headers: { "X-Env": "prod-secret" },
           },
           staging: new ForwarderEnvironment({ enabled: false }),
         },
@@ -963,15 +1040,13 @@ describe("Forwarder environments (env scoping)", () => {
     await forwarder.save();
     const body = JSON.parse(await requests[0]!.text());
     const envs = body.data.attributes.environments;
-    expect(envs.production.enabled).toBe(true);
-    expect(envs.production.configuration.url).toBe("https://prod.example/in");
-    expect(envs.production.configuration.headers[0]).toEqual({
-      name: "X-Env",
-      value: "prod-secret",
+    expect(envs.production).toEqual({
+      enabled: true,
+      url: "https://prod.example/in",
+      "headers.X-Env": "prod-secret",
     });
-    expect(envs.staging.enabled).toBe(false);
-    // No override on staging → null configuration (inherits the base).
-    expect(envs.staging.configuration).toBeNull();
+    // No leaf overrides on staging → only `enabled` rides along.
+    expect(envs.staging).toEqual({ enabled: false });
   });
 
   test("omits environments from the wire body when the map is empty", async () => {
@@ -983,20 +1058,25 @@ describe("Forwarder environments (env scoping)", () => {
     expect(body.data.attributes).not.toHaveProperty("environments");
   });
 
-  test("parses the environments map from a read, including config overrides", async () => {
+  test("parses a flat overlay from a read, including a dotted header name and unknown leaves", async () => {
     const { client } = makeClient([
       jsonResponse({
         data: _forwarderResource({
           environments: {
             production: {
               enabled: true,
-              configuration: {
-                method: HttpMethod.POST,
-                url: "https://prod.example/in",
-                headers: [{ name: "X-Env", value: "<redacted>" }],
-                success_status: "2xx",
-              },
+              url: "https://prod.example/in",
+              method: HttpMethod.PUT,
+              success_status: "204",
+              tls_verify: false,
+              ca_cert: "PROD-PEM",
+              // Header whose name itself contains a dot: split on the FIRST dot.
+              "headers.X-Foo.Bar": "v",
+              "headers.DD-API-KEY": "<redacted>",
+              // Unknown leaf must be ignored (forward-compat).
+              future_leaf: "ignored",
             },
+            // Overrides ONLY enabled — every other leaf reads back null.
             staging: { enabled: false },
             // Null value coerces to a disabled, override-less environment.
             qa: null,
@@ -1005,15 +1085,46 @@ describe("Forwarder environments (env scoping)", () => {
       }),
     ]);
     const fwd = await client.forwarders.get(FWD_ID);
-    expect(fwd.environments.production).toBeInstanceOf(ForwarderEnvironment);
-    expect(fwd.environments.production!.enabled).toBe(true);
-    expect(fwd.environments.production!.configuration).toBeInstanceOf(HttpConfiguration);
-    expect(fwd.environments.production!.configuration!.url).toBe("https://prod.example/in");
-    expect(fwd.environments.production!.configuration!.headers[0]!.value).toBe("<redacted>");
-    expect(fwd.environments.staging!.enabled).toBe(false);
-    expect(fwd.environments.staging!.configuration).toBeNull();
+    const prod = fwd.environments.production!;
+    expect(prod).toBeInstanceOf(ForwarderEnvironment);
+    expect(prod.enabled).toBe(true);
+    expect(prod.url).toBe("https://prod.example/in");
+    expect(prod.method).toBe(HttpMethod.PUT);
+    expect(prod.successStatus).toBe("204");
+    expect(prod.tlsVerify).toBe(false);
+    expect(prod.caCert).toBe("PROD-PEM");
+    // Dotted header name is preserved (split on first dot only).
+    expect(prod.getHeader("X-Foo.Bar")).toBe("v");
+    expect(prod.getHeader("DD-API-KEY")).toBe("<redacted>");
+    expect(prod.getHeader("future_leaf")).toBeUndefined();
+    // staging: a pure-enabled override reads every other leaf as null, missing
+    // headers as undefined — the SDK does NOT merge in base values.
+    const staging = fwd.environments.staging!;
+    expect(staging.enabled).toBe(false);
+    expect(staging.url).toBeNull();
+    expect(staging.method).toBeNull();
+    expect(staging.successStatus).toBeNull();
+    expect(staging.tlsVerify).toBeNull();
+    expect(staging.caCert).toBeNull();
+    expect(staging.getHeader("missing")).toBeUndefined();
+    // qa: null env value → empty, disabled override.
     expect(fwd.environments.qa!.enabled).toBe(false);
-    expect(fwd.environments.qa!.configuration).toBeNull();
+    expect(fwd.environments.qa!.headers).toEqual({});
+  });
+
+  test("parse skips a `headers.` key with an empty header name", async () => {
+    const { client } = makeClient([
+      jsonResponse({
+        data: _forwarderResource({
+          environments: {
+            // `headers.` with no name after the dot must be skipped.
+            production: { enabled: true, "headers.": "orphan" },
+          },
+        }),
+      }),
+    ]);
+    const fwd = await client.forwarders.get(FWD_ID);
+    expect(fwd.environments.production!.headers).toEqual({});
   });
 
   test("environments round-trip through save() — _apply copies the map", async () => {

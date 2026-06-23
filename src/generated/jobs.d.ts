@@ -358,28 +358,6 @@ export interface components {
             errors: components["schemas"]["Error"][];
         };
         /**
-         * HttpHeader
-         * @description A single HTTP header attached to an outbound request.
-         *
-         *     Header values are encrypted at the application layer before
-         *     persistence regardless of header name; the wire representation here
-         *     is always plaintext on both the request and the response, so a
-         *     `GET → mutate → PUT` round-trip preserves header values without
-         *     requiring the customer to re-enter secrets.
-         */
-        HttpHeader: {
-            /**
-             * Name
-             * @description Header name.
-             */
-            name: string;
-            /**
-             * Value
-             * @description Header value. Stored encrypted at rest; returned as plaintext on `GET`.
-             */
-            value: string;
-        };
-        /**
          * Job
          * @description A unit of work: an HTTP request, run on a schedule or triggered on demand.
          *
@@ -427,10 +405,12 @@ export interface components {
             configuration: components["schemas"]["JobHttpConfiguration"];
             /**
              * Environments
-             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry sets `enabled` (whether the job is enabled — scheduled, for a recurring job, or triggerable, for a manual job — in that environment), an optional `schedule` override (a cron expression for recurring jobs; omit to inherit the base `schedule`), an optional `timezone` override (an IANA zone for recurring jobs; omit to inherit the base `timezone`, else UTC), and an optional `configuration` override (omit to inherit the base `configuration`); it also reports the read-only `next_run_at` for that environment. A job with no entry for an environment is disabled there. For a recurring or manual job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
+             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry is a flat, sparse overlay: only the leaves that differ from the base definition are present, and everything absent is inherited. Set `enabled` to `true` to run the job in that environment (the base is disabled everywhere; an environment with no entry, or an entry without `enabled: true`, does not run). Overridable leaves are `url`, `method`, `timeout`, `body`, `success_status`, `tls_verify`, `ca_cert`, `schedule` and `timezone` (recurring jobs only), `retry_policy` (the `id` of a retry policy, or `Default`), and an individual header as `headers.<name>` (e.g. `headers.Authorization`). On read, each entry also reports the read-only `next_run_at` for that environment (the next fire time, or `null`). For a recurring or manual job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
              */
             environments?: {
-                [key: string]: components["schemas"]["JobEnvironment"];
+                [key: string]: {
+                    [key: string]: unknown;
+                };
             };
             /**
              * Concurrency Policy
@@ -485,12 +465,9 @@ export interface components {
          *         "concurrency_policy": "ALLOW",
          *         "configuration": {
          *           "body": "{\"scope\":\"all\"}",
-         *           "headers": [
-         *             {
-         *               "name": "Authorization",
-         *               "value": "Bearer s3cr3t"
-         *             }
-         *           ],
+         *           "headers": {
+         *             "Authorization": "Bearer s3cr3t"
+         *           },
          *           "method": "POST",
          *           "success_status": "2xx",
          *           "timeout": 30,
@@ -503,23 +480,11 @@ export interface components {
          *             "enabled": true
          *           },
          *           "staging": {
-         *             "configuration": {
-         *               "body": "{\"scope\":\"all\"}",
-         *               "headers": [
-         *                 {
-         *                   "name": "Authorization",
-         *                   "value": "Bearer staging"
-         *                 }
-         *               ],
-         *               "method": "POST",
-         *               "success_status": "2xx",
-         *               "timeout": 30,
-         *               "tls_verify": true,
-         *               "url": "https://staging.example.com/cache/warm"
-         *             },
          *             "enabled": true,
+         *             "headers.Authorization": "Bearer staging",
          *             "schedule": "0 3 * * *",
-         *             "timezone": "Europe/London"
+         *             "timezone": "Europe/London",
+         *             "url": "https://staging.example.com/cache/warm"
          *           }
          *         },
          *         "name": "Nightly cache warm",
@@ -547,45 +512,12 @@ export interface components {
             attributes: components["schemas"]["Job"];
         };
         /**
-         * JobEnvironment
-         * @description Per-environment override for a job's enablement, schedule, and configuration.
-         */
-        JobEnvironment: {
-            /**
-             * Enabled
-             * @description Whether the job schedules runs in this environment. A job runs in an environment only via this field; it is disabled in every environment by default.
-             * @default false
-             */
-            enabled: boolean;
-            /**
-             * Schedule
-             * @description Per-environment schedule override. Omit to inherit the job's base `schedule`. When present, it must be a 5-field cron expression (e.g. `0 3 * * *`), evaluated in this environment's effective `timezone` (the per-environment override, else the base, else UTC), and is only allowed on a recurring (cron) job — it varies the cadence within that environment. It cannot appear on a manual or one-off job, and cannot change a job's kind.
-             */
-            schedule?: string | null;
-            /**
-             * Timezone
-             * @description Per-environment timezone override for evaluating this environment's cron `schedule`. Omit to inherit the base `timezone` (else UTC). When present, it must be a valid IANA timezone key (e.g. `America/New_York`). Only valid on a recurring (cron) job; it may be set on an environment that inherits the base schedule (it need not also override `schedule`).
-             */
-            timezone?: string | null;
-            /** @description Per-environment HTTP request override. Omit to inherit the job's base `configuration`. When present, it fully replaces the base configuration for runs in this environment. */
-            configuration?: components["schemas"]["JobHttpConfiguration"] | null;
-            /**
-             * Retry Policy
-             * @description Per-environment retry-policy override — the `id` of a retry policy (or `Default`). Omit to inherit the job's base `retry_policy`. When present, runs in this environment retry according to this policy instead of the base.
-             */
-            retry_policy?: string | null;
-            /**
-             * Next Run At
-             * @description The next scheduled fire time in this environment. `null` when the environment is not enabled, or once a one-off run has fired.
-             */
-            readonly next_run_at?: string | null;
-        };
-        /**
          * JobHttpConfiguration
          * @description HTTP request a job performs when it fires.
          *
          *     Extends the shared forwarder configuration with the two fields a scheduled
-         *     job needs beyond a forwarder.
+         *     job needs beyond a forwarder, and represents headers as a name→value object
+         *     so an individual header can be overridden per environment by its name.
          */
         JobHttpConfiguration: {
             /**
@@ -602,9 +534,11 @@ export interface components {
             url: string;
             /**
              * Headers
-             * @description HTTP headers attached to each request.
+             * @description HTTP headers sent on each request, as a name→value object (e.g. `{"Authorization": "Bearer s3cr3t"}`). A header is overridden per environment by its name via a `headers.<name>` entry in that environment's overrides; header names match case-insensitively.
              */
-            headers?: components["schemas"]["HttpHeader"][];
+            headers?: {
+                [key: string]: string;
+            };
             /**
              * Success Status
              * @description HTTP response status that indicates success. Either a specific status code (e.g. `200`, `204`) or a status class (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`).
@@ -658,12 +592,9 @@ export interface components {
          *         "concurrency_policy": "ALLOW",
          *         "configuration": {
          *           "body": "{\"scope\":\"all\"}",
-         *           "headers": [
-         *             {
-         *               "name": "Authorization",
-         *               "value": "Bearer s3cr3t"
-         *             }
-         *           ],
+         *           "headers": {
+         *             "Authorization": "Bearer s3cr3t"
+         *           },
          *           "method": "POST",
          *           "success_status": "2xx",
          *           "timeout": 30,
@@ -676,23 +607,11 @@ export interface components {
          *             "enabled": true
          *           },
          *           "staging": {
-         *             "configuration": {
-         *               "body": "{\"scope\":\"all\"}",
-         *               "headers": [
-         *                 {
-         *                   "name": "Authorization",
-         *                   "value": "Bearer staging"
-         *                 }
-         *               ],
-         *               "method": "POST",
-         *               "success_status": "2xx",
-         *               "timeout": 30,
-         *               "tls_verify": true,
-         *               "url": "https://staging.example.com/cache/warm"
-         *             },
          *             "enabled": true,
+         *             "headers.Authorization": "Bearer staging",
          *             "schedule": "0 3 * * *",
-         *             "timezone": "Europe/London"
+         *             "timezone": "Europe/London",
+         *             "url": "https://staging.example.com/cache/warm"
          *           }
          *         },
          *         "name": "Nightly cache warm",
@@ -1082,12 +1001,9 @@ export interface components {
          *         "pending_duration_ms": 120,
          *         "request": {
          *           "body": "{\"scope\":\"all\"}",
-         *           "headers": [
-         *             {
-         *               "name": "Authorization",
-         *               "value": "<redacted>"
-         *             }
-         *           ],
+         *           "headers": {
+         *             "Authorization": "<redacted>"
+         *           },
          *           "method": "POST",
          *           "url": "https://api.example.com/cache/warm"
          *         },

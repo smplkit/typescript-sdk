@@ -59,37 +59,34 @@ async function main(): Promise<void> {
       configuration: new HttpConfig({
         method: JobsHttpMethod.POST,
         url: "https://httpbin.org/post",
-        headers: [{ name: "Authorization", value: "Bearer s3cr3t" }],
+        headers: { Authorization: "Bearer s3cr3t" },
         body: '{"scope": "all"}',
         timeout: 30,
       }),
     });
-    job.setEnabled(true, "development");
-    job.setEnabled(true, "production");
-    job.setSchedule("0 */6 * * *", "America/New_York", "development");
-    job.setConfiguration(
-      new HttpConfig({
-        method: JobsHttpMethod.POST,
-        url: "https://development.example.com/cache/warm",
-        headers: [{ name: "Authorization", value: "Bearer development-s3cr3t" }],
-        body: '{"scope": "all"}',
-      }),
-      "development",
-    );
+
+    // enable the job to run in various environments
+    job.environment("development").enabled = true;
+    job.environment("production").enabled = true;
+
+    // change how the job runs in production
+    const prod = job.environment("production");
+    prod.schedule = "0 */6 * * *";
+    prod.timezone = "America/New_York";
+    prod.url = "https://production.example.com/cache/warm";
+    prod.setHeader("Authorization", "Bearer production-s3cr3t");
     await job.save();
     assert.equal(job.isRecurring(), true);
-    assert.equal(job.isEnabled("development"), true);
-    assert.equal(job.isEnabled("production"), true);
-    assert.equal(job.environments["development"].timezone, "America/New_York");
+    assert.equal(job.environment("production").schedule, "0 */6 * * *");
     assert.equal(
-      job.getConfiguration("development").url,
-      "https://development.example.com/cache/warm",
+      job.environment("production").url,
+      "https://production.example.com/cache/warm",
     );
     console.log(`Created recurring job ${job.id} (v${job.version})`);
 
     // get a job
     const fetched = await jobs.get(RECURRING_JOB_ID);
-    assert.equal(fetched.environments["development"].schedule, "0 */6 * * *");
+    assert.equal(fetched.environments["production"].schedule, "0 */6 * * *");
     console.log(`Fetched job ${RECURRING_JOB_ID}`);
 
     // list jobs, filtered to recurring jobs
@@ -99,8 +96,7 @@ async function main(): Promise<void> {
 
     // update a job
     job.name = "Nightly cache warm (v2)";
-    job.setRetryPolicy(retryPolicy, "production");
-    job.setSchedule("30 2 * * *", "America/Los_Angeles", "production");
+    job.environment("production").retryPolicy = retryPolicy;
     await job.save();
     assert.equal(job.version, 2);
     console.log(`Updated job to v${job.version}`);
@@ -146,7 +142,7 @@ async function main(): Promise<void> {
         url: "https://httpbin.org/post",
       }),
     });
-    manual.setEnabled(true, "production");
+    manual.environment("production").enabled = true;
     await manual.save();
     assert.equal(manual.isManual(), true);
     const manualRun = await manual.trigger("production");
@@ -166,7 +162,7 @@ async function main(): Promise<void> {
     });
     await oneoff.save();
     assert.equal(oneoff.isOneOff(), true);
-    assert.equal(oneoff.isEnabled("development"), true);
+    assert.equal(oneoff.environment("development").enabled, true);
     assert(oneoff.environments["development"].nextRunAt !== null);
     console.log(`Created one-off job ${oneoff.id} to run in development`);
 

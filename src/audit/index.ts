@@ -21,9 +21,9 @@
  * - `audit.forwarders.new/get/list/save/delete` — manage SIEM forwarders.
  *
  * The shared models (`AuditEvent`, `Forwarder`, `HttpConfiguration`,
- * `HttpHeader`, `ResourceType`, `EventType`, `Category`) plus the
- * `ForwarderType`, `HttpMethod`, and `TransformType` enums live in
- * `./types.js` and are re-exported here for convenience.
+ * `ResourceType`, `EventType`, `Category`) plus the `ForwarderType`,
+ * `HttpMethod`, and `TransformType` enums live in `./types.js` and are
+ * re-exported here for convenience.
  */
 
 export { AuditClient, type AuditClientOptions } from "./client.js";
@@ -42,7 +42,6 @@ export type {
   CreateEventInput,
   EventType,
   EventTypeListPage,
-  HttpHeader,
   ListCategoriesParams,
   ListEventTypesParams,
   ListEventsPage,

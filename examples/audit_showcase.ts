@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     // create a forwarder (disabled by default)
     let forwarder = audit.forwarders.new(forwarderId, {
       configuration: new HttpConfiguration({
-        headers: [{ name: "X-Showcase", value: "ok" }],
+        headers: { "X-Showcase": "ok" },
         method: AuditHttpMethod.POST,
         url: "https://example.com",
       }),
@@ -139,23 +139,14 @@ async function main(): Promise<void> {
     assert.equal(forwarder.id, forwarderId);
 
     // configure where to forward events in production
-    forwarder.setConfiguration(
-      new HttpConfiguration({
-        headers: [{ name: "X-Showcase", value: "ok" }],
-        method: AuditHttpMethod.POST,
-        url: "https://httpbin.org/post",
-      }),
-      "production",
-    );
+    forwarder.environment("production").url = "https://httpbin.org/post";
+    forwarder.environment("production").setHeader("X-Showcase", "ok");
     await forwarder.save();
-    assert.equal(
-      forwarder.environments["production"]?.configuration?.url,
-      "https://httpbin.org/post",
-    );
+    assert.equal(forwarder.environments["production"]?.url, "https://httpbin.org/post");
     console.log(`Updated forwarder: ${forwarder.name}`);
 
     // start forwarding events in production
-    forwarder.setEnabled(true, "production");
+    forwarder.environment("production").enabled = true;
     await forwarder.save();
     console.log(
       `Enabled forwarder ${forwarder.name} (id=${forwarder.id}) ` +

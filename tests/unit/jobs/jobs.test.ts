@@ -9,6 +9,13 @@
  * JSON:API headers). These tests drive both construction shapes by stubbing
  * `globalThis.fetch` and returning `application/vnd.api+json` responses.
  *
+ * ADR-056 reshaped the per-environment surface into a flat sparse overlay:
+ * `HttpConfig.headers` is a name→value object (with `setHeader`/`getHeader`),
+ * a {@link JobEnvironment} is a flat sparse override (only the leaves it sets
+ * travel on the wire, each header as a `headers.<name>` leaf), and a job's
+ * base fields are set by direct assignment while per-environment overrides are
+ * reached through `job.environment(env)`.
+ *
  * Coverage target is 100% lines on src/jobs/{client,types,index}.ts.
  */
 
@@ -76,7 +83,8 @@ function _jobResource(
       configuration: {
         method: "POST",
         url: "https://api.example.com/cache/warm",
-        headers: [{ name: "Authorization", value: "<redacted>" }],
+        // Wire headers are a name→value object (ADR-056).
+        headers: { Authorization: "<redacted>" },
         body: '{"scope":"all"}',
         success_status: "2xx",
         timeout: 30,
@@ -157,7 +165,7 @@ function _newJob(client: JobsClient): Job {
     configuration: new HttpConfig({
       method: HttpMethod.POST,
       url: "https://api.example.com/cache/warm",
-      headers: [{ name: "Authorization", value: "Bearer s3cr3t" }],
+      headers: { Authorization: "Bearer s3cr3t" },
       body: '{"scope":"all"}',
     }),
   });
@@ -171,7 +179,7 @@ describe("HttpConfig", () => {
   test("applies defaults for omitted fields", () => {
     const c = new HttpConfig({ url: "https://e.com" });
     expect(c.method).toBe(HttpMethod.POST);
-    expect(c.headers).toEqual([]);
+    expect(c.headers).toEqual({});
     expect(c.body).toBeNull();
     expect(c.successStatus).toBe("2xx");
     expect(c.timeout).toBe(30);
@@ -183,7 +191,7 @@ describe("HttpConfig", () => {
     const c = new HttpConfig({
       url: "https://e.com",
       method: HttpMethod.GET,
-      headers: [{ name: "X", value: "y" }],
+      headers: { X: "y" },
       body: "hi",
       successStatus: "200",
       timeout: 5,
@@ -191,9 +199,31 @@ describe("HttpConfig", () => {
       caCert: "PEM",
     });
     expect(c.method).toBe(HttpMethod.GET);
+    expect(c.headers).toEqual({ X: "y" });
     expect(c.timeout).toBe(5);
     expect(c.tlsVerify).toBe(false);
     expect(c.caCert).toBe("PEM");
+  });
+
+  test("setHeader / getHeader read and write individual headers by name", () => {
+    const c = new HttpConfig({ url: "https://e.com", headers: { Authorization: "Bearer one" } });
+    expect(c.getHeader("Authorization")).toBe("Bearer one");
+    // getHeader of a missing header returns undefined.
+    expect(c.getHeader("X-Trace")).toBeUndefined();
+    // setHeader adds a new header and replaces an existing one.
+    c.setHeader("X-Trace", "abc");
+    expect(c.getHeader("X-Trace")).toBe("abc");
+    c.setHeader("Authorization", "Bearer two");
+    expect(c.getHeader("Authorization")).toBe("Bearer two");
+    expect(c.headers).toEqual({ Authorization: "Bearer two", "X-Trace": "abc" });
+  });
+
+  test("copies the supplied headers object rather than aliasing it", () => {
+    const source = { Authorization: "Bearer one" };
+    const c = new HttpConfig({ url: "https://e.com", headers: source });
+    c.setHeader("Authorization", "Bearer two");
+    // Mutating the config must not reach back into the caller's object.
+    expect(source.Authorization).toBe("Bearer one");
   });
 });
 
@@ -295,6 +325,8 @@ describe("Job model", () => {
     expect(job.environments).toEqual({});
     expect(job.kind).toBeNull();
     expect(job.type).toBe("http");
+    expect(job.timezone).toBeNull();
+    expect(job.retryPolicy).toBeNull();
     expect(job.concurrencyPolicy).toBe("ALLOW");
     expect(job.createdAt).toBeNull();
     expect(job.updatedAt).toBeNull();
@@ -361,6 +393,126 @@ describe("Job model", () => {
     });
     await expect(job.delete()).rejects.toThrow("cannot delete");
   });
+
+  test("enabled roll-up is false with no enabled env and true once any env is enabled", () => {
+    const job = _newJob(makeClient());
+    // No environments overridden yet — the roll-up reads false.
+    expect(job.enabled).toBe(false);
+    // An override present but disabled keeps the roll-up false.
+    job.environment("staging").enabled = false;
+    expect(job.enabled).toBe(false);
+    // Enabling any environment flips the roll-up to true.
+    job.environment("production").enabled = true;
+    expect(job.enabled).toBe(true);
+    // Disabling it again returns the roll-up to false.
+    job.environment("production").enabled = false;
+    expect(job.enabled).toBe(false);
+  });
+
+  test("retryPolicy accessor coerces instances, strings, and null on the base job", () => {
+    const client = makeClient();
+    const job = _newJob(client);
+    const policy = client.retryPolicies.new(POLICY_ID, {
+      name: "Retry on server errors",
+      maxRetries: 5,
+      backoff: Backoff.EXPONENTIAL,
+      delaySeconds: 2,
+    });
+    // Assigning a RetryPolicy instance stores its id.
+    job.retryPolicy = policy;
+    expect(job.retryPolicy).toBe(POLICY_ID);
+    // Assigning a string stores the string verbatim.
+    job.retryPolicy = "Default";
+    expect(job.retryPolicy).toBe("Default");
+    // Assigning null clears the override.
+    job.retryPolicy = null;
+    expect(job.retryPolicy).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JobEnvironment (flat sparse override, ADR-056)
+// ---------------------------------------------------------------------------
+
+describe("JobEnvironment", () => {
+  test("defaults: disabled, every leaf null, headers empty", () => {
+    const e = new JobEnvironment();
+    expect(e.enabled).toBe(false);
+    expect(e.schedule).toBeNull();
+    expect(e.timezone).toBeNull();
+    expect(e.retryPolicy).toBeNull();
+    expect(e.url).toBeNull();
+    expect(e.method).toBeNull();
+    expect(e.timeout).toBeNull();
+    expect(e.body).toBeNull();
+    expect(e.successStatus).toBeNull();
+    expect(e.tlsVerify).toBeNull();
+    expect(e.caCert).toBeNull();
+    expect(e.headers).toEqual({});
+    expect(e.nextRunAt).toBeNull();
+    expect(e.getHeader("anything")).toBeUndefined();
+  });
+
+  test("keeps explicit leaf values", () => {
+    const e = new JobEnvironment({
+      enabled: true,
+      schedule: "0 3 * * *",
+      timezone: "Europe/London",
+      retryPolicy: "Default",
+      url: "https://prod.example.com/warm",
+      method: HttpMethod.GET,
+      timeout: 5,
+      body: "payload",
+      successStatus: "204",
+      tlsVerify: false,
+      caCert: "PEM",
+      headers: { Authorization: "Bearer prod" },
+      nextRunAt: "2026-06-07T03:00:00+00:00",
+    });
+    expect(e.enabled).toBe(true);
+    expect(e.schedule).toBe("0 3 * * *");
+    expect(e.timezone).toBe("Europe/London");
+    expect(e.retryPolicy).toBe("Default");
+    expect(e.url).toBe("https://prod.example.com/warm");
+    expect(e.method).toBe(HttpMethod.GET);
+    expect(e.timeout).toBe(5);
+    expect(e.body).toBe("payload");
+    expect(e.successStatus).toBe("204");
+    expect(e.tlsVerify).toBe(false);
+    expect(e.caCert).toBe("PEM");
+    expect(e.getHeader("Authorization")).toBe("Bearer prod");
+    expect(e.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
+  });
+
+  test("retryPolicy accessor coerces a RetryPolicy instance to its id", () => {
+    const policy = new RetryPolicy(null, {
+      id: POLICY_ID,
+      name: "Retry on server errors",
+      maxRetries: 5,
+      backoff: Backoff.EXPONENTIAL,
+      delaySeconds: 2,
+    });
+    // Coercion runs in the constructor path too.
+    const e = new JobEnvironment({ retryPolicy: policy });
+    expect(e.retryPolicy).toBe(POLICY_ID);
+    // And via the setter: instance -> id, string -> string, null -> null.
+    e.retryPolicy = "Default";
+    expect(e.retryPolicy).toBe("Default");
+    e.retryPolicy = policy;
+    expect(e.retryPolicy).toBe(POLICY_ID);
+    e.retryPolicy = null;
+    expect(e.retryPolicy).toBeNull();
+  });
+
+  test("setHeader / getHeader read and write individual header overrides", () => {
+    const e = new JobEnvironment();
+    expect(e.getHeader("Authorization")).toBeUndefined();
+    e.setHeader("Authorization", "Bearer prod");
+    expect(e.getHeader("Authorization")).toBe("Bearer prod");
+    e.setHeader("Authorization", "Bearer prod-2");
+    expect(e.getHeader("Authorization")).toBe("Bearer prod-2");
+    expect(e.headers).toEqual({ Authorization: "Bearer prod-2" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -386,7 +538,7 @@ describe("jobs CRUD", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     job.name = "renamed";
-    job.setEnabled(true, "production");
+    job.environment("production").enabled = true;
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         data: _jobResource({
@@ -401,7 +553,7 @@ describe("jobs CRUD", () => {
     // `enabled` is the derived roll-up: true because the server echoed an
     // enabled `production` environment.
     expect(job.enabled).toBe(true);
-    expect(job.isEnabled("production")).toBe(true);
+    expect(job.environments.production.enabled).toBe(true);
     expect((mockFetch.mock.calls[1][0] as Request).method).toBe("PUT");
   });
 
@@ -448,7 +600,7 @@ describe("jobs CRUD", () => {
       configuration: new HttpConfig({ url: "https://e.com" }),
     });
     expect(job.schedule).toBeNull(); // no schedule supplied
-    job.setEnabled(true, "production");
+    job.environment("production").enabled = true;
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: _jobResource({ kind: "manual", schedule: null }, "manual-job") }, 201),
     );
@@ -474,10 +626,9 @@ describe("jobs CRUD", () => {
     expect(job._client).toBe(client);
     expect(job.configuration).toBeInstanceOf(HttpConfig);
     expect(job.configuration.method).toBe("POST");
-    expect(job.configuration.headers[0]).toEqual({
-      name: "Authorization",
-      value: "<redacted>",
-    });
+    // Wire object headers round-trip onto the base configuration.
+    expect(job.configuration.headers).toEqual({ Authorization: "<redacted>" });
+    expect(job.configuration.getHeader("Authorization")).toBe("<redacted>");
     expect(job.configuration.timeout).toBe(30);
     expect(job.configuration.tlsVerify).toBe(true);
   });
@@ -497,12 +648,14 @@ describe("jobs CRUD", () => {
     expect(job.kind).toBeNull();
     expect(job.type).toBe("http");
     expect(job.schedule).toBeNull();
+    expect(job.timezone).toBeNull();
+    expect(job.retryPolicy).toBeNull();
     expect(job.concurrencyPolicy).toBe("ALLOW");
     expect(job.createdAt).toBeNull();
     expect(job.version).toBeNull();
     expect(job.configuration.url).toBe("");
     expect(job.configuration.method).toBe(HttpMethod.POST);
-    expect(job.configuration.headers).toEqual([]);
+    expect(job.configuration.headers).toEqual({});
     expect(job.configuration.body).toBeNull();
     expect(job.configuration.successStatus).toBe("2xx");
     expect(job.configuration.timeout).toBe(30);
@@ -510,7 +663,7 @@ describe("jobs CRUD", () => {
     expect(job.configuration.caCert).toBeNull();
   });
 
-  test("get handles a configuration with sparse header objects and an explicit body", async () => {
+  test("get handles a configuration with object headers and an explicit body", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -518,7 +671,7 @@ describe("jobs CRUD", () => {
           configuration: {
             url: "https://e.com",
             method: "GET",
-            headers: [{}],
+            headers: { "X-Token": "abc", "X-Count": 7 },
             body: "payload",
             success_status: "200",
             timeout: 5,
@@ -529,12 +682,28 @@ describe("jobs CRUD", () => {
       }),
     );
     const job = await client.get(JOB_ID);
-    expect(job.configuration.headers).toEqual([{ name: "", value: "" }]);
+    // Non-string header values are coerced to strings by _headersFromWire.
+    expect(job.configuration.headers).toEqual({ "X-Token": "abc", "X-Count": "7" });
     expect(job.configuration.body).toBe("payload");
     expect(job.configuration.successStatus).toBe("200");
     expect(job.configuration.timeout).toBe(5);
     expect(job.configuration.tlsVerify).toBe(false);
     expect(job.configuration.caCert).toBe("PEM");
+  });
+
+  test("get tolerates a non-object headers value on the wire", async () => {
+    const client = makeClient();
+    // A malformed/absent headers field (here a string) exercises the
+    // non-object branch of _headersFromWire, which yields an empty object.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _jobResource({
+          configuration: { url: "https://e.com", method: "POST", headers: "not-an-object" },
+        }),
+      }),
+    );
+    const job = await client.get(JOB_ID);
+    expect(job.configuration.headers).toEqual({});
   });
 
   test("get throws on an empty body", async () => {
@@ -638,7 +807,7 @@ describe("jobs CRUD", () => {
       configuration: new HttpConfig({
         url: "https://e.com",
         method: HttpMethod.PUT,
-        headers: [{ name: "X", value: "y" }],
+        headers: { X: "y" },
         body: "b",
         successStatus: "204",
         timeout: 10,
@@ -654,7 +823,8 @@ describe("jobs CRUD", () => {
     expect(sent.data.id).toBe(JOB_ID);
     expect(sent.data.attributes.description).toBe("desc");
     expect(cfg.method).toBe("PUT");
-    expect(cfg.headers).toEqual([{ name: "X", value: "y" }]);
+    // Configuration headers serialize as a name→value object on the wire.
+    expect(cfg.headers).toEqual({ X: "y" });
     expect(cfg.body).toBe("b");
     expect(cfg.success_status).toBe("204");
     expect(cfg.timeout).toBe(10);
@@ -879,6 +1049,7 @@ describe("JobsClient construction", () => {
     expect(JobsNamespace.RunsClient).toBe(RunsClient);
     expect(JobsNamespace.RetryPoliciesClient).toBe(RetryPoliciesClient);
     expect(JobsNamespace.HttpConfig).toBe(HttpConfig);
+    expect(JobsNamespace.JobEnvironment).toBe(JobEnvironment);
     expect(JobsNamespace.Job).toBe(Job);
     expect(JobsNamespace.Run).toBe(Run);
     expect(JobsNamespace.RunRetry).toBe(RunRetry);
@@ -901,159 +1072,74 @@ describe("jobs environment scoping", () => {
     });
   }
 
-  test("JobEnvironment defaults", () => {
-    const e = new JobEnvironment();
-    expect(e.enabled).toBe(false);
-    expect(e.schedule).toBeNull();
-    expect(e.timezone).toBeNull();
-    expect(e.configuration).toBeNull();
-    expect(e.nextRunAt).toBeNull();
-  });
-
-  test("JobEnvironment keeps explicit field values", () => {
-    const e = new JobEnvironment({
-      enabled: true,
-      schedule: "0 3 * * *",
-      timezone: "Europe/London",
-      configuration: new HttpConfig({ url: "https://e.com" }),
-      nextRunAt: "2026-06-07T03:00:00+00:00",
-    });
-    expect(e.enabled).toBe(true);
-    expect(e.schedule).toBe("0 3 * * *");
-    expect(e.timezone).toBe("Europe/London");
-    expect(e.configuration?.url).toBe("https://e.com");
-    expect(e.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
-  });
-
-  test("setEnabled / isEnabled per environment and derived roll-up", () => {
+  test("environment() lazily creates an override and returns the existing one thereafter", () => {
     const job = _newJob(makeClient());
-    expect(job.isEnabled()).toBe(false); // roll-up default (no environments)
-    expect(job.enabled).toBe(false);
-    job.setEnabled(true, "production");
-    expect(job.isEnabled("production")).toBe(true); // per-env present
-    expect(job.isEnabled("staging")).toBe(false); // env absent
-    // the no-arg roll-up is derived from the environments map — enabling any
-    // environment flips it to true, with nothing read from the wire
-    expect(job.enabled).toBe(true);
-    expect(job.isEnabled()).toBe(true);
-    job.setEnabled(false, "production");
-    expect(job.enabled).toBe(false); // back to false once no environment is enabled
-    expect(job.isEnabled()).toBe(false);
-  });
-
-  test("setConfiguration / getConfiguration base and per environment", () => {
-    const base = new HttpConfig({ url: "https://base.example.com" });
-    const job = new Job(makeClient(), {
-      id: JOB_ID,
-      name: "x",
-      schedule: "0 2 * * *",
-      configuration: base,
-    });
-    expect(job.getConfiguration()).toBe(base);
-    expect(job.getConfiguration("production")).toBe(base); // no override -> base
-    const override = new HttpConfig({ url: "https://prod.example.com" });
-    job.setConfiguration(override, "production");
-    expect(job.getConfiguration("production")).toBe(override); // override wins
-    // an env entry with no configuration falls back to base
-    job.setEnabled(true, "staging");
-    expect(job.getConfiguration("staging")).toBe(base);
-    // base setter (no environment)
-    const newBase = new HttpConfig({ url: "https://new.example.com" });
-    job.setConfiguration(newBase);
-    expect(job.configuration).toBe(newBase);
-  });
-
-  test("setSchedule sets the base schedule and per-environment overrides", () => {
-    const job = _newJob(makeClient());
-    // base schedule (no environment, no timezone)
-    job.setSchedule("30 2 * * *");
-    expect(job.schedule).toBe("30 2 * * *");
-    expect(job.timezone).toBeNull(); // timezone untouched when omitted
     expect(job.environments).toEqual({});
-    // per-environment override creates the entry, leaving the base untouched
-    job.setSchedule("0 5 * * *", undefined, "production");
-    expect(job.schedule).toBe("30 2 * * *");
-    expect(job.environments.production.schedule).toBe("0 5 * * *");
-    expect(job.environments.production.timezone).toBeNull(); // timezone omitted
-    // a per-env schedule override preserves an already-set enabled flag
-    job.setEnabled(true, "staging");
-    job.setSchedule("0 6 * * *", undefined, "staging");
-    expect(job.environments.staging.enabled).toBe(true);
-    expect(job.environments.staging.schedule).toBe("0 6 * * *");
+    const prod = job.environment("production");
+    expect(prod).toBeInstanceOf(JobEnvironment);
+    // The freshly-created override is stored in the environments map.
+    expect(job.environments.production).toBe(prod);
+    // A second access returns the SAME instance (the create-vs-existing branch).
+    expect(job.environment("production")).toBe(prod);
+    // Mutations through the returned override are visible on the map.
+    prod.enabled = true;
+    expect(job.environments.production.enabled).toBe(true);
   });
 
-  test("setSchedule with a timezone sets the same scope's timezone too", () => {
-    const job = _newJob(makeClient());
-    // base schedule + timezone in one call
-    job.setSchedule("0 2 * * *", "America/New_York");
-    expect(job.schedule).toBe("0 2 * * *");
-    expect(job.timezone).toBe("America/New_York");
-    expect(job.environments).toEqual({});
-    // per-environment schedule + timezone in one call
-    job.setSchedule("0 */6 * * *", "Europe/London", "production");
-    expect(job.environments.production.schedule).toBe("0 */6 * * *");
-    expect(job.environments.production.timezone).toBe("Europe/London");
-    // the base scope is untouched by the per-env call
-    expect(job.timezone).toBe("America/New_York");
-  });
-
-  test("setTimezone sets the base timezone and per-environment overrides", () => {
-    const job = _newJob(makeClient());
-    // base timezone (no environment)
-    job.setTimezone("America/New_York");
-    expect(job.timezone).toBe("America/New_York");
-    expect(job.environments).toEqual({});
-    // per-environment override creates the entry, leaving the base untouched
-    job.setSchedule("0 5 * * *", undefined, "production");
-    job.setTimezone("Europe/London", "production");
-    expect(job.timezone).toBe("America/New_York");
-    expect(job.environments.production.timezone).toBe("Europe/London");
-    // setting a per-env timezone preserves the already-set schedule override
-    expect(job.environments.production.schedule).toBe("0 5 * * *");
-    // a brand-new environment override is created with the timezone alone
-    job.setTimezone("Asia/Tokyo", "edge");
-    expect(job.environments.edge.timezone).toBe("Asia/Tokyo");
-    expect(job.environments.edge.enabled).toBe(false);
-  });
-
-  test("create sends the environments map (schedule when set, never enabled/next_run_at)", async () => {
+  test("per-env leaf overrides serialize to a flat snake_case overlay on save", async () => {
     const client = makeClient();
     const job = client.newRecurringJob(JOB_ID, {
       name: "x",
       schedule: "0 2 * * *",
+      timezone: "America/New_York", // base timezone (direct assignment via field)
       configuration: new HttpConfig({ url: "https://api.example.com" }),
     });
-    job.setEnabled(true, "production");
-    job.setSchedule("0 5 * * *", undefined, "production"); // per-env cron override
-    job.setTimezone("America/New_York"); // base timezone
-    job.setTimezone("Europe/London", "production"); // per-env timezone override
-    job.setConfiguration(new HttpConfig({ url: "https://staging.example.com" }), "staging");
-    job.setEnabled(false, "staging");
+    // Production overrides several leaves plus a header.
+    const prod = job.environment("production");
+    prod.enabled = true;
+    prod.schedule = "0 5 * * *";
+    prod.timezone = "Europe/London";
+    prod.url = "https://prod.example.com/warm";
+    prod.method = HttpMethod.GET;
+    prod.timeout = 45;
+    prod.body = "prod-body";
+    prod.successStatus = "204";
+    prod.tlsVerify = false;
+    prod.caCert = "PROD-PEM";
+    prod.retryPolicy = "Default";
+    prod.setHeader("Authorization", "Bearer prod");
+    // Staging only flips enabled off — every other leaf stays null and must be
+    // omitted from its overlay.
+    job.environment("staging").enabled = false;
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
-    expect(sent.data.attributes.enabled).toBeUndefined(); // read-only roll-up not sent
-    // the base timezone is sent when set
+    // The read-only roll-up `enabled` is never sent at the top level.
+    expect(sent.data.attributes.enabled).toBeUndefined();
     expect(sent.data.attributes.timezone).toBe("America/New_York");
-    // production carries its per-environment schedule + timezone overrides
+    // production carries enabled plus only the overridden snake_case leaves and
+    // its header as a `headers.<name>` entry.
     expect(sent.data.attributes.environments.production).toEqual({
       enabled: true,
-      configuration: null,
       schedule: "0 5 * * *",
       timezone: "Europe/London",
+      retry_policy: "Default",
+      url: "https://prod.example.com/warm",
+      method: "GET",
+      timeout: 45,
+      body: "prod-body",
+      success_status: "204",
+      tls_verify: false,
+      ca_cert: "PROD-PEM",
+      "headers.Authorization": "Bearer prod",
     });
-    // the read-only next_run_at is never serialized onto the wire
-    expect(sent.data.attributes.environments.production.next_run_at).toBeUndefined();
-    // staging has no schedule/timezone override, so the keys are omitted entirely
-    expect(sent.data.attributes.environments.staging.enabled).toBe(false);
-    expect("schedule" in sent.data.attributes.environments.staging).toBe(false);
-    expect("timezone" in sent.data.attributes.environments.staging).toBe(false);
-    expect(sent.data.attributes.environments.staging.configuration.url).toBe(
-      "https://staging.example.com",
-    );
+    // nextRunAt is read-only and never serialized.
+    expect("next_run_at" in sent.data.attributes.environments.production).toBe(false);
+    // staging overrides nothing else, so only `enabled` rides along.
+    expect(sent.data.attributes.environments.staging).toEqual({ enabled: false });
   });
 
-  test("get parses environments (schedule, config override, next_run_at) and kind", async () => {
+  test("parse a flat overlay back into the model, including a dotted header name", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -1063,15 +1149,23 @@ describe("jobs environment scoping", () => {
           environments: {
             production: {
               enabled: true,
-              schedule: "0 3 * * *", // per-env cron override
-              timezone: "Europe/London", // per-env timezone override
+              schedule: "0 3 * * *",
+              timezone: "Europe/London",
+              url: "https://prod.example.com/warm",
+              method: "GET",
+              timeout: 45,
+              body: "prod-body",
+              success_status: "204",
+              tls_verify: false,
+              ca_cert: "PROD-PEM",
+              retry_policy: "Default",
+              // Header whose name itself contains a dot: the wrapper splits on
+              // the FIRST dot only, so the rest of the key is the header name.
+              "headers.X-Foo.Bar": "v",
+              "headers.Authorization": "Bearer prod",
               next_run_at: "2026-06-07T03:00:00+00:00", // read-only
-            },
-            staging: {
-              enabled: false,
-              configuration: { method: "POST", url: "https://staging.example.com/x", headers: [] },
-              // no schedule/timezone override, next_run_at null while disabled
-              next_run_at: null,
+              // An unknown leaf key must be ignored (forward-compat).
+              future_leaf: "ignored",
             },
           },
         }),
@@ -1079,19 +1173,114 @@ describe("jobs environment scoping", () => {
     );
     const job = await client.get(JOB_ID);
     expect(job.kind).toBe(JobKind.RECURRING);
-    expect(job.isRecurring()).toBe(true);
-    expect(job.enabled).toBe(true); // derived roll-up: production is enabled
+    expect(job.enabled).toBe(true); // derived roll-up: production enabled
     expect(job.timezone).toBe("America/New_York"); // base timezone decodes from the wire
-    expect(job.environments.production.enabled).toBe(true);
-    expect(job.environments.production.schedule).toBe("0 3 * * *");
-    expect(job.environments.production.timezone).toBe("Europe/London");
-    expect(job.environments.production.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
-    expect(job.environments.production.configuration).toBeNull();
-    // staging: no schedule/timezone override → null; disabled → null next_run_at
-    expect(job.environments.staging.schedule).toBeNull();
-    expect(job.environments.staging.timezone).toBeNull();
-    expect(job.environments.staging.nextRunAt).toBeNull();
-    expect(job.environments.staging.configuration?.url).toBe("https://staging.example.com/x");
+    const prod = job.environment("production");
+    expect(prod.enabled).toBe(true);
+    expect(prod.schedule).toBe("0 3 * * *");
+    expect(prod.timezone).toBe("Europe/London");
+    expect(prod.url).toBe("https://prod.example.com/warm");
+    expect(prod.method).toBe(HttpMethod.GET);
+    expect(prod.timeout).toBe(45);
+    expect(prod.body).toBe("prod-body");
+    expect(prod.successStatus).toBe("204");
+    expect(prod.tlsVerify).toBe(false);
+    expect(prod.caCert).toBe("PROD-PEM");
+    expect(prod.retryPolicy).toBe("Default");
+    expect(prod.nextRunAt).toBe("2026-06-07T03:00:00+00:00");
+    // The dotted header name is preserved (split on first dot only).
+    expect(prod.getHeader("X-Foo.Bar")).toBe("v");
+    expect(prod.getHeader("Authorization")).toBe("Bearer prod");
+    // The unknown leaf never lands on a model field.
+    expect(prod.getHeader("future_leaf")).toBeUndefined();
+  });
+
+  test("a pure-enabled override reads every other leaf as null and missing headers as undefined", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _jobResource({
+          environments: {
+            // Overrides ONLY enabled — the SDK must NOT merge in base values.
+            production: { enabled: true },
+          },
+        }),
+      }),
+    );
+    const job = await client.get(JOB_ID);
+    const prod = job.environment("production");
+    expect(prod.enabled).toBe(true);
+    expect(prod.schedule).toBeNull();
+    expect(prod.timezone).toBeNull();
+    expect(prod.retryPolicy).toBeNull();
+    expect(prod.url).toBeNull();
+    expect(prod.method).toBeNull();
+    expect(prod.timeout).toBeNull();
+    expect(prod.body).toBeNull();
+    expect(prod.successStatus).toBeNull();
+    expect(prod.tlsVerify).toBeNull();
+    expect(prod.caCert).toBeNull();
+    expect(prod.nextRunAt).toBeNull();
+    expect(prod.getHeader("missing")).toBeUndefined();
+  });
+
+  test("parse tolerates a header key that is just `headers.` (empty name) and a null env value", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        data: _jobResource({
+          environments: {
+            // `headers.` with no name after the dot must be skipped, not stored
+            // under an empty key.
+            production: { enabled: true, "headers.": "orphan" },
+            // A null environment value coerces to an empty (disabled) override.
+            staging: null,
+          },
+        }),
+      }),
+    );
+    const job = await client.get(JOB_ID);
+    expect(job.environments.production.headers).toEqual({});
+    expect(job.environments.staging.enabled).toBe(false);
+    expect(job.environments.staging.headers).toEqual({});
+  });
+
+  test("create omits the environments attribute entirely when no env is overridden", async () => {
+    const client = makeClient();
+    const job = client.newRecurringJob(JOB_ID, {
+      name: "x",
+      schedule: "0 2 * * *",
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect("environments" in sent.data.attributes).toBe(false);
+  });
+
+  test("base fields are set by direct assignment and serialized", async () => {
+    const client = makeClient();
+    const job = _newJob(client);
+    // Direct assignment of base fields (no setters anymore).
+    job.schedule = "30 2 * * *";
+    job.timezone = "America/New_York";
+    job.configuration = new HttpConfig({ url: "https://new.example.com" });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect(sent.data.attributes.schedule).toBe("30 2 * * *");
+    expect(sent.data.attributes.timezone).toBe("America/New_York");
+    expect(sent.data.attributes.configuration.url).toBe("https://new.example.com");
+  });
+
+  test("base timezone is omitted from the wire when null", async () => {
+    const client = makeClient();
+    const job = _newJob(client); // no timezone
+    expect(job.timezone).toBeNull();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect("timezone" in sent.data.attributes).toBe(false);
   });
 
   test("schedule() serializes the Date to ISO-8601 and sends the birth environment", async () => {
@@ -1272,7 +1461,7 @@ describe("Run.retry", () => {
 // ---------------------------------------------------------------------------
 
 describe("job retry policy", () => {
-  test("setRetryPolicy accepts a RetryPolicy instance or a bare id, base and per-env", () => {
+  test("retryPolicy coercion holds on both the job and a per-env override", () => {
     const client = makeClient();
     const job = _newJob(client);
     const policy = client.retryPolicies.new(POLICY_ID, {
@@ -1282,20 +1471,27 @@ describe("job retry policy", () => {
       delaySeconds: 2,
     });
     // base: a RetryPolicy instance contributes its id
-    job.setRetryPolicy(policy);
+    job.retryPolicy = policy;
     expect(job.retryPolicy).toBe(POLICY_ID);
     // base: a bare id string is used as-is
-    job.setRetryPolicy("Default");
+    job.retryPolicy = "Default";
     expect(job.retryPolicy).toBe("Default");
-    // per-env override (object) creates the entry, preserving an enabled flag
-    job.setEnabled(true, "production");
-    job.setRetryPolicy(policy, "production");
+    // base: null clears it
+    job.retryPolicy = null;
+    expect(job.retryPolicy).toBeNull();
+    // per-env override (instance) creates/updates the entry
+    const prod = job.environment("production");
+    prod.enabled = true;
+    prod.retryPolicy = policy;
     expect(job.environments.production.retryPolicy).toBe(POLICY_ID);
     expect(job.environments.production.enabled).toBe(true);
     // per-env override (bare id) on a brand-new environment entry
-    job.setRetryPolicy("Default", "edge");
+    job.environment("edge").retryPolicy = "Default";
     expect(job.environments.edge.retryPolicy).toBe("Default");
     expect(job.environments.edge.enabled).toBe(false);
+    // per-env override cleared with null
+    job.environment("edge").retryPolicy = null;
+    expect(job.environments.edge.retryPolicy).toBeNull();
   });
 
   test("create serializes base + per-env retry_policy, omitting it when null", async () => {
@@ -1307,9 +1503,10 @@ describe("job retry policy", () => {
       retryPolicy: POLICY_ID,
       configuration: new HttpConfig({ url: "https://api.example.com" }),
     });
-    job.setEnabled(true, "production");
-    job.setRetryPolicy("Default", "production");
-    job.setEnabled(true, "staging"); // no per-env retry policy
+    const prod = job.environment("production");
+    prod.enabled = true;
+    prod.retryPolicy = "Default";
+    job.environment("staging").enabled = true; // no per-env retry policy
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save();
     const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
@@ -1350,7 +1547,7 @@ describe("job retry policy", () => {
   test("retry_policy survives a save round-trip onto the in-memory job", async () => {
     const client = makeClient();
     const job = _newJob(client);
-    job.setRetryPolicy(POLICY_ID);
+    job.retryPolicy = POLICY_ID;
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: _jobResource({ retry_policy: POLICY_ID, version: 1 }) }, 201),
     );

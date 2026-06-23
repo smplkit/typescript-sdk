@@ -25,9 +25,4 @@ export {
   RunTrigger,
   Usage,
 } from "./types.js";
-export type {
-  HttpHeader,
-  ListJobsParams,
-  ListRetryPoliciesParams,
-  ListRunsParams,
-} from "./types.js";
+export type { ListJobsParams, ListRetryPoliciesParams, ListRunsParams } from "./types.js";

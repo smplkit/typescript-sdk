@@ -57,7 +57,6 @@ import {
   type CreateEventInput,
   type EventType,
   type EventTypeListPage,
-  type HttpHeader,
   type ListCategoriesParams,
   type ListEventTypesParams,
   type ListEventsPage,
@@ -77,8 +76,7 @@ import {
 type GenEvent = components["schemas"]["Event"];
 type GenEventResponse = components["schemas"]["EventResponse"];
 type GenForwarder = components["schemas"]["Forwarder"];
-type GenHttpConfiguration = components["schemas"]["HttpConfiguration"];
-type GenForwarderEnvironment = components["schemas"]["ForwarderEnvironment"];
+type GenForwarderHttpConfiguration = components["schemas"]["ForwarderHttpConfiguration"];
 type GenForwarderCreateRequest = components["schemas"]["ForwarderCreateRequest"];
 type GenForwarderRequest = components["schemas"]["ForwarderRequest"];
 
@@ -243,27 +241,33 @@ function _resolveEnvironmentFilter(
 // Wire <-> wrapper conversions (forwarders)
 // ---------------------------------------------------------------------------
 
-function _configurationToWire(config: HttpConfiguration): GenHttpConfiguration {
+function _configurationToWire(config: HttpConfiguration): GenForwarderHttpConfiguration {
   return {
-    method: config.method as GenHttpConfiguration["method"],
+    method: config.method as GenForwarderHttpConfiguration["method"],
     url: config.url,
-    headers: config.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
+    headers: { ...config.headers },
     success_status: config.successStatus,
     tls_verify: config.tlsVerify,
     ca_cert: config.caCert,
   };
 }
 
+function _headersFromWire(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === "object") {
+    for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+      out[name] = String(value);
+    }
+  }
+  return out;
+}
+
 function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpConfiguration {
   const r = raw ?? {};
-  const headers = ((r.headers as Array<{ name?: string; value?: string }>) ?? []).map((h) => ({
-    name: String(h.name ?? ""),
-    value: String(h.value ?? ""),
-  }));
   return new HttpConfiguration({
     method: (r.method as HttpMethod | undefined) ?? HttpMethod.POST,
     url: String(r.url ?? ""),
-    headers,
+    headers: _headersFromWire(r.headers),
     successStatus: String(r.success_status ?? "2xx"),
     // Absent ``tls_verify`` on the wire means a forwarder persisted before
     // the field landed — default to verifying so its prior secure
@@ -273,20 +277,75 @@ function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpC
   });
 }
 
+/**
+ * The flat overlay leaves a forwarder environment may override (everything
+ * except headers, which travel as `headers.<name>`). Forwarders are
+ * event-driven, so unlike jobs there is no schedule / timezone / retry_policy /
+ * body / timeout.
+ */
+type ForwarderLeaf = {
+  enabled?: boolean;
+  url?: string | null;
+  method?: HttpMethod | null;
+  successStatus?: string | null;
+  tlsVerify?: boolean | null;
+  caCert?: string | null;
+  headers?: Record<string, string>;
+};
+
+/**
+ * Emit one environment's flat sparse leaf-path overlay (ADR-056): `enabled`
+ * plus only the leaves this environment overrides, with each header as a
+ * `headers.<name>` leaf.
+ */
+function _environmentToPayload(env: ForwarderEnvironment): { [key: string]: unknown } {
+  const payload: { [key: string]: unknown } = { enabled: env.enabled };
+  if (env.url !== null) payload.url = env.url;
+  if (env.method !== null) payload.method = env.method;
+  if (env.successStatus !== null) payload.success_status = env.successStatus;
+  if (env.tlsVerify !== null) payload.tls_verify = env.tlsVerify;
+  if (env.caCert !== null) payload.ca_cert = env.caCert;
+  for (const [name, value] of Object.entries(env.headers)) {
+    payload[`headers.${name}`] = value;
+  }
+  return payload;
+}
+
 function _environmentsToWire(environments: Record<string, ForwarderEnvironment>): {
-  [key: string]: GenForwarderEnvironment;
+  [key: string]: { [key: string]: unknown };
 } {
-  // Per-environment `configuration` overrides are sent as full
-  // HttpConfiguration payloads (plaintext headers in), mirroring the base
-  // configuration's round-trip semantics.
-  const out: { [key: string]: GenForwarderEnvironment } = {};
+  const out: { [key: string]: { [key: string]: unknown } } = {};
   for (const [envKey, env] of Object.entries(environments)) {
-    out[envKey] = {
-      enabled: env.enabled,
-      configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
-    };
+    out[envKey] = _environmentToPayload(env);
   }
   return out;
+}
+
+/**
+ * Parse one environment's flat leaf-path overlay (ADR-056). Header leaves
+ * arrive as `headers.<name>` (split on the FIRST dot, so a dotted header name
+ * like `X-Foo.Bar` is preserved); every other leaf is a single top-level key. A
+ * leaf the environment doesn't override is absent and reads back as `null` —
+ * the SDK never merges in the base. Unknown leaves are ignored.
+ */
+function _environmentFromWire(raw: Record<string, unknown>): ForwarderEnvironment {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const dot = key.indexOf(".");
+    if (dot !== -1 && key.slice(0, dot) === "headers") {
+      const name = key.slice(dot + 1);
+      if (name) headers[name] = String(value);
+    }
+  }
+  return new ForwarderEnvironment({
+    enabled: Boolean(raw.enabled ?? false),
+    url: raw.url == null ? null : String(raw.url),
+    method: raw.method == null ? null : (raw.method as HttpMethod),
+    successStatus: raw.success_status == null ? null : String(raw.success_status),
+    tlsVerify: raw.tls_verify == null ? null : Boolean(raw.tls_verify),
+    caCert: raw.ca_cert == null ? null : String(raw.ca_cert),
+    headers,
+  });
 }
 
 function _environmentsFromWire(
@@ -294,43 +353,20 @@ function _environmentsFromWire(
 ): Record<string, ForwarderEnvironment> {
   const out: Record<string, ForwarderEnvironment> = {};
   for (const [envKey, value] of Object.entries(raw ?? {})) {
-    const v = (value ?? {}) as {
-      enabled?: unknown;
-      configuration?: Record<string, unknown> | null;
-    };
-    out[envKey] = new ForwarderEnvironment({
-      enabled: Boolean(v.enabled ?? false),
-      configuration:
-        v.configuration == null
-          ? null
-          : _configurationFromWire(v.configuration as Record<string, unknown>),
-    });
+    out[envKey] = _environmentFromWire((value ?? {}) as Record<string, unknown>);
   }
   return out;
 }
 
 function _normalizeEnvironments(
-  environments:
-    | Record<
-        string,
-        ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
-      >
-    | null
-    | undefined,
+  environments: Record<string, ForwarderEnvironment | ForwarderLeaf> | null | undefined,
 ): Record<string, ForwarderEnvironment> {
   // Accept either ForwarderEnvironment instances or plain objects
-  // (`{ enabled: true, configuration: new HttpConfiguration(...) }`) so
-  // callers can use the lightweight literal form without importing the
-  // class.
+  // (`{ enabled: true, url: ..., headers: {...} }`) so callers can use the
+  // lightweight literal form without importing the class.
   const out: Record<string, ForwarderEnvironment> = {};
   for (const [envKey, value] of Object.entries(environments ?? {})) {
-    out[envKey] =
-      value instanceof ForwarderEnvironment
-        ? value
-        : new ForwarderEnvironment({
-            enabled: value.enabled ?? false,
-            configuration: value.configuration ?? null,
-          });
+    out[envKey] = value instanceof ForwarderEnvironment ? value : new ForwarderEnvironment(value);
   }
   return out;
 }
@@ -387,9 +423,6 @@ function _forwarderFromResource(
     name: String(a.name ?? ""),
     description: (a.description as string | null) ?? null,
     forwarderType: a.forwarder_type as ForwarderType,
-    // The base `enabled` is server-pinned false; round-trip whatever the
-    // server returned (always false) without assuming a default of true.
-    enabled: Boolean(a.enabled ?? false),
     environments: _environmentsFromWire(a.environments as Record<string, unknown> | undefined),
     // Absent on the wire (a forwarder persisted before the field landed)
     // reads back as false — the additive default.
@@ -713,11 +746,11 @@ class ForwardersClient {
    *                               when that environment's entry has
    *                               `enabled: true`. Values may be
    *                               {@link ForwarderEnvironment} instances or
-   *                               plain objects (`{ enabled: true }`,
-   *                               optionally with a `configuration`
-   *                               {@link HttpConfiguration} override). Omit to
-   *                               create a forwarder that delivers nowhere
-   *                               until enabled per environment.
+   *                               plain objects (`{ enabled: true }`, optionally
+   *                               with sparse leaf overrides such as `url`,
+   *                               `method`, or `headers`). Omit to create a
+   *                               forwarder that delivers nowhere until enabled
+   *                               per environment.
    * @param fields.description     Optional free-text description.
    * @param fields.forwardSmplkitEvents
    *                               When `true`, this forwarder also receives
@@ -754,10 +787,7 @@ class ForwardersClient {
       name?: string;
       forwarderType: ForwarderType;
       configuration: HttpConfiguration;
-      environments?: Record<
-        string,
-        ForwarderEnvironment | { enabled?: boolean; configuration?: HttpConfiguration | null }
-      > | null;
+      environments?: Record<string, ForwarderEnvironment | ForwarderLeaf> | null;
       description?: string | null;
       forwardSmplkitEvents?: boolean;
       filter?: Record<string, unknown> | null;
