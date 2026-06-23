@@ -385,19 +385,6 @@ export interface CategoryListPage {
 // ---------------------------------------------------------------------------
 
 /**
- * A single name/value HTTP header on a forwarder destination.
- */
-export interface HttpHeader {
-  /** Header name (e.g. `"Authorization"`, `"DD-API-KEY"`). */
-  name: string;
-  /**
-   * Header value. Returned in plaintext on reads, so a get-mutate-put
-   * round-trip preserves it without re-entering secrets.
-   */
-  value: string;
-}
-
-/**
  * Supported SIEM forwarder destination types.
  *
  * The audit service declares `forwarder_type` as a string with an enum
@@ -452,11 +439,13 @@ export class HttpConfiguration {
   /** Destination URL the audit service POSTs each event to. */
   url: string;
   /**
-   * Headers attached to every outbound request. Values often carry
-   * credentials and are returned in plaintext on reads, so a get-mutate-put
-   * round-trip preserves them without re-entering secrets.
+   * Headers attached to every outbound request, as a name→value object (e.g.
+   * `{ "DD-API-KEY": "s3cr3t" }`). Values often carry credentials and are
+   * returned in plaintext on reads, so a get-mutate-put round-trip preserves
+   * them without re-entering secrets. Use {@link setHeader} / {@link getHeader}
+   * to read and write individual headers.
    */
-  headers: HttpHeader[];
+  headers: Record<string, string>;
   /**
    * Status the destination must return for delivery to count as success —
    * either an exact code (`"200"`, `"204"`) or a class (`"2xx"`, `"4xx"`).
@@ -481,7 +470,7 @@ export class HttpConfiguration {
     fields: {
       method?: HttpMethod;
       url?: string;
-      headers?: HttpHeader[];
+      headers?: Record<string, string>;
       successStatus?: string;
       tlsVerify?: boolean;
       caCert?: string | null;
@@ -489,20 +478,40 @@ export class HttpConfiguration {
   ) {
     this.method = fields.method ?? HttpMethod.POST;
     this.url = fields.url ?? "";
-    this.headers = fields.headers ?? [];
+    this.headers = { ...(fields.headers ?? {}) };
     this.successStatus = fields.successStatus ?? "2xx";
     this.tlsVerify = fields.tlsVerify ?? true;
     this.caCert = fields.caCert ?? null;
   }
+
+  /** Set (or replace) a single request header by name. */
+  setHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  /** The value of header `name`, or `undefined` if it is not set. */
+  getHeader(name: string): string | undefined {
+    return this.headers[name];
+  }
 }
 
 /**
- * Per-environment enablement and optional configuration override for a forwarder.
+ * One environment's **sparse override** for a forwarder (ADR-056).
  *
- * A forwarder delivers events in a given environment only when that
- * environment has an entry in {@link Forwarder.environments} with
- * `enabled: true`. An environment with no entry (or `enabled: false`)
- * receives no deliveries.
+ * A forwarder's {@link Forwarder.environments} map holds one of these per
+ * environment. Only the leaves you set are sent on save; everything you leave
+ * unset is inherited from the forwarder's base definition, and the server
+ * resolves base ⊕ overrides when an event is delivered. The base definition
+ * delivers nowhere, so a forwarder delivers in an environment only when that
+ * environment's override sets `enabled` to `true`.
+ *
+ * Set overrides through {@link Forwarder.environment}, e.g.
+ * `forwarder.environment("production").url = "https://prod.siem.example.com/in"`.
+ *
+ * **Reading a leaf returns this environment's override, or `null` when it does
+ * not override that leaf** — the SDK does not merge in the base value
+ * (forwarders resolve server-side). To see a base value, read the forwarder's
+ * base definition (`forwarder.configuration`).
  */
 export class ForwarderEnvironment {
   /**
@@ -511,18 +520,69 @@ export class ForwarderEnvironment {
    */
   enabled: boolean;
   /**
-   * Optional per-environment destination configuration that fully replaces
-   * the forwarder's base {@link Forwarder.configuration} for this
-   * environment. `null` (the default) inherits the base configuration. As
-   * with the base configuration, header values are returned in plaintext on
-   * reads, so a get-mutate-put round-trip preserves them without re-entering
-   * secrets.
+   * Per-environment override of the base {@link HttpConfiguration.url}. `null`
+   * (the default) inherits the base {@link Forwarder.configuration} url.
    */
-  configuration: HttpConfiguration | null;
+  url: string | null;
+  /**
+   * Per-environment override of the base {@link HttpConfiguration.method}.
+   * `null` (the default) inherits the base {@link Forwarder.configuration} method.
+   */
+  method: HttpMethod | null;
+  /**
+   * Per-environment override of the base
+   * {@link HttpConfiguration.successStatus}. `null` (the default) inherits the
+   * base {@link Forwarder.configuration} value.
+   */
+  successStatus: string | null;
+  /**
+   * Per-environment override of the base {@link HttpConfiguration.tlsVerify}.
+   * `null` (the default) inherits the base {@link Forwarder.configuration} value.
+   */
+  tlsVerify: boolean | null;
+  /**
+   * Per-environment override of the base {@link HttpConfiguration.caCert}.
+   * `null` (the default) inherits the base {@link Forwarder.configuration} value.
+   */
+  caCert: string | null;
+  /**
+   * Per-environment header overrides, as a name→value object. Each entry
+   * overrides (or adds) that one header by name on top of the base headers,
+   * leaving the rest inherited. Use {@link setHeader} / {@link getHeader}.
+   */
+  headers: Record<string, string>;
 
-  constructor(fields: { enabled?: boolean; configuration?: HttpConfiguration | null } = {}) {
+  constructor(
+    fields: {
+      enabled?: boolean;
+      url?: string | null;
+      method?: HttpMethod | null;
+      successStatus?: string | null;
+      tlsVerify?: boolean | null;
+      caCert?: string | null;
+      headers?: Record<string, string>;
+    } = {},
+  ) {
     this.enabled = fields.enabled ?? false;
-    this.configuration = fields.configuration ?? null;
+    this.url = fields.url ?? null;
+    this.method = fields.method ?? null;
+    this.successStatus = fields.successStatus ?? null;
+    this.tlsVerify = fields.tlsVerify ?? null;
+    this.caCert = fields.caCert ?? null;
+    this.headers = { ...(fields.headers ?? {}) };
+  }
+
+  /** Override (or add) a single header by name in this environment. */
+  setHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  /**
+   * This environment's override for header `name`, or `undefined` when it does
+   * not override that header.
+   */
+  getHeader(name: string): string | undefined {
+    return this.headers[name];
   }
 }
 
@@ -550,18 +610,13 @@ export class Forwarder {
   /** Destination request configuration. */
   configuration: HttpConfiguration;
   /**
-   * Read-only. Always `false` — the base enablement is pinned off. Whether
-   * a forwarder actually delivers is decided per environment via
-   * {@link environments}; mutating this field has no effect on the server.
-   */
-  enabled: boolean;
-  /**
-   * Per-environment overrides keyed by environment key (e.g.
-   * `"production"`, `"staging"`). A forwarder delivers in an environment
-   * only when `environments[env].enabled` is `true`. Each entry may carry
-   * an optional {@link HttpConfiguration} override; omit it to inherit the
-   * base {@link configuration}. Every referenced environment must exist and
-   * be managed for the account.
+   * Per-environment sparse overrides keyed by environment key (e.g.
+   * `"production"`, `"staging"`). A forwarder delivers in an environment only
+   * when `environments[env].enabled` is `true`. Each entry overrides only the
+   * leaves it sets; omitted leaves inherit the base {@link configuration} (the
+   * server resolves base ⊕ overrides on delivery). Reach one via
+   * {@link environment}. Every referenced environment must exist and be managed
+   * for the account.
    */
   environments: Record<string, ForwarderEnvironment>;
   /** Optional free-text description. */
@@ -609,6 +664,17 @@ export class Forwarder {
   /** @internal */
   _client: ForwarderModelClient | null;
 
+  /**
+   * Whether the forwarder delivers in at least one environment. Read-only
+   * roll-up derived from {@link environments} — `true` iff any environment
+   * override has `enabled` set. Enable per environment via
+   * `forwarder.environment(env).enabled = true`; the forwarder has no
+   * server-side top-level `enabled` field.
+   */
+  get enabled(): boolean {
+    return Object.values(this.environments).some((env) => env.enabled);
+  }
+
   /** @internal */
   constructor(
     client: ForwarderModelClient | null,
@@ -617,7 +683,6 @@ export class Forwarder {
       name: string;
       forwarderType: ForwarderType;
       configuration: HttpConfiguration;
-      enabled?: boolean;
       environments?: Record<string, ForwarderEnvironment> | null;
       description?: string | null;
       forwardSmplkitEvents?: boolean;
@@ -635,10 +700,6 @@ export class Forwarder {
     this.name = fields.name;
     this.forwarderType = fields.forwarderType;
     this.configuration = fields.configuration;
-    // `enabled` is server-pinned false; we keep the field so reads
-    // round-trip the server value, but enablement is driven by
-    // `environments` (see the field docs).
-    this.enabled = fields.enabled ?? false;
     this.environments = fields.environments ?? {};
     this.description = fields.description ?? null;
     this.forwardSmplkitEvents = fields.forwardSmplkitEvents ?? false;
@@ -680,14 +741,25 @@ export class Forwarder {
   }
 
   /**
-   * Return the override for `environment`, creating an empty one if absent.
+   * The per-environment override for `environment` — the single place to read
+   * or set what this forwarder overrides there (ADR-056).
    *
-   * The per-environment mutators reach through here so an existing
-   * override's other field is preserved when only one of `enabled` /
-   * `configuration` is being set.
-   * @internal
+   * Returns the {@link ForwarderEnvironment} for `environment`, creating an
+   * empty one (and inserting it into {@link environments}) on first access, so
+   * you can set overrides directly:
+   *
+   * ```typescript
+   * forwarder.environment("production").enabled = true;
+   * forwarder.environment("production").url = "https://prod.siem.example.com/in";
+   * forwarder.environment("production").setHeader("DD-API-KEY", "prod-secret");
+   * ```
+   *
+   * Only the leaves you set are sent on save; everything else inherits the base
+   * definition (the server resolves base ⊕ overrides on delivery). Set base
+   * fields by direct assignment on the forwarder itself (e.g.
+   * `forwarder.configuration`).
    */
-  private _environmentOverride(environment: string): ForwarderEnvironment {
+  environment(environment: string): ForwarderEnvironment {
     let env = this.environments[environment];
     if (env === undefined) {
       env = new ForwarderEnvironment();
@@ -696,48 +768,12 @@ export class Forwarder {
     return env;
   }
 
-  /**
-   * Set this forwarder's destination configuration in memory.
-   *
-   * With `environment` omitted, replaces the base {@link configuration}.
-   * With `environment` given, sets the per-environment override's
-   * configuration on {@link environments}, creating the override entry if
-   * it doesn't exist yet (preserving any already-set `enabled` on it). Call
-   * {@link save} to persist.
-   */
-  setConfiguration(configuration: HttpConfiguration, environment: string | null = null): void {
-    if (environment === null) {
-      this.configuration = configuration;
-    } else {
-      this._environmentOverride(environment).configuration = configuration;
-    }
-  }
-
-  /**
-   * Set this forwarder's enablement in memory.
-   *
-   * With `environment` omitted, sets the base {@link enabled} (which the
-   * server pins false regardless — enablement is per-environment). With
-   * `environment` given, sets the per-environment override's `enabled` on
-   * {@link environments}, creating the override entry if it doesn't exist
-   * yet (preserving any already-set `configuration` on it). Call
-   * {@link save} to persist.
-   */
-  setEnabled(enabled: boolean, environment: string | null = null): void {
-    if (environment === null) {
-      this.enabled = enabled;
-    } else {
-      this._environmentOverride(environment).enabled = enabled;
-    }
-  }
-
   /** @internal Copy every server-authoritative field from `other` onto self. */
   _apply(other: Forwarder): void {
     this.id = other.id;
     this.name = other.name;
     this.forwarderType = other.forwarderType;
     this.configuration = other.configuration;
-    this.enabled = other.enabled;
     this.environments = other.environments;
     this.description = other.description;
     this.forwardSmplkitEvents = other.forwardSmplkitEvents;

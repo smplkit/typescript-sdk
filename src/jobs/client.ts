@@ -37,7 +37,6 @@ import {
   RetryPolicy,
   Run,
   Usage,
-  type HttpHeader,
   type ListJobsParams,
   type ListRetryPoliciesParams,
   type ListRunsParams,
@@ -46,7 +45,6 @@ import {
 type JobsHttp = ReturnType<typeof createClient<paths>>;
 type GenJobHttpConfiguration = components["schemas"]["JobHttpConfiguration"];
 type GenJob = components["schemas"]["Job"];
-type GenJobEnvironment = components["schemas"]["JobEnvironment"];
 type GenJobCreateRequest = components["schemas"]["JobCreateRequest"];
 type GenJobRequest = components["schemas"]["JobRequest"];
 type GenRetryPolicy = components["schemas"]["RetryPolicy"];
@@ -77,24 +75,71 @@ function _resolveEnvironmentFilter(
   return _joinEnvironments(environments) ?? defaultEnv;
 }
 
+/**
+ * Emit one environment's flat sparse leaf-path overlay (ADR-056): `enabled`
+ * plus only the leaves this environment overrides, with each header as a
+ * `headers.<name>` leaf. Read-only `nextRunAt` is never sent.
+ */
+function _environmentToPayload(env: JobEnvironment): { [key: string]: unknown } {
+  const payload: { [key: string]: unknown } = { enabled: env.enabled };
+  if (env.schedule !== null) payload.schedule = env.schedule;
+  if (env.timezone !== null) payload.timezone = env.timezone;
+  if (env.retryPolicy !== null) payload.retry_policy = env.retryPolicy;
+  if (env.url !== null) payload.url = env.url;
+  if (env.method !== null) payload.method = env.method;
+  if (env.timeout !== null) payload.timeout = env.timeout;
+  if (env.body !== null) payload.body = env.body;
+  if (env.successStatus !== null) payload.success_status = env.successStatus;
+  if (env.tlsVerify !== null) payload.tls_verify = env.tlsVerify;
+  if (env.caCert !== null) payload.ca_cert = env.caCert;
+  for (const [name, value] of Object.entries(env.headers)) {
+    payload[`headers.${name}`] = value;
+  }
+  return payload;
+}
+
 function _environmentsToWire(environments: Record<string, JobEnvironment>): {
-  [key: string]: GenJobEnvironment;
+  [key: string]: { [key: string]: unknown };
 } {
-  const out: { [key: string]: GenJobEnvironment } = {};
+  const out: { [key: string]: { [key: string]: unknown } } = {};
   for (const [envKey, env] of Object.entries(environments)) {
-    const wire: GenJobEnvironment = {
-      enabled: env.enabled,
-      configuration: env.configuration === null ? null : _configurationToWire(env.configuration),
-    };
-    // `schedule`, `timezone`, and `retry_policy` are customer-settable
-    // per-environment overrides; send each only when set. `nextRunAt` is
-    // read-only — never sent.
-    if (env.schedule !== null) wire.schedule = env.schedule;
-    if (env.timezone !== null) wire.timezone = env.timezone;
-    if (env.retryPolicy !== null) wire.retry_policy = env.retryPolicy;
-    out[envKey] = wire;
+    out[envKey] = _environmentToPayload(env);
   }
   return out;
+}
+
+/**
+ * Parse one environment's flat leaf-path overlay (ADR-056). Header leaves
+ * arrive as `headers.<name>` (split on the FIRST dot, so a dotted header name
+ * like `X-Foo.Bar` is preserved); every other leaf is a single top-level key.
+ * A leaf the environment doesn't override is absent and reads back as `null` —
+ * the SDK never merges in the base. Read-only `next_run_at` and unknown leaves
+ * are ignored.
+ */
+function _environmentFromWire(raw: Record<string, unknown>): JobEnvironment {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const dot = key.indexOf(".");
+    if (dot !== -1 && key.slice(0, dot) === "headers") {
+      const name = key.slice(dot + 1);
+      if (name) headers[name] = String(value);
+    }
+  }
+  return new JobEnvironment({
+    enabled: Boolean(raw.enabled ?? false),
+    schedule: raw.schedule == null ? null : String(raw.schedule),
+    timezone: raw.timezone == null ? null : String(raw.timezone),
+    retryPolicy: raw.retry_policy == null ? null : String(raw.retry_policy),
+    url: raw.url == null ? null : String(raw.url),
+    method: raw.method == null ? null : (raw.method as HttpMethod),
+    timeout: raw.timeout == null ? null : Number(raw.timeout),
+    body: raw.body == null ? null : String(raw.body),
+    successStatus: raw.success_status == null ? null : String(raw.success_status),
+    tlsVerify: raw.tls_verify == null ? null : Boolean(raw.tls_verify),
+    caCert: raw.ca_cert == null ? null : String(raw.ca_cert),
+    headers,
+    nextRunAt: raw.next_run_at == null ? null : String(raw.next_run_at),
+  });
 }
 
 function _environmentsFromWire(
@@ -102,25 +147,7 @@ function _environmentsFromWire(
 ): Record<string, JobEnvironment> {
   const out: Record<string, JobEnvironment> = {};
   for (const [envKey, value] of Object.entries(raw ?? {})) {
-    const v = (value ?? {}) as {
-      enabled?: unknown;
-      schedule?: unknown;
-      timezone?: unknown;
-      retry_policy?: unknown;
-      configuration?: Record<string, unknown> | null;
-      next_run_at?: unknown;
-    };
-    out[envKey] = new JobEnvironment({
-      enabled: Boolean(v.enabled ?? false),
-      schedule: v.schedule == null ? null : String(v.schedule),
-      timezone: v.timezone == null ? null : String(v.timezone),
-      retryPolicy: v.retry_policy == null ? null : String(v.retry_policy),
-      configuration:
-        v.configuration == null
-          ? null
-          : _configurationFromWire(v.configuration as Record<string, unknown>),
-      nextRunAt: v.next_run_at == null ? null : String(v.next_run_at),
-    });
+    out[envKey] = _environmentFromWire((value ?? {}) as Record<string, unknown>);
   }
   return out;
 }
@@ -165,7 +192,7 @@ function _configurationToWire(config: HttpConfig): GenJobHttpConfiguration {
   return {
     method: config.method as GenJobHttpConfiguration["method"],
     url: config.url,
-    headers: config.headers.map((h: HttpHeader) => ({ name: h.name, value: h.value })),
+    headers: { ...config.headers },
     body: config.body,
     success_status: config.successStatus,
     timeout: config.timeout,
@@ -174,16 +201,22 @@ function _configurationToWire(config: HttpConfig): GenJobHttpConfiguration {
   };
 }
 
+function _headersFromWire(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === "object") {
+    for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+      out[name] = String(value);
+    }
+  }
+  return out;
+}
+
 function _configurationFromWire(raw: Record<string, unknown> | undefined): HttpConfig {
   const r = raw ?? {};
-  const headers = ((r.headers as Array<{ name?: string; value?: string }>) ?? []).map((h) => ({
-    name: String(h.name ?? ""),
-    value: String(h.value ?? ""),
-  }));
   return new HttpConfig({
     url: String(r.url ?? ""),
     method: (r.method as HttpMethod | undefined) ?? HttpMethod.POST,
-    headers,
+    headers: _headersFromWire(r.headers),
     body: r.body == null ? null : String(r.body),
     successStatus: String(r.success_status ?? "2xx"),
     timeout: r.timeout === undefined ? 30 : Number(r.timeout),

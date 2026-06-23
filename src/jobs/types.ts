@@ -11,17 +11,6 @@
  * on `client.jobs.runs`.
  */
 
-/** A request header attached to the HTTP request a job performs. */
-export interface HttpHeader {
-  /** Header name (e.g. `"Authorization"`, `"Content-Type"`). */
-  name: string;
-  /**
-   * Header value. Returned in plaintext on reads, so a get-mutate-put
-   * round-trip preserves it without re-entering secrets.
-   */
-  value: string;
-}
-
 /**
  * HTTP verb a job uses when it fires.
  *
@@ -90,11 +79,13 @@ export class HttpConfig {
   /** Destination URL the job requests on each run. */
   url: string;
   /**
-   * Headers attached to every request. Values often carry credentials and
+   * Headers attached to every request, as a name→value object (e.g.
+   * `{ Authorization: "Bearer s3cr3t" }`). Values often carry credentials and
    * are returned in plaintext on reads, so a get-mutate-put round-trip
-   * preserves them without re-entering secrets.
+   * preserves them without re-entering secrets. Use {@link setHeader} /
+   * {@link getHeader} to read and write individual headers.
    */
-  headers: HttpHeader[];
+  headers: Record<string, string>;
   /**
    * Request body sent on each run. `null` (the default) sends an empty body,
    * suitable for a connectivity ping. Sent verbatim — pair with a matching
@@ -129,7 +120,7 @@ export class HttpConfig {
   constructor(fields: {
     url: string;
     method?: HttpMethod;
-    headers?: HttpHeader[];
+    headers?: Record<string, string>;
     body?: string | null;
     successStatus?: string;
     timeout?: number;
@@ -138,57 +129,113 @@ export class HttpConfig {
   }) {
     this.url = fields.url;
     this.method = fields.method ?? HttpMethod.POST;
-    this.headers = fields.headers ?? [];
+    this.headers = { ...(fields.headers ?? {}) };
     this.body = fields.body ?? null;
     this.successStatus = fields.successStatus ?? "2xx";
     this.timeout = fields.timeout ?? 30;
     this.tlsVerify = fields.tlsVerify ?? true;
     this.caCert = fields.caCert ?? null;
   }
+
+  /** Set (or replace) a single request header by name. */
+  setHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  /** The value of header `name`, or `undefined` if it is not set. */
+  getHeader(name: string): string | undefined {
+    return this.headers[name];
+  }
 }
 
 /**
- * Per-environment override for a job's enablement, schedule, and configuration.
+ * Coerce a retry-policy reference to its id.
  *
- * A job runs in a given environment only when that environment has an entry in
- * {@link Job.environments} with `enabled` set to `true` (scheduled there for a
- * recurring job, triggerable there for a manual one); an environment with no
- * entry (or `enabled` false) is disabled there. An entry may carry its own cron
- * {@link schedule} override (varying the cadence within that environment) and
- * exposes the read-only {@link nextRunAt} for it.
+ * Accepts a {@link RetryPolicy} instance (its `id` is used), a policy id
+ * string, or `null` (no override / inherit). This is the one coercion behind
+ * the `retryPolicy` accessor on both {@link Job} and {@link JobEnvironment}, so
+ * `x.retryPolicy = somePolicy` and `x.retryPolicy = "retry-on-5xx"` both work.
+ */
+function coercePolicyId(value: RetryPolicy | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof RetryPolicy ? value.id : value;
+}
+
+/**
+ * One environment's **sparse override** for a job (ADR-056).
+ *
+ * A job's {@link Job.environments} map holds one of these per environment. Only
+ * the leaves you set are sent on save; everything you leave unset is inherited
+ * from the job's base definition, and the server resolves base ⊕ overrides when
+ * the job fires. The base definition is disabled everywhere, so a job runs in an
+ * environment only when that environment's override sets `enabled` to `true`.
+ *
+ * Set overrides through {@link Job.environment}, e.g.
+ * `job.environment("production").url = "https://prod.example.com/warm"`.
+ *
+ * **Reading a leaf returns this environment's override, or `null` when it does
+ * not override that leaf** — the SDK does not merge in the base value (jobs
+ * resolve server-side). To see a base value, read the job's base definition
+ * (`job.configuration`, `job.schedule`, …).
  */
 export class JobEnvironment {
-  /** Whether the job is enabled in this environment. Defaults to `false`. */
+  /** Whether the job runs in this environment. Defaults to `false`. */
   enabled: boolean;
   /**
-   * Optional per-environment cron schedule override. `null` (the default)
-   * inherits the job's base {@link Job.schedule}. When set, it must be a
-   * 5-field cron expression evaluated in UTC; it only applies to a recurring
-   * job and varies that environment's cadence — it cannot appear on a manual or
-   * one-off job, and cannot change a job's kind.
+   * Per-environment cron schedule override (recurring jobs only). `null` (the
+   * default) inherits the base {@link Job.schedule}. When set, it must be a
+   * 5-field cron expression; it varies that environment's cadence and cannot
+   * appear on a manual or one-off job, nor change a job's kind.
    */
   schedule: string | null;
   /**
-   * Optional per-environment IANA timezone override for evaluating this
-   * environment's cron {@link schedule} (recurring jobs only). `null` (the
-   * default) inherits the job's base {@link Job.timezone}, else UTC. When set,
-   * it must be a valid IANA zone key (e.g. `"America/New_York"`); it may be set
-   * on an environment that inherits the base schedule (it need not also override
-   * {@link schedule}).
+   * Per-environment IANA timezone override for evaluating this environment's
+   * cron {@link schedule} (recurring jobs only). `null` (the default) inherits
+   * the base {@link Job.timezone}, else UTC. It may be set on an environment
+   * that inherits the base schedule (it need not also override {@link schedule}).
    */
   timezone: string | null;
   /**
-   * Optional per-environment retry-policy override — the id of a
-   * {@link RetryPolicy} (or `"Default"`). `null` (the default) inherits the
-   * job's base {@link Job.retryPolicy}. Sent on writes only when set.
+   * Per-environment override of the request {@link HttpConfig.url}. `null` (the
+   * default) inherits the base {@link Job.configuration} url.
    */
-  retryPolicy: string | null;
+  url: string | null;
   /**
-   * Optional per-environment request configuration that fully replaces the
-   * job's base {@link Job.configuration} for this environment. `null` (the
-   * default) inherits the base configuration.
+   * Per-environment override of the request {@link HttpConfig.method}. `null`
+   * (the default) inherits the base {@link Job.configuration} method.
    */
-  configuration: HttpConfig | null;
+  method: HttpMethod | null;
+  /**
+   * Per-environment override of the request {@link HttpConfig.timeout}. `null`
+   * (the default) inherits the base {@link Job.configuration} timeout.
+   */
+  timeout: number | null;
+  /**
+   * Per-environment override of the request {@link HttpConfig.body}. `null`
+   * (the default) inherits the base {@link Job.configuration} body.
+   */
+  body: string | null;
+  /**
+   * Per-environment override of the request {@link HttpConfig.successStatus}.
+   * `null` (the default) inherits the base {@link Job.configuration} value.
+   */
+  successStatus: string | null;
+  /**
+   * Per-environment override of the request {@link HttpConfig.tlsVerify}.
+   * `null` (the default) inherits the base {@link Job.configuration} value.
+   */
+  tlsVerify: boolean | null;
+  /**
+   * Per-environment override of the request {@link HttpConfig.caCert}. `null`
+   * (the default) inherits the base {@link Job.configuration} value.
+   */
+  caCert: string | null;
+  /**
+   * Per-environment header overrides, as a name→value object. Each entry
+   * overrides (or adds) that one header by name on top of the base headers,
+   * leaving the rest inherited. Use {@link setHeader} / {@link getHeader}.
+   */
+  headers: Record<string, string>;
   /**
    * Read-only: the next scheduled fire time in this environment. `null` when
    * the environment is not enabled, or once a one-off run has fired. Populated
@@ -196,22 +243,66 @@ export class JobEnvironment {
    */
   nextRunAt: string | null;
 
+  /** @internal backing store for the coercing {@link retryPolicy} accessor. */
+  _retryPolicy: string | null;
+
   constructor(
     fields: {
       enabled?: boolean;
       schedule?: string | null;
       timezone?: string | null;
-      retryPolicy?: string | null;
-      configuration?: HttpConfig | null;
+      retryPolicy?: RetryPolicy | string | null;
+      url?: string | null;
+      method?: HttpMethod | null;
+      timeout?: number | null;
+      body?: string | null;
+      successStatus?: string | null;
+      tlsVerify?: boolean | null;
+      caCert?: string | null;
+      headers?: Record<string, string>;
       nextRunAt?: string | null;
     } = {},
   ) {
     this.enabled = fields.enabled ?? false;
     this.schedule = fields.schedule ?? null;
     this.timezone = fields.timezone ?? null;
-    this.retryPolicy = fields.retryPolicy ?? null;
-    this.configuration = fields.configuration ?? null;
+    this._retryPolicy = coercePolicyId(fields.retryPolicy ?? null);
+    this.url = fields.url ?? null;
+    this.method = fields.method ?? null;
+    this.timeout = fields.timeout ?? null;
+    this.body = fields.body ?? null;
+    this.successStatus = fields.successStatus ?? null;
+    this.tlsVerify = fields.tlsVerify ?? null;
+    this.caCert = fields.caCert ?? null;
+    this.headers = { ...(fields.headers ?? {}) };
     this.nextRunAt = fields.nextRunAt ?? null;
+  }
+
+  /**
+   * Per-environment retry-policy override — the id of a {@link RetryPolicy} (or
+   * `"Default"`). `null` (the default) inherits the base {@link Job.retryPolicy}.
+   * Assigning accepts a {@link RetryPolicy} instance (its id is used) or a
+   * policy id string.
+   */
+  get retryPolicy(): string | null {
+    return this._retryPolicy;
+  }
+
+  set retryPolicy(value: RetryPolicy | string | null) {
+    this._retryPolicy = coercePolicyId(value);
+  }
+
+  /** Override (or add) a single header by name in this environment. */
+  setHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  /**
+   * This environment's override for header `name`, or `undefined` when it does
+   * not override that header.
+   */
+  getHeader(name: string): string | undefined {
+    return this.headers[name];
   }
 }
 
@@ -254,23 +345,17 @@ export class Job {
    * `null` for a manual or one-off job. Sent on writes only when set.
    */
   timezone: string | null;
-  /**
-   * The base retry policy for failed runs — the id of a {@link RetryPolicy} (or
-   * the built-in `"Default"`, which never retries), overridable per environment
-   * via {@link JobEnvironment.retryPolicy}. `null` (omitted on the wire) means
-   * the server default `"Default"` policy. Sent on writes only when set.
-   */
-  retryPolicy: string | null;
   /** The HTTP request to perform when the job fires. */
   configuration: HttpConfig;
   /**
-   * Per-environment overrides keyed by environment key (e.g. `"production"`,
-   * `"staging"`). A job fires in an environment only when
-   * `environments[env].enabled` is `true`. Each entry may carry an optional
-   * {@link HttpConfig} override; omit it to inherit the base
-   * {@link configuration}. For a recurring job, supply this map to choose
-   * where it runs; a one-off job records the single environment it was created
-   * in. Every referenced environment must exist for the account.
+   * Per-environment sparse overrides keyed by environment key (e.g.
+   * `"production"`, `"staging"`). A job fires in an environment only when
+   * `environments[env].enabled` is `true`. Each entry overrides only the leaves
+   * it sets; omitted leaves inherit the base definition (the server resolves
+   * base ⊕ overrides when the job fires). Reach one via {@link environment}. For
+   * a recurring or manual job, supply this map to choose where it runs; a
+   * one-off job records the single environment it was created in. Every
+   * referenced environment must exist for the account.
    */
   environments: Record<string, JobEnvironment>;
   /**
@@ -290,14 +375,32 @@ export class Job {
   /** Monotonic version counter; bumped on every server-side write. */
   version: number | null;
 
+  /** @internal backing store for the coercing {@link retryPolicy} accessor. */
+  _retryPolicy: string | null = null;
+
   /**
    * Whether the job is enabled in at least one environment. Read-only roll-up
    * derived from {@link environments} — `true` iff any environment override has
-   * `enabled` set. Set enablement per environment via {@link setEnabled}; this
-   * value is never read from the wire.
+   * `enabled` set. Enable per environment via
+   * `job.environment(env).enabled = true`; this value is never read from the wire.
    */
   get enabled(): boolean {
     return Object.values(this.environments).some((env) => env.enabled);
+  }
+
+  /**
+   * The base retry policy for failed runs — the id of a {@link RetryPolicy} (or
+   * the built-in `"Default"`, which never retries), overridable per environment
+   * via `job.environment(env).retryPolicy`. `null` (omitted on the wire) means
+   * the server default `"Default"` policy. Assigning accepts a
+   * {@link RetryPolicy} instance (its id is used) or a policy id string.
+   */
+  get retryPolicy(): string | null {
+    return this._retryPolicy;
+  }
+
+  set retryPolicy(value: RetryPolicy | string | null) {
+    this._retryPolicy = coercePolicyId(value);
   }
 
   /** Whether this is a recurring (cron-scheduled) job. */
@@ -334,7 +437,7 @@ export class Job {
       name: string;
       schedule: string | null;
       timezone?: string | null;
-      retryPolicy?: string | null;
+      retryPolicy?: RetryPolicy | string | null;
       configuration: HttpConfig;
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
@@ -396,127 +499,31 @@ export class Job {
   }
 
   /**
-   * Return the override for `environment`, creating an empty one if absent.
-   * @internal
+   * The per-environment override for `environment` — the single place to read
+   * or set what this job overrides there (ADR-056).
+   *
+   * Returns the {@link JobEnvironment} for `environment`, creating an empty one
+   * (and inserting it into {@link environments}) on first access, so you can set
+   * overrides directly:
+   *
+   * ```typescript
+   * job.environment("production").enabled = true;
+   * job.environment("production").url = "https://prod.example.com/warm";
+   * job.environment("production").setHeader("Authorization", "Bearer prod");
+   * ```
+   *
+   * Only the leaves you set are sent on save; everything else inherits the base
+   * definition (the server resolves base ⊕ overrides when the job fires). Set
+   * base fields by direct assignment on the job itself (e.g. `job.schedule`,
+   * `job.configuration`).
    */
-  private _environmentOverride(environment: string): JobEnvironment {
+  environment(environment: string): JobEnvironment {
     let env = this.environments[environment];
     if (env === undefined) {
       env = new JobEnvironment();
       this.environments[environment] = env;
     }
     return env;
-  }
-
-  /**
-   * Enable or disable the job in a single environment, in memory. Call
-   * {@link save} to persist. Creates the override entry if it doesn't exist
-   * yet (preserving any already-set `configuration` on it).
-   */
-  setEnabled(enabled: boolean, environment: string): void {
-    this._environmentOverride(environment).enabled = enabled;
-  }
-
-  /**
-   * Whether the job is enabled. With `environment` omitted, returns the
-   * roll-up ({@link enabled} — enabled in at least one environment); with an
-   * `environment`, returns whether the job is enabled in that environment.
-   */
-  isEnabled(environment?: string): boolean {
-    if (environment === undefined) return this.enabled;
-    const override = this.environments[environment];
-    return override !== undefined && override.enabled;
-  }
-
-  /**
-   * Set the job's configuration in memory — the base configuration with
-   * `environment` omitted, or a per-environment override otherwise. Call
-   * {@link save} to persist.
-   */
-  setConfiguration(configuration: HttpConfig, environment?: string): void {
-    if (environment === undefined) {
-      this.configuration = configuration;
-    } else {
-      this._environmentOverride(environment).configuration = configuration;
-    }
-  }
-
-  /**
-   * The job's effective configuration. With `environment` omitted, the base
-   * configuration; with an `environment`, that environment's override when it
-   * has one, else the base — the request the job actually sends when it fires
-   * in that environment.
-   */
-  getConfiguration(environment?: string): HttpConfig {
-    if (environment !== undefined) {
-      const override = this.environments[environment];
-      if (override !== undefined && override.configuration !== null) {
-        return override.configuration;
-      }
-    }
-    return this.configuration;
-  }
-
-  /**
-   * Set the job's schedule in memory — the base {@link schedule} with
-   * `environment` omitted, or a per-environment cron override otherwise. A
-   * per-environment override varies the cadence in that environment only and
-   * applies to recurring jobs; omit `environment` to set the schedule every
-   * environment inherits. Setting a per-environment override creates the
-   * override entry if it doesn't exist yet (preserving any already-set
-   * `enabled` / `configuration` on it).
-   *
-   * Because the timezone is an integral part of a cron cadence, an optional
-   * `timezone` may be supplied alongside the schedule; when given it sets the
-   * same scope's timezone too (equivalent to a follow-up {@link setTimezone}).
-   * Omit it to leave the timezone untouched. For a timezone-only change, use
-   * {@link setTimezone}. Call {@link save} to persist.
-   */
-  setSchedule(schedule: string, timezone?: string, environment?: string): void {
-    if (environment === undefined) {
-      this.schedule = schedule;
-    } else {
-      this._environmentOverride(environment).schedule = schedule;
-    }
-    if (timezone !== undefined) {
-      this.setTimezone(timezone, environment);
-    }
-  }
-
-  /**
-   * Set the IANA timezone the cron schedule is evaluated in — the base
-   * {@link timezone} with `environment` omitted, or a per-environment override
-   * otherwise. A timezone is only valid on a recurring (cron) job; omit
-   * `environment` to set the timezone every environment inherits. A
-   * per-environment override evaluates that environment's cadence on the named
-   * zone's wall clock. Setting a per-environment override creates the override
-   * entry if it doesn't exist yet (preserving any already-set `enabled` /
-   * `schedule` / `configuration` on it). Call {@link save} to persist.
-   */
-  setTimezone(timezone: string, environment?: string): void {
-    if (environment === undefined) {
-      this.timezone = timezone;
-    } else {
-      this._environmentOverride(environment).timezone = timezone;
-    }
-  }
-
-  /**
-   * Set the retry policy for failed runs in memory — the base
-   * {@link retryPolicy} with `environment` omitted, or a per-environment
-   * override otherwise. Accepts either a {@link RetryPolicy} instance (its id is
-   * used) or a policy id string — pass `"Default"` for the built-in never-retry
-   * policy. Setting a per-environment override creates the override entry if it
-   * doesn't exist yet (preserving any already-set `enabled` / `schedule` /
-   * `timezone` / `configuration` on it). Call {@link save} to persist.
-   */
-  setRetryPolicy(retryPolicy: RetryPolicy | string, environment?: string): void {
-    const policyId = retryPolicy instanceof RetryPolicy ? retryPolicy.id : retryPolicy;
-    if (environment === undefined) {
-      this.retryPolicy = policyId;
-    } else {
-      this._environmentOverride(environment).retryPolicy = policyId;
-    }
   }
 
   /**
