@@ -515,9 +515,9 @@ export interface components {
          * JobHttpConfiguration
          * @description HTTP request a job performs when it fires.
          *
-         *     Extends the shared forwarder configuration with the two fields a scheduled
-         *     job needs beyond a forwarder, and represents headers as a name→value object
-         *     so an individual header can be overridden per environment by its name.
+         *     Extends the shared HTTP configuration with the two fields a scheduled job
+         *     needs beyond a forwarder (``body`` and ``timeout``); everything else,
+         *     including the shared name→value ``headers`` object, is inherited unchanged.
          */
         JobHttpConfiguration: {
             /**
@@ -534,7 +534,7 @@ export interface components {
             url: string;
             /**
              * Headers
-             * @description HTTP headers sent on each request, as a name→value object (e.g. `{"Authorization": "Bearer s3cr3t"}`). A header is overridden per environment by its name via a `headers.<name>` entry in that environment's overrides; header names match case-insensitively.
+             * @description HTTP headers attached to each request, as a name→value object (e.g. `{"Authorization": "Bearer s3cr3t"}`). Override an individual header in a specific environment by its name via a `headers.<name>` entry in that environment's overrides; header names match case-insensitively.
              */
             headers?: {
                 [key: string]: string;
