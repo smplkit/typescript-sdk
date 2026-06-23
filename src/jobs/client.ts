@@ -441,8 +441,8 @@ export class RunsClient {
  * Reached as `client.jobs.retryPolicies`. A {@link RetryPolicy} is an
  * active record: build one with {@link new}, set fields, and call `save()`;
  * then reference it from a job's `retryPolicy` (see
- * {@link JobsClient.newRecurringJob} and {@link Job.setRetryPolicy}). Retry
- * policies are account-global — never environment-scoped.
+ * {@link JobsClient.newRecurringJob}). Retry policies are account-global —
+ * never environment-scoped.
  */
 export class RetryPoliciesClient {
   /** @internal */

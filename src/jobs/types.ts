@@ -750,8 +750,8 @@ export class Usage {
  * Active-record style: build one with `client.jobs.retryPolicies.new(...)`,
  * mutate fields, and call {@link save} (create when new, full-replace update
  * when it already exists) or {@link delete}. Reference it from a job's
- * {@link Job.retryPolicy} (see {@link Job.setRetryPolicy}). Retry policies are
- * account-global — never environment-scoped.
+ * {@link Job.retryPolicy}. Retry policies are account-global — never
+ * environment-scoped.
  */
 export class RetryPolicy {
   /** Caller-supplied unique identifier for the policy (the resource `id`); immutable. */
