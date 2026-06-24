@@ -50,6 +50,7 @@ type GenJobRequest = components["schemas"]["JobRequest"];
 type GenRetryPolicy = components["schemas"]["RetryPolicy"];
 type GenRetryPolicyCreateRequest = components["schemas"]["RetryPolicyCreateRequest"];
 type GenRetryPolicyRequest = components["schemas"]["RetryPolicyRequest"];
+type GenRunNowRequest = components["schemas"]["RunNowRequest"];
 
 const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
@@ -106,6 +107,19 @@ function _environmentsToWire(environments: Record<string, JobEnvironment>): {
     out[envKey] = _environmentToPayload(env);
   }
   return out;
+}
+
+/**
+ * A one-off job's birth environment as an enabled `environments` entry.
+ *
+ * The target environment of a one-off job is now conveyed by the keys of the
+ * body's `environments` map (there is no longer a request header). Returns an
+ * empty map when the environment is unknown, leaving it for a
+ * single-environment credential to imply server-side.
+ */
+function _birthEnvMap(environment: string | undefined): Record<string, JobEnvironment> {
+  if (environment === undefined || environment === "") return {};
+  return { [environment]: new JobEnvironment({ enabled: true }) };
 }
 
 /**
@@ -721,7 +735,6 @@ export class JobsClient {
       description?: string | null;
       environments?: Record<string, JobEnvironment>;
       concurrencyPolicy?: string;
-      environment?: string;
     },
   ): Job {
     return new Job(this, {
@@ -734,7 +747,6 @@ export class JobsClient {
       description: fields.description,
       environments: fields.environments,
       concurrencyPolicy: fields.concurrencyPolicy,
-      birthEnvironment: fields.environment ?? this._environment ?? null,
     });
   }
 
@@ -861,7 +873,11 @@ export class JobsClient {
       configuration: fields.configuration,
       description: fields.description,
       concurrencyPolicy: fields.concurrencyPolicy,
-      environment: fields.environment,
+      // A one-off job's birth environment travels as an enabled entry in the
+      // body's environments map (no request header). An explicit arg wins, else
+      // the client's configured environment; when neither is known the map is
+      // empty so a single-environment credential implies it server-side.
+      environments: _birthEnvMap(fields.environment ?? this._environment),
     });
   }
 
@@ -959,15 +975,15 @@ export class JobsClient {
    */
   async run(id: string, params: { environment?: string } = {}): Promise<Run> {
     const environment = params.environment ?? this._environment;
+    // The target environment now travels in the request body, not a header.
+    // When no environment is resolved, send an empty body so a
+    // single-environment credential implies it server-side.
+    const body: GenRunNowRequest = environment !== undefined ? { environment } : {};
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.POST("/api/v1/jobs/{job_id}/actions/run", {
-        params: {
-          path: { job_id: id },
-          ...(environment !== undefined
-            ? { header: { "X-Smplkit-Environment": environment } }
-            : {}),
-        },
+        params: { path: { job_id: id } },
+        body,
       });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
@@ -1002,17 +1018,12 @@ export class JobsClient {
     const body: GenJobCreateRequest = {
       data: { id: job.id, type: "job", attributes: _jobAttrs(job) },
     };
-    // A one-off job is born in the environment named here (recurring and
-    // manual jobs ignore it server-side; their environments come from the map).
-    const birthEnv = job._birthEnvironment ?? undefined;
+    // The environment carries no header anymore: a one-off job's birth
+    // environment rides in its `environments` map (see `schedule`), while
+    // recurring and manual jobs name their environments there too.
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
-      const result = await this._http.POST("/api/v1/jobs", {
-        ...(birthEnv !== undefined
-          ? { params: { header: { "X-Smplkit-Environment": birthEnv } } }
-          : {}),
-        body,
-      });
+      const result = await this._http.POST("/api/v1/jobs", { body });
       if (!result.response.ok) await checkError(result.response, result.error);
       data = result.data as typeof data;
     } catch (err) {
@@ -1030,12 +1041,7 @@ export class JobsClient {
     let data: { data: { id: string; attributes: Record<string, unknown> } } | undefined;
     try {
       const result = await this._http.PUT("/api/v1/jobs/{job_id}", {
-        params: {
-          path: { job_id: job.id },
-          ...(this._environment !== undefined
-            ? { header: { "X-Smplkit-Environment": this._environment } }
-            : {}),
-        },
+        params: { path: { job_id: job.id } },
         body,
       });
       if (!result.response.ok) await checkError(result.response, result.error);
