@@ -129,9 +129,7 @@ export interface paths {
          * @description List this account's retry policies.
          *
          *     Default sort is `name` ascending. Sort by `name`, `created_at`, or
-         *     `updated_at` (prefix `-` for descending). The built-in `Default` policy is
-         *     not included here — it always exists and is retrievable at
-         *     `/retry-policies/Default`.
+         *     `updated_at` (prefix `-` for descending).
          */
         get: operations["list_retry_policies"];
         put?: never;
@@ -140,8 +138,7 @@ export interface paths {
          * @description Create a retry policy for this account.
          *
          *     The caller supplies the policy's id as `data.id`. Ids are unique within an
-         *     account and immutable. `Default` is reserved for the built-in policy and
-         *     cannot be created.
+         *     account and immutable.
          */
         post: operations["create_retry_policy"];
         delete?: never;
@@ -160,15 +157,11 @@ export interface paths {
         /**
          * Get Retry Policy
          * @description Retrieve a single retry policy by its id.
-         *
-         *     `Default` returns the built-in do-not-retry policy.
          */
         get: operations["get_retry_policy"];
         /**
          * Update Retry Policy
          * @description Replace an existing retry policy. Every writable field is overwritten.
-         *
-         *     The built-in `Default` policy cannot be modified.
          */
         put: operations["update_retry_policy"];
         post?: never;
@@ -176,10 +169,10 @@ export interface paths {
          * Delete Retry Policy
          * @description Delete a retry policy.
          *
-         *     The built-in `Default` policy cannot be deleted (`403`). A policy still
-         *     referenced by any job — at the base level or in a per-environment override —
-         *     cannot be deleted (`409`); the error lists the referencing job ids under
-         *     `meta.referencing_jobs` so they can be reassigned to `Default` first.
+         *     A policy still referenced by any job — at the base level or in a
+         *     per-environment override — cannot be deleted (`409`); the error lists the
+         *     referencing job ids under `meta.referencing_jobs` so they can be reassigned
+         *     (or cleared to no policy) first.
          */
         delete: operations["delete_retry_policy"];
         options?: never;
@@ -405,7 +398,7 @@ export interface components {
             configuration: components["schemas"]["JobHttpConfiguration"];
             /**
              * Environments
-             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry is a flat, sparse overlay: only the leaves that differ from the base definition are present, and everything absent is inherited. Set `enabled` to `true` to run the job in that environment (the base is disabled everywhere; an environment with no entry, or an entry without `enabled: true`, does not run). Overridable leaves are `url`, `method`, `timeout`, `body`, `success_status`, `tls_verify`, `ca_cert`, `schedule` and `timezone` (recurring jobs only), `retry_policy` (the `id` of a retry policy, or `Default`), and an individual header as `headers.<name>` (e.g. `headers.Authorization`). On read, each entry also reports the read-only `next_run_at` for that environment (the next fire time, or `null`). For a recurring or manual job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
+             * @description Per-environment overrides keyed by environment key (e.g. `production`, `staging`). Each entry is a flat, sparse overlay: only the leaves that differ from the base definition are present, and everything absent is inherited. Set `enabled` to `true` to run the job in that environment (the base is disabled everywhere; an environment with no entry, or an entry without `enabled: true`, does not run). Overridable leaves are `url`, `method`, `timeout`, `body`, `success_status`, `tls_verify`, `ca_cert`, `schedule` and `timezone` (recurring jobs only), `retry_policy` (the `id` of a retry policy), and an individual header as `headers.<name>` (e.g. `headers.Authorization`). On read, each entry also reports the read-only `next_run_at` for that environment (the next fire time, or `null`). For a recurring or manual job, supply this map to choose where it runs. For a one-off job, the environment it is created in is recorded here automatically — name it with the `X-Smplkit-Environment` header. Every referenced environment must exist for the account.
              */
             environments?: {
                 [key: string]: {
@@ -421,7 +414,7 @@ export interface components {
             concurrency_policy: "ALLOW";
             /**
              * Retry Policy
-             * @description The base retry policy for failed runs — the `id` of a retry policy (or the built-in `Default`), overridable per environment. Omit (or send `null`) to use `Default`, which never retries — so a job that sets nothing behaves exactly as before retries existed.
+             * @description The base retry policy for failed runs — the `id` of a retry policy, overridable per environment. Omit (or send `null`) to reference no policy, in which case failed runs are never retried.
              */
             retry_policy?: string | null;
             /**
@@ -685,8 +678,7 @@ export interface components {
          *
          *     A policy decides whether and how a failed run is retried. Reference it from
          *     a job's `retry_policy` (and optionally override it per environment). A job
-         *     that references nothing uses the built-in `Default` policy, which never
-         *     retries.
+         *     that references no policy is never retried.
          */
         RetryPolicy: {
             /**
