@@ -421,14 +421,6 @@ export class Job {
   /** @internal */
   _client: JobModelClient | null;
 
-  /**
-   * @internal Creation-time only: the environment a one-off job is born in,
-   * sent as the `X-Smplkit-Environment` header by `_createJob`. Ignored for
-   * recurring and manual jobs, whose environments come from
-   * {@link environments}.
-   */
-  _birthEnvironment: string | null;
-
   /** @internal */
   constructor(
     client: JobModelClient | null,
@@ -448,7 +440,6 @@ export class Job {
       updatedAt?: string | null;
       deletedAt?: string | null;
       version?: number | null;
-      birthEnvironment?: string | null;
     },
   ) {
     this._client = client;
@@ -467,7 +458,6 @@ export class Job {
     this.updatedAt = fields.updatedAt ?? null;
     this.deletedAt = fields.deletedAt ?? null;
     this.version = fields.version ?? null;
-    this._birthEnvironment = fields.birthEnvironment ?? null;
   }
 
   /**
@@ -633,9 +623,9 @@ export class Run {
   jobVersion: number | null;
   /**
    * The environment this run executed in. A scheduled run inherits the firing
-   * job-environment; a manual run is created in the environment named by the
-   * `X-Smplkit-Environment` header; a rerun copies its source run's
-   * environment.
+   * job-environment; a manual run is created in the environment named in the
+   * run request body (implied when your credential is scoped to a single
+   * environment); a rerun copies its source run's environment.
    */
   environment: string;
   /**

@@ -1283,7 +1283,7 @@ describe("jobs environment scoping", () => {
     expect("timezone" in sent.data.attributes).toBe(false);
   });
 
-  test("schedule() serializes the Date to ISO-8601 and sends the birth environment", async () => {
+  test("schedule() serializes the Date to ISO-8601 and puts the birth environment in the map", async () => {
     const client = makeClient();
     const when = new Date("2030-01-01T12:30:00.000Z");
     const job = client.schedule("one-off", {
@@ -1292,15 +1292,48 @@ describe("jobs environment scoping", () => {
       configuration: new HttpConfig({ url: "https://api.example.com" }),
       environment: "staging",
     });
+    // The birth environment materializes as an enabled entry on the model
+    // (before save), so callers can read it back without a round-trip.
+    expect(job.environment("staging").enabled).toBe(true);
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, "one-off") }, 201));
     await job.save();
     const req = mockFetch.mock.calls[0][0] as Request;
-    expect(req.headers.get("X-Smplkit-Environment")).toBe("staging"); // birth environment
+    // The birth environment travels in the body map, not a header.
+    expect(req.headers.get("X-Smplkit-Environment")).toBeNull();
     const sent = JSON.parse(await req.text());
     expect(sent.data.attributes.schedule).toBe(when.toISOString()); // Date -> ISO-8601
+    expect(sent.data.attributes.environments.staging).toEqual({ enabled: true });
   });
 
-  test("client-level environment is the default birth header and update header", async () => {
+  test("schedule() with no environment and no client default sends an empty map", async () => {
+    const client = makeClient();
+    const when = new Date("2030-01-01T12:30:00.000Z");
+    const job = client.schedule("o2", {
+      name: "O2",
+      schedule: when,
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    // No explicit environment and no client default → empty map; a
+    // single-environment credential implies the one environment server-side.
+    expect(job.environments).toEqual({});
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, "o2") }, 201));
+    await job.save();
+    const sent = JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text());
+    expect("environments" in sent.data.attributes).toBe(false);
+  });
+
+  test("schedule() uses the client default environment for the birth map", async () => {
+    const client = envClient("production");
+    const when = new Date("2030-01-01T12:30:00.000Z");
+    const job = client.schedule("o3", {
+      name: "O3",
+      schedule: when,
+      configuration: new HttpConfig({ url: "https://api.example.com" }),
+    });
+    expect(job.environment("production").enabled).toBe(true);
+  });
+
+  test("create and update no longer send an environment header", async () => {
     const client = envClient("production");
     const job = client.newRecurringJob(JOB_ID, {
       name: "x",
@@ -1309,15 +1342,11 @@ describe("jobs environment scoping", () => {
     });
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }, 201));
     await job.save(); // create
-    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
-      "production",
-    );
+    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBeNull();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource({}, JOB_ID) }));
     job.name = "renamed";
     await job.save(); // update
-    expect((mockFetch.mock.calls[1][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
-      "production",
-    );
+    expect((mockFetch.mock.calls[1][0] as Request).headers.get("X-Smplkit-Environment")).toBeNull();
   });
 
   test("create with no environment sends no header", async () => {
@@ -1327,22 +1356,40 @@ describe("jobs environment scoping", () => {
     expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBeNull();
   });
 
-  test("run-now sends the environment header and the returned run is bound", async () => {
+  test("run-now sends the environment in the body and the returned run is bound", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ data: _runResource({ environment: "production" }) }),
     );
     const run = await client.run(JOB_ID, { environment: "production" });
-    expect((mockFetch.mock.calls[0][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
-      "production",
-    );
+    const req = mockFetch.mock.calls[0][0] as Request;
+    expect(req.headers.get("X-Smplkit-Environment")).toBeNull(); // no header anymore
+    expect(JSON.parse(await req.text())).toEqual({ environment: "production" });
     expect(run.environment).toBe("production");
     // returned run is active-record: rerun() works
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _runResource({ trigger: "RERUN" }) }));
     expect((await run.rerun()).trigger).toBe("RERUN");
   });
 
-  test("job.trigger sends the run-now header", async () => {
+  test("run-now with the client default environment sends it in the body", async () => {
+    const client = envClient("production");
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: _runResource({ environment: "production" }) }),
+    );
+    await client.run(JOB_ID);
+    expect(JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text())).toEqual({
+      environment: "production",
+    });
+  });
+
+  test("run-now with no resolved environment sends an empty body", async () => {
+    const client = makeClient();
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: _runResource() }));
+    await client.run(JOB_ID);
+    expect(JSON.parse(await (mockFetch.mock.calls[0][0] as Request).text())).toEqual({});
+  });
+
+  test("job.trigger sends the run-now environment in the body", async () => {
     const client = makeClient();
     mockFetch.mockResolvedValueOnce(jsonResponse({ data: _jobResource() }));
     const job = await client.get(JOB_ID);
@@ -1351,9 +1398,9 @@ describe("jobs environment scoping", () => {
     );
     const run = await job.trigger("production");
     expect(run.environment).toBe("production");
-    expect((mockFetch.mock.calls[1][0] as Request).headers.get("X-Smplkit-Environment")).toBe(
-      "production",
-    );
+    const req = mockFetch.mock.calls[1][0] as Request;
+    expect(req.headers.get("X-Smplkit-Environment")).toBeNull();
+    expect(JSON.parse(await req.text())).toEqual({ environment: "production" });
   });
 
   test("job.listRuns filters by environment", async () => {
