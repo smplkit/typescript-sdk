@@ -10,6 +10,17 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { components } from "../generated/audit.d.ts";
+
+/**
+ * Severity level recorded on an audit event.
+ *
+ * Mirrors the audit spec's `Severity` enum: one of `"TRACE"`, `"DEBUG"`,
+ * `"INFO"`, `"WARN"`, `"ERROR"`, or `"FATAL"`. Sourced from the generated
+ * client so a spec change to the allowed values flows through automatically.
+ */
+export type Severity = components["schemas"]["Severity"];
+
 /**
  * A single audit event as returned by the audit service.
  *
@@ -116,6 +127,12 @@ export interface CreateEventInput {
    * uncategorized.
    */
   category?: string;
+  /**
+   * Optional severity level for the event — one of `"TRACE"`, `"DEBUG"`,
+   * `"INFO"`, `"WARN"`, `"ERROR"`, or `"FATAL"`. Omit it to let the audit
+   * service default the event to `"INFO"`.
+   */
+  severity?: Severity;
   /**
    * Free-form contextual JSON. To record a resource snapshot, place it
    * inside `data` — smplkit's internal convention nests it at

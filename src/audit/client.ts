@@ -148,6 +148,7 @@ function _eventBodyFromInput(
   if (input.actorId !== undefined) attrs.actor_id = input.actorId;
   if (input.actorLabel !== undefined) attrs.actor_label = input.actorLabel;
   if (input.category !== undefined) attrs.category = input.category;
+  if (input.severity !== undefined) attrs.severity = input.severity;
   if (input.data !== undefined) {
     attrs.data = input.data as { [key: string]: unknown };
   }

@@ -173,6 +173,73 @@ describe("AuditClient", () => {
     await client._close();
   });
 
+  test("record passes severity onto the wire", async () => {
+    const seenBodies: string[] = [];
+    const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      seenBodies.push(await req.text());
+      return new Response(
+        JSON.stringify({
+          data: {
+            id: "00000000-0000-0000-0000-000000000001",
+            type: "event",
+            attributes: {
+              event_type: "user.created",
+              resource_type: "user",
+              resource_id: "u-1",
+              occurred_at: "2026-05-06T12:00:00+00:00",
+              created_at: "2026-05-06T12:00:01+00:00",
+              severity: "WARN",
+              data: {},
+              idempotency_key: "auto",
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/vnd.api+json" } },
+      );
+    });
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
+    });
+    client.events.record({
+      eventType: "user.created",
+      resourceType: "user",
+      resourceId: "u-1",
+      severity: "WARN",
+    });
+    await client.events.flush(2_000);
+    expect(seenBodies[0]).toContain('"severity":"WARN"');
+    const body = JSON.parse(seenBodies[0]!);
+    expect(body.data.attributes.severity).toBe("WARN");
+    await client._close();
+  });
+
+  test("record omits severity when not supplied", async () => {
+    const seenBodies: string[] = [];
+    const fetchMock = vi.fn(async (urlOrRequest: string | URL | Request, init?: RequestInit) => {
+      const req =
+        urlOrRequest instanceof Request ? urlOrRequest : new Request(String(urlOrRequest), init);
+      seenBodies.push(await req.text());
+      return new Response("{}", {
+        status: 201,
+        headers: { "Content-Type": "application/vnd.api+json" },
+      });
+    });
+    const client = new AuditClient({
+      apiKey: "sk_api_test",
+      baseUrl: "https://audit.example.com",
+      fetch: fetchMock,
+    });
+    client.events.record({ eventType: "user.created", resourceType: "user", resourceId: "u-1" });
+    await client.events.flush(2_000);
+    const body = JSON.parse(seenBodies[0]!);
+    expect(body.data.attributes.severity).toBeUndefined();
+    await client._close();
+  });
+
   test("get throws SmplNotFoundError on 404", async () => {
     const fetchMock = vi.fn(
       async () =>
