@@ -24,9 +24,24 @@
  * `ResourceType`, `EventType`, `Category`) plus the `ForwarderType`,
  * `HttpMethod`, and `TransformType` enums live in `./types.js` and are
  * re-exported here for convenience.
+ *
+ * This module is also the package's `@smplkit/sdk/audit` subpath — the
+ * edge/serverless entry. Its import graph is free of Node built-ins and of
+ * the `ws` transport, so it bundles for edge runtimes (e.g. Cloudflare
+ * Workers). Two differences from the package root apply there:
+ *
+ * - Configuration resolves from defaults → the `SMPLKIT_API_KEY` /
+ *   `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` / `SMPLKIT_ENVIRONMENT`
+ *   environment variables → constructor options, exactly like the root —
+ *   minus the `~/.smplkit` file step (that machinery needs `node:fs`, and
+ *   an isolate has no home directory anyway).
+ * - Pass `buffered: false` for the stateless write path: no background
+ *   buffer or timers; `record()` performs one awaited POST per call.
  */
 
 export { AuditClient, type AuditClientOptions } from "./client.js";
+// The full typed error surface, so edge callers can catch what record()/list() throw.
+export * from "../errors.js";
 export {
   Forwarder,
   ForwarderEnvironment,

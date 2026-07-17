@@ -127,10 +127,9 @@ export function parseBool(value: string, key: string): boolean {
   );
 }
 
-/** Build a service URL from scheme, subdomain, and base domain. */
-export function serviceUrl(scheme: string, subdomain: string, baseDomain: string): string {
-  return `${scheme}://${subdomain}.${baseDomain}`;
-}
+// serviceUrl moved to service_url.ts (a pure module the Node-free audit edge entry can share);
+// re-exported here so existing importers are unaffected.
+export { serviceUrl } from "./service_url.js";
 
 /** Options accepted by the SmplClient constructor (imported from client.ts at the type level). */
 interface ConstructorOptions {

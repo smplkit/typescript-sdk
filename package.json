@@ -16,6 +16,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./audit": {
+      "import": {
+        "types": "./dist/audit.d.ts",
+        "default": "./dist/audit.js"
+      },
+      "require": {
+        "types": "./dist/audit.d.cts",
+        "default": "./dist/audit.cjs"
+      }
     }
   },
   "files": [

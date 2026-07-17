@@ -190,6 +190,8 @@ export interface ListEventsParams {
   actorType?: string;
   /** Filter to this actor id. Matched as a literal string against whatever the recording call stored. */
   actorId?: string;
+  /** Filter to this exact category — the indexed correlation label callers stamp on related events. */
+  category?: string;
   /** Range notation, e.g. `"[2026-01-01T00:00:00Z,*)"`. */
   occurredAtRange?: string;
   /**

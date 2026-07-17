@@ -31,6 +31,15 @@ export { AccountSettings } from "./account/models.js";
 // Audit
 export { AuditClient } from "./audit/client.js";
 export type { AuditClientOptions } from "./audit/client.js";
+
+// The package-root entry wires the full config resolver (defaults →
+// `~/.smplkit` file → env vars → options, environment included) into the
+// audit client. The `@smplkit/sdk/audit` edge entry deliberately does NOT —
+// its import graph stays free of Node built-ins; it resolves the same
+// `SMPLKIT_*` environment variables itself and merely skips the file step.
+import { _setAuditConfigResolver } from "./audit/client.js";
+import { resolveConfig } from "./config.js";
+_setAuditConfigResolver(resolveConfig);
 export {
   Forwarder,
   ForwarderEnvironment,

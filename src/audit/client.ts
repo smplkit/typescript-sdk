@@ -42,7 +42,7 @@ import {
   SmplkitTimeoutError,
   throwForStatus,
 } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { envConfigValue, serviceUrl } from "../service_url.js";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import {
   Forwarder,
@@ -85,6 +85,35 @@ type AuditHttp = ReturnType<typeof createClient<paths>>;
 const BASE_URL = "https://audit.smplkit.com";
 
 const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
+
+// ---------------------------------------------------------------------------
+// Config-resolver injection
+// ---------------------------------------------------------------------------
+// The `~/.smplkit` FILE fallback lives in `../config.js`, whose import graph
+// carries Node built-ins (`node:fs` / `node:os` / `node:path`). This module
+// must stay importable from edge runtimes via the `@smplkit/sdk/audit`
+// subpath, so that resolver is injected by the package ROOT entry
+// (`src/index.ts`) rather than imported statically. Both entries resolve the
+// same way otherwise — defaults → environment variables (`SMPLKIT_API_KEY`,
+// `SMPLKIT_BASE_DOMAIN`, `SMPLKIT_SCHEME`, `SMPLKIT_ENVIRONMENT`) →
+// constructor options — exactly like {@link SmplClient}; the edge entry
+// merely skips the `~/.smplkit` file step, which has no meaning in an
+// isolate anyway.
+
+/** @internal The slice of the resolved config the audit fallback consumes. */
+export type AuditConfigResolver = (options: AuditClientOptions) => {
+  apiKey: string;
+  scheme: string;
+  baseDomain: string;
+  environment: string | null;
+};
+
+let _configResolver: AuditConfigResolver | null = null;
+
+/** @internal Wired by the package-root entry; the `/audit` edge entry leaves it unset. */
+export function _setAuditConfigResolver(resolver: AuditConfigResolver): void {
+  _configResolver = resolver;
+}
 
 // ---------------------------------------------------------------------------
 // Shared HTTP error handling
@@ -448,28 +477,40 @@ class EventsClient {
   /** @internal */
   constructor(
     private readonly _http: AuditHttp,
-    private readonly _buffer: AuditEventBuffer,
+    /** The background buffer, or `null` in stateless mode (`buffered: false`). */
+    private readonly _buffer: AuditEventBuffer | null,
     private readonly _environment: string | undefined,
   ) {}
 
   /**
-   * Enqueue an audit event for asynchronous delivery.
+   * Record an audit event.
    *
-   * Returns immediately when `flush` is false (the default) — the buffer's
-   * worker performs the actual POST with retry on transient failures.
-   *
-   * When `flush: true`, this call awaits until the buffer has drained or
-   * `flushTimeoutMs` elapses. Use this when the caller needs the event
-   * durable before continuing — typical examples are CLI tools, in-test
-   * assertions, and any flow about to exit the process. The
-   * fire-and-forget default remains the right choice on the
+   * In the default buffered mode this enqueues for asynchronous delivery
+   * and returns immediately — the buffer's worker performs the actual POST
+   * with retry on transient failures. When `flush: true`, the call awaits
+   * until the buffer has drained or `flushTimeoutMs` elapses; use this when
+   * the caller needs the event durable before continuing — typical examples
+   * are CLI tools, in-test assertions, and any flow about to exit the
+   * process. The fire-and-forget default remains the right choice on the
    * request-handling hot path.
+   *
+   * In stateless mode (`buffered: false` on the client) every call performs
+   * one awaited POST and throws on failure; `flush` is meaningless there
+   * and ignored.
    */
   async record(input: CreateEventInput): Promise<void> {
-    this._buffer.enqueue(
-      _eventBodyFromInput(input, this._environment),
-      input.idempotencyKey ?? null,
-    );
+    const body = _eventBodyFromInput(input, this._environment);
+    if (this._buffer === null) {
+      const headerInit: Record<string, string> = {};
+      if (input.idempotencyKey != null) headerInit["Idempotency-Key"] = input.idempotencyKey;
+      const result = await this._http.POST("/api/v1/events", {
+        body,
+        headers: headerInit,
+      });
+      if (!result.response.ok) await _throwForResponse(result.response);
+      return;
+    }
+    this._buffer.enqueue(body, input.idempotencyKey ?? null);
     if (input.flush) {
       await this._buffer.flush(input.flushTimeoutMs ?? 5_000);
     }
@@ -504,6 +545,7 @@ class EventsClient {
     if (params.resourceId !== undefined) query["filter[resource_id]"] = params.resourceId;
     if (params.actorType !== undefined) query["filter[actor_type]"] = params.actorType;
     if (params.actorId !== undefined) query["filter[actor_id]"] = params.actorId;
+    if (params.category !== undefined) query["filter[category]"] = params.category;
     if (params.occurredAtRange !== undefined) query["filter[occurred_at]"] = params.occurredAtRange;
     if (params.search !== undefined) query["filter[search]"] = params.search;
     const environments = _resolveEnvironmentFilter(params.environments, this._environment);
@@ -547,15 +589,16 @@ class EventsClient {
    *
    * Equivalent to passing `flush: true` to a final {@link record} call.
    * Useful for draining buffered events at process shutdown or after a
-   * batch of fire-and-forget records.
+   * batch of fire-and-forget records. A no-op in stateless mode
+   * (`buffered: false`), where every record is already durable on return.
    */
   async flush(timeoutMs = 5_000): Promise<void> {
-    await this._buffer.flush(timeoutMs);
+    if (this._buffer !== null) await this._buffer.flush(timeoutMs);
   }
 
   /** @internal */
   async _close(): Promise<void> {
-    await this._buffer.close();
+    if (this._buffer !== null) await this._buffer.close();
   }
 }
 
@@ -969,7 +1012,11 @@ function _validateTransform(transform: unknown, transformType: TransformType | n
 
 /** Configuration options for the {@link AuditClient}. */
 export interface AuditClientOptions {
-  /** API key. When omitted, resolved from `SMPLKIT_API_KEY` or `~/.smplkit`. */
+  /**
+   * API key. When omitted, resolved from `SMPLKIT_API_KEY` — plus
+   * `~/.smplkit` on package-root imports (the `/audit` edge entry skips the
+   * file step).
+   */
   apiKey?: string;
   /**
    * Deployment environment to scope recording and reads to. Sent on the
@@ -1002,6 +1049,17 @@ export interface AuditClientOptions {
   timeoutMs?: number;
   /** Custom fetch implementation, primarily for testing. */
   fetch?: typeof fetch;
+  /**
+   * Buffer event recording (default `true`): `record()` enqueues onto an
+   * in-memory buffer that a background interval drains with retry, and
+   * returns immediately. Set `false` for the stateless write path:
+   * `record()` performs one awaited POST per call and throws on failure,
+   * `flush()`/`close()` are no-ops, and no timers or background state are
+   * created — the right shape for serverless and edge runtimes (for
+   * example Cloudflare Workers), whose isolates cannot host
+   * interval-driven state.
+   */
+  buffered?: boolean;
 }
 
 /**
@@ -1045,11 +1103,11 @@ export class AuditClient {
 
   /** @internal */
   private readonly _http: AuditHttp;
-  /** @internal */
-  private readonly _buffer: AuditEventBuffer;
+  /** @internal The background buffer, or `null` in stateless mode (`buffered: false`). */
+  private readonly _buffer: AuditEventBuffer | null;
 
   constructor(options: AuditClientOptions = {}) {
-    const { apiKey, baseUrl } = resolveAuditCredentials(options);
+    const { apiKey, baseUrl, environment } = resolveAuditConfig(options);
     const ms = options.timeoutMs ?? 30_000;
 
     // Environment scoping no longer rides on the transport (ADR-055): the
@@ -1086,26 +1144,31 @@ export class AuditClient {
       },
     });
 
-    this._buffer = new AuditEventBuffer({
-      post: async (item): Promise<PostOutcome> => {
-        try {
-          const headerInit: Record<string, string> = {};
-          if (item.idempotencyKey !== null) headerInit["Idempotency-Key"] = item.idempotencyKey;
-          const result = await this._http.POST("/api/v1/events", {
-            body: item.body as GenEventResponse,
-            headers: headerInit,
+    // Stateless mode installs no buffer at all — no timers, no background
+    // state — so a client may be constructed per request in edge isolates.
+    this._buffer =
+      options.buffered === false
+        ? null
+        : new AuditEventBuffer({
+            post: async (item): Promise<PostOutcome> => {
+              try {
+                const headerInit: Record<string, string> = {};
+                if (item.idempotencyKey !== null) headerInit["Idempotency-Key"] = item.idempotencyKey;
+                const result = await this._http.POST("/api/v1/events", {
+                  body: item.body as GenEventResponse,
+                  headers: headerInit,
+                });
+                return { status: result.response.status };
+              } catch {
+                return { status: 0 };
+              }
+            },
           });
-          return { status: result.response.status };
-        } catch {
-          return { status: 0 };
-        }
-      },
-    });
 
-    this.events = new EventsClient(this._http, this._buffer, options.environment);
-    this.resourceTypes = new ResourceTypesClient(this._http, options.environment);
-    this.eventTypes = new EventTypesClient(this._http, options.environment);
-    this.categories = new CategoriesClient(this._http, options.environment);
+    this.events = new EventsClient(this._http, this._buffer, environment);
+    this.resourceTypes = new ResourceTypesClient(this._http, environment);
+    this.eventTypes = new EventTypesClient(this._http, environment);
+    this.categories = new CategoriesClient(this._http, environment);
     this.forwarders = new ForwardersClient(this._http);
   }
 
@@ -1121,21 +1184,51 @@ export class AuditClient {
 }
 
 /**
- * Resolve the audit API key and base URL.
+ * Resolve the audit API key, base URL, and environment — like {@link SmplClient}.
  *
- * `baseUrl`/`apiKey` are used directly when both are supplied (the path a
- * top-level client takes after it has already resolved them); otherwise the
- * management config resolver fills in whatever is missing (`~/.smplkit` /
- * env vars / defaults).
+ * All three options are optional. When everything is supplied explicitly it
+ * is used directly (the path a top-level client takes after it has already
+ * resolved them). Otherwise, on package-root imports the injected config
+ * resolver runs the full 4-step resolution (defaults → `~/.smplkit` file →
+ * environment variables → constructor options). Via the `@smplkit/sdk/audit`
+ * edge entry the same resolution applies minus the file step: defaults →
+ * `SMPLKIT_API_KEY` / `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` /
+ * `SMPLKIT_ENVIRONMENT` environment variables → constructor options.
  * @internal
  */
-function resolveAuditCredentials(options: AuditClientOptions): { apiKey: string; baseUrl: string } {
-  if (options.apiKey !== undefined && options.baseUrl !== undefined) {
-    return { apiKey: options.apiKey, baseUrl: options.baseUrl };
+function resolveAuditConfig(options: AuditClientOptions): {
+  apiKey: string;
+  baseUrl: string;
+  environment: string | undefined;
+} {
+  if (
+    options.apiKey !== undefined &&
+    options.baseUrl !== undefined &&
+    options.environment !== undefined
+  ) {
+    return { apiKey: options.apiKey, baseUrl: options.baseUrl, environment: options.environment };
   }
-  const cfg = resolveClientConfig(options);
+  if (_configResolver !== null) {
+    const cfg = _configResolver(options);
+    return {
+      apiKey: options.apiKey ?? cfg.apiKey,
+      baseUrl: options.baseUrl ?? serviceUrl(cfg.scheme, "audit", cfg.baseDomain) ?? BASE_URL,
+      environment: options.environment ?? cfg.environment ?? undefined,
+    };
+  }
+  const apiKey = options.apiKey ?? envConfigValue("SMPLKIT_API_KEY");
+  if (apiKey === undefined) {
+    throw new SmplError(
+      "No API key provided. Pass apiKey to the constructor, set the SMPLKIT_API_KEY environment " +
+        'variable, or import AuditClient from the package root ("@smplkit/sdk") to also resolve ' +
+        "it from ~/.smplkit.",
+    );
+  }
+  const scheme = options.scheme ?? envConfigValue("SMPLKIT_SCHEME") ?? "https";
+  const baseDomain = options.baseDomain ?? envConfigValue("SMPLKIT_BASE_DOMAIN") ?? "smplkit.com";
   return {
-    apiKey: options.apiKey ?? cfg.apiKey,
-    baseUrl: options.baseUrl ?? serviceUrl(cfg.scheme, "audit", cfg.baseDomain) ?? BASE_URL,
+    apiKey,
+    baseUrl: options.baseUrl ?? serviceUrl(scheme, "audit", baseDomain),
+    environment: options.environment ?? envConfigValue("SMPLKIT_ENVIRONMENT"),
   };
 }
