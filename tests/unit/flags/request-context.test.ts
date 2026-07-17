@@ -13,9 +13,15 @@
 import { describe, expect, it } from "vitest";
 import { Context } from "../../../src/flags/types.js";
 import { BooleanFlag } from "../../../src/flags/models.js";
-import { setContext } from "../../../src/context.js";
+import { getRequestContext, setContext } from "../../../src/context.js";
+import { _setAmbientContextReader } from "../../../src/ambient_context.js";
 import { createMockContexts, makeWiredClient } from "./_helpers.js";
 import type { FlagsClient } from "../../../src/flags/client.js";
+
+// Flag evaluation reads the ambient per-request context through the injected
+// reader (the package-root wiring); wire the real AsyncLocalStorage-backed
+// one here.
+_setAmbientContextReader(getRequestContext);
 
 function seedEnterpriseRule(client: FlagsClient): void {
   (client as any)._flagStore = {

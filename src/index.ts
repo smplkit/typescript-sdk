@@ -32,14 +32,29 @@ export { AccountSettings } from "./account/models.js";
 export { AuditClient } from "./audit/client.js";
 export type { AuditClientOptions } from "./audit/client.js";
 
-// The package-root entry wires the full config resolver (defaults →
-// `~/.smplkit` file → env vars → options, environment included) into the
-// audit client. The `@smplkit/sdk/audit` edge entry deliberately does NOT —
-// its import graph stays free of Node built-ins; it resolves the same
-// `SMPLKIT_*` environment variables itself and merely skips the file step.
-import { _setAuditConfigResolver } from "./audit/client.js";
+// The package-root entry wires three seams the sub-client modules leave
+// injectable so the `@smplkit/sdk/*` edge entries stay free of Node
+// built-ins and of `ws`:
+//
+// - the full config resolver (defaults → `~/.smplkit` file → env vars →
+//   options, environment and service included) — edge entries resolve the
+//   same `SMPLKIT_*` environment variables themselves and merely skip the
+//   file step;
+// - the live-updates socket factory (`ws`-backed SharedWebSocket) — edge
+//   entries use `streaming: false` instead;
+// - the ambient request-context reader (`AsyncLocalStorage`-backed) — edge
+//   entries pass evaluation contexts explicitly.
+import { _setSubclientConfigResolver } from "./subclient_config.js";
+import { _setLiveSocketFactory } from "./live_socket.js";
+import { _setAmbientContextReader } from "./ambient_context.js";
 import { resolveConfig } from "./config.js";
-_setAuditConfigResolver(resolveConfig);
+import { SharedWebSocket } from "./ws.js";
+import { getRequestContext } from "./context.js";
+_setSubclientConfigResolver(resolveConfig);
+_setLiveSocketFactory(
+  (appBaseUrl, apiKey, metrics) => new SharedWebSocket(appBaseUrl, apiKey, metrics),
+);
+_setAmbientContextReader(getRequestContext);
 export {
   Forwarder,
   ForwarderEnvironment,

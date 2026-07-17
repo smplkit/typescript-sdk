@@ -34,7 +34,7 @@ import {
   SmplkitConnectionError,
   throwForStatus,
 } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
 import { Color, EnvironmentClassification, coerceColor } from "./types.js";
 import { Environment, ContextType, Service } from "./models.js";
 import { Context } from "../flags/types.js";
@@ -914,10 +914,12 @@ export class PlatformClient {
     if (options.appTransport !== undefined) {
       this._appHttp = options.appTransport;
     } else {
-      const cfg = resolveClientConfig(options);
-      const appUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "app", cfg.baseDomain);
+      // Standalone: resolve like SmplClient — defaults → ~/.smplkit (root
+      // imports) → SMPLKIT_* env vars → options. Platform CRUD is
+      // account-global, so no environment/service scoping applies.
+      const cfg = resolveSubclientConfig("app", options);
       this._appHttp = createClient<import("../generated/app.d.ts").paths>({
-        baseUrl: appUrl.replace(/\/+$/, ""),
+        baseUrl: cfg.baseUrl.replace(/\/+$/, ""),
         headers: {
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${cfg.apiKey}`,

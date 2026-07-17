@@ -26,6 +26,66 @@
         "types": "./dist/audit.d.cts",
         "default": "./dist/audit.cjs"
       }
+    },
+    "./config": {
+      "import": {
+        "types": "./dist/config.d.ts",
+        "default": "./dist/config.js"
+      },
+      "require": {
+        "types": "./dist/config.d.cts",
+        "default": "./dist/config.cjs"
+      }
+    },
+    "./flags": {
+      "import": {
+        "types": "./dist/flags.d.ts",
+        "default": "./dist/flags.js"
+      },
+      "require": {
+        "types": "./dist/flags.d.cts",
+        "default": "./dist/flags.cjs"
+      }
+    },
+    "./logging": {
+      "import": {
+        "types": "./dist/logging.d.ts",
+        "default": "./dist/logging.js"
+      },
+      "require": {
+        "types": "./dist/logging.d.cts",
+        "default": "./dist/logging.cjs"
+      }
+    },
+    "./jobs": {
+      "import": {
+        "types": "./dist/jobs.d.ts",
+        "default": "./dist/jobs.js"
+      },
+      "require": {
+        "types": "./dist/jobs.d.cts",
+        "default": "./dist/jobs.cjs"
+      }
+    },
+    "./platform": {
+      "import": {
+        "types": "./dist/platform.d.ts",
+        "default": "./dist/platform.js"
+      },
+      "require": {
+        "types": "./dist/platform.d.cts",
+        "default": "./dist/platform.cjs"
+      }
+    },
+    "./account": {
+      "import": {
+        "types": "./dist/account.d.ts",
+        "default": "./dist/account.js"
+      },
+      "require": {
+        "types": "./dist/account.d.cts",
+        "default": "./dist/account.cjs"
+      }
     }
   },
   "files": [

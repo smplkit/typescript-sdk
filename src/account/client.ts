@@ -23,7 +23,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { SmplkitConnectionError, throwForStatus } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
 import { AccountSettings } from "./models.js";
 
 /**
@@ -38,11 +38,12 @@ function resolveAccountTarget(options: AccountClientOptions): {
   apiKey: string;
   headers: Record<string, string>;
 } {
-  const cfg = resolveClientConfig(options);
-  const apiKey = options.apiKey ?? cfg.apiKey;
-  const appUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "app", cfg.baseDomain);
+  // Resolve like SmplClient — defaults → ~/.smplkit (root imports) →
+  // SMPLKIT_* env vars → options. Account settings are account-global, so no
+  // environment/service scoping applies.
+  const cfg = resolveSubclientConfig("app", options);
   const headers: Record<string, string> = { ...(options.extraHeaders ?? {}) };
-  return { appUrl: appUrl.replace(/\/+$/, ""), apiKey, headers };
+  return { appUrl: cfg.baseUrl.replace(/\/+$/, ""), apiKey: cfg.apiKey, headers };
 }
 
 /**

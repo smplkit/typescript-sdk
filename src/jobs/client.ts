@@ -26,7 +26,7 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "../generated/jobs.d.ts";
 import { SmplError, SmplConnectionError, throwForStatus } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
 import {
   Backoff,
   HttpConfig,
@@ -652,9 +652,10 @@ export interface JobsClientOptions {
   /**
    * Default environment for environment-scoped operations — the environment a
    * one-off job created through this client is born in, the default a manual
-   * run executes in, and the default scope for `jobs.runs.list()`. Omit to
-   * leave these unset (the credential's permitted environment is implied where
-   * unambiguous).
+   * run executes in, and the default scope for `jobs.runs.list()`. When
+   * omitted, resolved from `SMPLKIT_ENVIRONMENT` or `~/.smplkit`; when that
+   * also yields nothing these stay unset (the credential's permitted
+   * environment is implied where unambiguous).
    */
   environment?: string;
   /**
@@ -704,11 +705,13 @@ export class JobsClient {
     if (options.transport !== undefined) {
       this._http = options.transport;
       this._ownsTransport = false;
+      this._environment = options.environment;
     } else {
-      const cfg = resolveClientConfig(options);
-      const jobsUrl = options.baseUrl ?? serviceUrl(cfg.scheme, "jobs", cfg.baseDomain);
+      // Standalone: resolve like SmplClient — defaults → ~/.smplkit (root
+      // imports) → SMPLKIT_* env vars → options — environment included.
+      const cfg = resolveSubclientConfig("jobs", options);
       this._http = createClient<paths>({
-        baseUrl: jobsUrl.replace(/\/+$/, ""),
+        baseUrl: cfg.baseUrl.replace(/\/+$/, ""),
         headers: {
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${cfg.apiKey}`,
@@ -717,8 +720,8 @@ export class JobsClient {
         },
       });
       this._ownsTransport = true;
+      this._environment = cfg.environment;
     }
-    this._environment = options.environment;
     this.runs = new RunsClient(this._http, this._environment);
     this.retryPolicies = new RetryPoliciesClient(this._http);
   }

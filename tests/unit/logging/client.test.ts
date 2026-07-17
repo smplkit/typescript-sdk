@@ -30,6 +30,7 @@ import {
   SmplNotInstalledError,
 } from "../../../src/errors.js";
 import type { LoggingAdapter } from "../../../src/logging/adapters/base.js";
+import { _setLiveSocketFactory } from "../../../src/live_socket.js";
 import type { SharedWebSocket } from "../../../src/ws.js";
 
 const mockFetch = vi.fn();
@@ -1287,13 +1288,13 @@ describe("LoggingClient — standalone construction", () => {
   });
 
   it("opens and owns its own WebSocket on install, and stops it on close", async () => {
+    // Standalone clients get their socket from the injected factory (the
+    // package-root wiring); wire a mock factory the same way.
     const fakeWs = createMockSharedWs();
     const startSpy = fakeWs.start;
     const stopSpy = fakeWs.stop;
-    const SharedWsModule = await import("../../../src/ws.js");
-    const ctorSpy = vi
-      .spyOn(SharedWsModule, "SharedWebSocket")
-      .mockImplementation(() => fakeWs as unknown as SharedWebSocket);
+    const factory = vi.fn(() => fakeWs as unknown as SharedWebSocket);
+    _setLiveSocketFactory(factory);
 
     const client = new LoggingClient({
       apiKey: "sk_standalone",
@@ -1303,7 +1304,7 @@ describe("LoggingClient — standalone construction", () => {
     client.registerAdapter(makeAdapter());
     mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
     await client.install();
-    expect(ctorSpy).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledTimes(1);
     expect(startSpy).toHaveBeenCalledTimes(1);
 
     client.close();

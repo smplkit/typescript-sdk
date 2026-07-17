@@ -50,13 +50,14 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
+import { serviceUrl } from "../service_url.js";
 import { Logger, LogGroup } from "./models.js";
 import { LogLevel, LoggerChangeEvent, LoggerSource, loggerEnvironmentsToWire } from "./types.js";
 import { resolveLevel, type GroupCacheEntry, type LoggerCacheEntry } from "./_resolution.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { SharedWebSocket } from "../ws.js";
+import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
 import { debug } from "../_debug.js";
 import { keyToDisplayName } from "../helpers.js";
 
@@ -67,7 +68,7 @@ export interface LoggingParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): SharedWebSocket;
+  _ensureWs(): LiveSocket;
 }
 
 const DEFAULT_LOGGING_BASE_URL = "https://logging.smplkit.com";
@@ -678,6 +679,22 @@ export interface LoggingClientOptions {
   /** Request timeout in milliseconds (default 30000). */
   timeout?: number;
   /**
+   * Service name attached to discovery declarations. When omitted, resolved
+   * from `SMPLKIT_SERVICE` or `~/.smplkit`. Optional.
+   */
+  service?: string;
+  /**
+   * Live updates over WebSocket (default `true`): {@link LoggingClient.install}
+   * opens a shared socket and server-side level changes stream in, plus a
+   * periodic timer re-flushes post-startup logger discovery. Set `false` for
+   * the stateless apply-once surface: `install()` still loads adapters,
+   * flushes discovery, and applies the server's levels — all with `await` —
+   * but NO socket, timers, or background state are created; `refresh()`
+   * re-fetches and re-applies on demand. The right shape for serverless
+   * runtimes; note that live level changes then arrive only via `refresh()`.
+   */
+  streaming?: boolean;
+  /**
    * Internal — the owning {@link SmplClient}. Not for direct use.
    * @internal
    */
@@ -739,8 +756,10 @@ export class LoggingClient {
   // Standalone-only WebSocket state.
   private readonly _appBaseUrl: string | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: SharedWebSocket | null = null;
+  private _wsManager: LiveSocket | null = null;
   private _ownsWs = false;
+  /** @internal `false` = stateless mode: apply once on install, poll with refresh(), no socket. */
+  private readonly _streaming: boolean;
 
   // Live-surface state.
   private _connected = false;
@@ -767,23 +786,25 @@ export class LoggingClient {
   constructor(options: LoggingClientOptions = {}) {
     this._parent = options.parent ?? null;
     this._metrics = options.metrics ?? null;
-    this._environment = options.parent?._environment ?? options.environment ?? "";
-    this._service = options.parent?._service ?? null;
+    this._streaming = options.streaming ?? true;
 
     if (options.transport !== undefined) {
       this._http = options.transport;
+      this._environment = options.parent?._environment ?? options.environment ?? "";
+      this._service = options.parent?._service ?? options.service ?? null;
       this._loggingBaseUrl = DEFAULT_LOGGING_BASE_URL;
       this._appBaseUrl = null;
       this._standaloneApiKey = null;
     } else {
-      const cfg = resolveClientConfig(options);
-      const loggingUrl =
-        options.baseUrl ??
-        serviceUrl(cfg.scheme, "logging", cfg.baseDomain) ??
-        DEFAULT_LOGGING_BASE_URL;
-      this._loggingBaseUrl = loggingUrl.replace(/\/+$/, "");
+      // Standalone: resolve like SmplClient — defaults → ~/.smplkit (root
+      // imports) → SMPLKIT_* env vars → options — environment and service
+      // included.
+      const cfg = resolveSubclientConfig("logging", options);
+      this._environment = options.parent?._environment ?? cfg.environment ?? "";
+      this._service = options.parent?._service ?? cfg.service ?? null;
+      this._loggingBaseUrl = cfg.baseUrl.replace(/\/+$/, "");
       this._appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
-      this._standaloneApiKey = options.apiKey ?? cfg.apiKey;
+      this._standaloneApiKey = cfg.apiKey;
       const ms = options.timeout ?? 30_000;
       this._http = createClient<import("../generated/logging.d.ts").paths>({
         baseUrl: this._loggingBaseUrl,
@@ -848,17 +869,18 @@ export class LoggingClient {
     }
   }
 
-  /** Return the shared WebSocket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): SharedWebSocket {
+  /** Return the shared live socket — the parent's when wired, else our own. @internal */
+  private _ensureWs(): LiveSocket {
     if (this._parent !== null) {
       return this._parent._ensureWs();
     }
     if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(
-        this._appBaseUrl!,
-        this._standaloneApiKey!,
-        this._metrics,
-      );
+      const factory = _liveSocketFactory();
+      if (factory === null) {
+        // The `@smplkit/sdk/logging` edge entry has no socket implementation.
+        throw new SmplkitError(noLiveSocketMessage("logging"));
+      }
+      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
       this._wsManager.start();
       this._ownsWs = true;
     }
@@ -881,6 +903,13 @@ export class LoggingClient {
       this._parent._ensureStarted();
     }
     if (this._connected) return;
+
+    // Resolve the socket up front — an unavailable live transport (an edge
+    // entry with `streaming` left on) must fail before adapters are hooked
+    // or state mutated so every install() fails the same way. In stateless
+    // mode (`streaming: false`) no socket is ever created; refresh()
+    // re-applies on demand.
+    const ws = this._streaming ? this._ensureWs() : null;
 
     // 0. Load adapters
     if (this._adapters.length === 0) {
@@ -941,21 +970,23 @@ export class LoggingClient {
       // Server may be unreachable — continue with WebSocket wiring
     }
 
-    // 7. Register WebSocket event handlers for real-time level updates
-    this._wsManager = this._ensureWs();
-    this._wsManager.on("logger_changed", this._handleLoggerChanged);
-    this._wsManager.on("logger_deleted", this._handleLoggerDeleted);
-    this._wsManager.on("group_changed", this._handleGroupChanged);
-    this._wsManager.on("group_deleted", this._handleGroupDeleted);
-    this._wsManager.on("loggers_changed", this._handleLoggersChanged);
+    if (ws !== null) {
+      // 7. Register WebSocket event handlers for real-time level updates
+      this._wsManager = ws;
+      ws.on("logger_changed", this._handleLoggerChanged);
+      ws.on("logger_deleted", this._handleLoggerDeleted);
+      ws.on("group_changed", this._handleGroupChanged);
+      ws.on("group_deleted", this._handleGroupDeleted);
+      ws.on("loggers_changed", this._handleLoggersChanged);
 
-    // 8. Start periodic flush timer for post-startup logger discovery
-    //    (unref so it doesn't pin the event loop).
-    this._loggerFlushTimer = setInterval(() => {
-      void this.loggers.flush();
-    }, 30_000);
-    if (typeof this._loggerFlushTimer === "object" && "unref" in this._loggerFlushTimer) {
-      (this._loggerFlushTimer as NodeJS.Timeout).unref();
+      // 8. Start periodic flush timer for post-startup logger discovery
+      //    (unref so it doesn't pin the event loop).
+      this._loggerFlushTimer = setInterval(() => {
+        void this.loggers.flush();
+      }, 30_000);
+      if (typeof this._loggerFlushTimer === "object" && "unref" in this._loggerFlushTimer) {
+        (this._loggerFlushTimer as NodeJS.Timeout).unref();
+      }
     }
 
     this._connected = true;

@@ -11,13 +11,14 @@
  *   `~/.smplkit` file step.
  * - The injected-resolver branch the package root wires up.
  *
- * NOTE ON ORDER: `_setAuditConfigResolver` mutates module state for the rest
- * of this file, so every unresolved-credentials case runs before the final
- * injection test. Env vars are stubbed per test and restored afterward.
+ * NOTE ON ORDER: `_setSubclientConfigResolver` mutates module state for the
+ * rest of this file, so every unresolved-credentials case runs before the
+ * final injection test. Env vars are stubbed per test and restored afterward.
  */
 
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
-import { AuditClient, _setAuditConfigResolver } from "../../../src/audit/client.js";
+import { AuditClient } from "../../../src/audit/client.js";
+import { _setSubclientConfigResolver } from "../../../src/subclient_config.js";
 import { SmplError, SmplNotFoundError } from "../../../src/errors.js";
 
 // The dev machine (or CI) may carry real SMPLKIT_* values; every test in this
@@ -192,7 +193,7 @@ describe("edge-entry config resolution (defaults → SMPLKIT_* env vars → opti
 
   // LAST in the file: mutates module-level resolver state.
   test("the package-root entry's injected resolver fills in credentials and environment", async () => {
-    _setAuditConfigResolver(() => ({
+    _setSubclientConfigResolver(() => ({
       apiKey: "sk_api_resolved",
       scheme: "http",
       baseDomain: "resolved.example",

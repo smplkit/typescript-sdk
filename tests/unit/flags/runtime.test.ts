@@ -31,6 +31,7 @@ import {
   flagListResponse,
   createMockSharedWs,
 } from "./_helpers.js";
+import { _setLiveSocketFactory } from "../../../src/live_socket.js";
 
 const mockFetch = vi.fn();
 
@@ -583,10 +584,11 @@ describe("_evaluateHandle metrics + context registration", () => {
 
 describe("standalone construction", () => {
   it("builds its own transport, owns a WebSocket on first live use, and close() tears it down", async () => {
-    // Patch SharedWebSocket so the standalone client's _ensureWs uses our mock.
-    const wsMod = await import("../../../src/ws.js");
+    // Standalone clients get their socket from the injected factory (the
+    // package-root wiring); wire a mock factory the same way.
     const mockWs = createMockSharedWs();
-    const ctor = vi.spyOn(wsMod, "SharedWebSocket").mockImplementation(() => mockWs as any);
+    const factory = vi.fn(() => mockWs as any);
+    _setLiveSocketFactory(factory);
 
     const client = new FlagsClient({
       apiKey: "sk_test",
@@ -598,7 +600,7 @@ describe("standalone construction", () => {
     mockFetch.mockImplementation(async () => flagListResponse([{ id: "f" }]));
     await client.refresh();
 
-    expect(ctor).toHaveBeenCalled();
+    expect(factory).toHaveBeenCalled();
     expect(mockWs.start).toHaveBeenCalled();
     expect((client as any)._ownsWs).toBe(true);
 
@@ -608,7 +610,6 @@ describe("standalone construction", () => {
 
     // Second close is a no-op.
     expect(() => client.close()).not.toThrow();
-    ctor.mockRestore();
   });
 
   it("sends the standalone flags request to the resolved base URL with auth", async () => {

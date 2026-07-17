@@ -42,7 +42,8 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
+import { serviceUrl } from "../service_url.js";
 import {
   Flag,
   BooleanFlag,
@@ -54,12 +55,12 @@ import {
   FlagEnvironment,
 } from "./models.js";
 import { Context, FlagDeclaration } from "./types.js";
-import { getRequestContext } from "../context.js";
+import { getAmbientContext } from "../ambient_context.js";
 import { keyToDisplayName } from "../helpers.js";
 import { ContextsClient } from "../platform/client.js";
 import { ContextRegistrationBuffer } from "../buffer.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { SharedWebSocket } from "../ws.js";
+import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
 import { debug } from "../_debug.js";
 
 // Use require-style import for json-logic-js (no TS types)
@@ -75,10 +76,8 @@ export interface FlagsParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): SharedWebSocket;
+  _ensureWs(): LiveSocket;
 }
-
-const FLAGS_BASE_URL = "https://flags.smplkit.com";
 
 const CACHE_MAX_SIZE = 10_000;
 
@@ -524,6 +523,24 @@ export interface FlagsClientOptions {
   /** Request timeout in milliseconds (default 30000). */
   timeout?: number;
   /**
+   * Service name attached to discovery declarations and auto-injected into
+   * the evaluation context. When omitted, resolved from `SMPLKIT_SERVICE`
+   * or `~/.smplkit`. Optional.
+   */
+  service?: string;
+  /**
+   * Live updates over WebSocket (default `true`): the first live call opens
+   * a shared socket and flag changes stream in. Set `false` for the
+   * stateless read-through surface: the first live call fetches all flag
+   * definitions once with `await`, evaluation stays local, `refresh()`
+   * re-fetches on demand, and NO socket, timers, or background state are
+   * created — the right shape for serverless and edge runtimes (for example
+   * Cloudflare Workers), whose isolates cannot host socket-driven state.
+   * `onChange` listeners fire only from explicit `refresh()` calls in this
+   * mode (there is no stream to drive them).
+   */
+  streaming?: boolean;
+  /**
    * Internal — the owning {@link SmplClient}. Not for direct use.
    * @internal
    */
@@ -595,8 +612,10 @@ export class FlagsClient {
   private readonly _appBaseUrl: string | null;
   private readonly _appHttpStandalone: AppHttp | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: SharedWebSocket | null = null;
+  private _wsManager: LiveSocket | null = null;
   private _ownsWs = false;
+  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no socket. */
+  private readonly _streaming: boolean;
 
   // Live-surface state.
   private _flagStore: Record<string, Record<string, any>> = {};
@@ -611,11 +630,12 @@ export class FlagsClient {
   constructor(options: FlagsClientOptions = {}) {
     this._parent = options.parent ?? null;
     this._metrics = options.metrics ?? null;
-    this._environment = options.parent?._environment ?? options.environment ?? null;
-    this._service = options.parent?._service ?? null;
+    this._streaming = options.streaming ?? true;
 
     if (options.transport !== undefined) {
       this._http = options.transport;
+      this._environment = options.parent?._environment ?? options.environment ?? null;
+      this._service = options.parent?._service ?? options.service ?? null;
       this._appBaseUrl = null;
       this._appHttpStandalone = null;
       this._standaloneApiKey = null;
@@ -623,11 +643,15 @@ export class FlagsClient {
       // registration seam.
       this._contexts = options.contexts ?? null;
     } else {
-      const cfg = resolveClientConfig(options);
-      const flagsUrl =
-        options.baseUrl ?? serviceUrl(cfg.scheme, "flags", cfg.baseDomain) ?? FLAGS_BASE_URL;
+      // Standalone: resolve like SmplClient — defaults → ~/.smplkit (root
+      // imports) → SMPLKIT_* env vars → options — environment and service
+      // included.
+      const cfg = resolveSubclientConfig("flags", options);
+      this._environment = options.parent?._environment ?? cfg.environment ?? null;
+      this._service = options.parent?._service ?? cfg.service ?? null;
+      const flagsUrl = cfg.baseUrl;
       this._appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
-      this._standaloneApiKey = options.apiKey ?? cfg.apiKey;
+      this._standaloneApiKey = cfg.apiKey;
       const ms = options.timeout ?? 30_000;
       const fetchWithTimeout = async (request: Request): Promise<Response> => {
         const controller = new AbortController();
@@ -1006,17 +1030,18 @@ export class FlagsClient {
   // Live surface: lazy connect + transport / WebSocket helpers
   // ------------------------------------------------------------------
 
-  /** Return the shared WebSocket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): SharedWebSocket {
+  /** Return the shared live socket — the parent's when wired, else our own. @internal */
+  private _ensureWs(): LiveSocket {
     if (this._parent !== null) {
       return this._parent._ensureWs();
     }
     if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(
-        this._appBaseUrl!,
-        this._standaloneApiKey!,
-        this._metrics,
-      );
+      const factory = _liveSocketFactory();
+      if (factory === null) {
+        // The `@smplkit/sdk/flags` edge entry has no socket implementation.
+        throw new SmplkitError(noLiveSocketMessage("flags"));
+      }
+      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
       this._wsManager.start();
       this._ownsWs = true;
     }
@@ -1040,6 +1065,13 @@ export class FlagsClient {
     }
     if (this._connected) return;
 
+    // Resolve the socket up front — an unavailable live transport (an edge
+    // entry with `streaming` left on) must fail before any fetch or state
+    // mutation so every live call fails the same way. In stateless mode
+    // (`streaming: false`) no socket is ever created and refresh()
+    // re-fetches on demand.
+    const ws = this._streaming ? this._ensureWs() : null;
+
     // Flush discovered flags BEFORE fetching definitions so the fetch
     // reflects them. Items stay in the buffer until the POST succeeds.
     try {
@@ -1055,8 +1087,7 @@ export class FlagsClient {
     this._cache.clear();
     this._connected = true;
 
-    const ws = this._ensureWs();
-    if (!this._wsSubscribed) {
+    if (ws !== null && !this._wsSubscribed) {
       ws.on("flag_changed", this._handleFlagChanged);
       ws.on("flag_deleted", this._handleFlagDeleted);
       ws.on("flags_changed", this._handleFlagsChanged);
@@ -1292,7 +1323,7 @@ export class FlagsClient {
       }
       evalDict = contextsToEvalDict(context);
     } else {
-      const requestContext = getRequestContext();
+      const requestContext = getAmbientContext();
       if (requestContext.length > 0) {
         // Per-request context from client.setContext (most specific). Already
         // registered at the setContext call site, so don't re-register here.

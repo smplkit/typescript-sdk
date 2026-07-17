@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigClient } from "../../../src/config/client.js";
 import type { ConfigChangeEvent, ConfigParent } from "../../../src/config/client.js";
 import { SmplkitNotFoundError } from "../../../src/errors.js";
+import { _setLiveSocketFactory } from "../../../src/live_socket.js";
 import type { SharedWebSocket } from "../../../src/ws.js";
 
 const mockFetch = vi.fn();
@@ -220,40 +221,35 @@ describe("subscribe()", () => {
 // ---------------------------------------------------------------------------
 
 describe("standalone live connection", () => {
-  it("opens and owns its own SharedWebSocket, torn down on close()", async () => {
+  // Standalone clients get their socket from the injected factory (the
+  // package-root wiring); tests wire a mock factory the same way.
+  it("opens and owns its own live socket via the injected factory, torn down on close()", async () => {
     const fakeWs = createMockSharedWs();
-    const { SharedWebSocket } = await import("../../../src/ws.js");
-    const spy = vi.spyOn(SharedWebSocket.prototype, "start").mockImplementation(function (
-      this: unknown,
-    ) {
-      // no-op; avoid opening a real socket
-    });
-    const onSpy = vi.spyOn(SharedWebSocket.prototype, "on").mockImplementation(() => {});
-    const stopSpy = vi.spyOn(SharedWebSocket.prototype, "stop").mockImplementation(() => {});
-    void fakeWs;
+    const factory = vi.fn(() => fakeWs as any);
+    _setLiveSocketFactory(factory);
 
     const client = makeStandalone();
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
 
     await client.subscribe("app");
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(onSpy).toHaveBeenCalledWith("config_changed", expect.any(Function));
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(fakeWs.start).toHaveBeenCalledTimes(1);
+    expect(fakeWs.on).toHaveBeenCalledWith("config_changed", expect.any(Function));
 
     client.close();
-    expect(stopSpy).toHaveBeenCalledTimes(1);
+    expect(fakeWs.stop).toHaveBeenCalledTimes(1);
   });
 
   it("reuses the same owned WebSocket across live calls", async () => {
-    const { SharedWebSocket } = await import("../../../src/ws.js");
-    const startSpy = vi.spyOn(SharedWebSocket.prototype, "start").mockImplementation(() => {});
-    vi.spyOn(SharedWebSocket.prototype, "on").mockImplementation(() => {});
+    const fakeWs = createMockSharedWs();
+    _setLiveSocketFactory(() => fakeWs as any);
 
     const client = makeStandalone();
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
     await client.subscribe("app");
     // A second live call must not open a second socket.
     await client.getValue("app", "retries");
-    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(fakeWs.start).toHaveBeenCalledTimes(1);
   });
 });
 

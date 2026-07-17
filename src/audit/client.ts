@@ -42,7 +42,7 @@ import {
   SmplkitTimeoutError,
   throwForStatus,
 } from "../errors.js";
-import { envConfigValue, serviceUrl } from "../service_url.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import {
   Forwarder,
@@ -82,38 +82,17 @@ type GenForwarderRequest = components["schemas"]["ForwarderRequest"];
 
 type AuditHttp = ReturnType<typeof createClient<paths>>;
 
-const BASE_URL = "https://audit.smplkit.com";
-
 const JSONAPI_CONTENT_TYPE = "application/vnd.api+json";
 
-// ---------------------------------------------------------------------------
-// Config-resolver injection
-// ---------------------------------------------------------------------------
-// The `~/.smplkit` FILE fallback lives in `../config.js`, whose import graph
-// carries Node built-ins (`node:fs` / `node:os` / `node:path`). This module
-// must stay importable from edge runtimes via the `@smplkit/sdk/audit`
-// subpath, so that resolver is injected by the package ROOT entry
-// (`src/index.ts`) rather than imported statically. Both entries resolve the
-// same way otherwise — defaults → environment variables (`SMPLKIT_API_KEY`,
-// `SMPLKIT_BASE_DOMAIN`, `SMPLKIT_SCHEME`, `SMPLKIT_ENVIRONMENT`) →
-// constructor options — exactly like {@link SmplClient}; the edge entry
-// merely skips the `~/.smplkit` file step, which has no meaning in an
-// isolate anyway.
-
-/** @internal The slice of the resolved config the audit fallback consumes. */
-export type AuditConfigResolver = (options: AuditClientOptions) => {
-  apiKey: string;
-  scheme: string;
-  baseDomain: string;
-  environment: string | null;
-};
-
-let _configResolver: AuditConfigResolver | null = null;
-
-/** @internal Wired by the package-root entry; the `/audit` edge entry leaves it unset. */
-export function _setAuditConfigResolver(resolver: AuditConfigResolver): void {
-  _configResolver = resolver;
-}
+// Config resolution is shared with every other standalone sub-client via
+// `../subclient_config.js` — a pure module whose `~/.smplkit` file step is
+// injected by the package ROOT entry (`src/index.ts`), keeping this module
+// importable from edge runtimes via the `@smplkit/sdk/audit` subpath. Both
+// entries resolve the same way otherwise — defaults → environment variables
+// (`SMPLKIT_API_KEY`, `SMPLKIT_BASE_DOMAIN`, `SMPLKIT_SCHEME`,
+// `SMPLKIT_ENVIRONMENT`) → constructor options — exactly like
+// {@link SmplClient}; the edge entry merely skips the `~/.smplkit` file
+// step, which has no meaning in an isolate anyway.
 
 // ---------------------------------------------------------------------------
 // Shared HTTP error handling
@@ -1186,14 +1165,13 @@ export class AuditClient {
 /**
  * Resolve the audit API key, base URL, and environment — like {@link SmplClient}.
  *
- * All three options are optional. When everything is supplied explicitly it
- * is used directly (the path a top-level client takes after it has already
- * resolved them). Otherwise, on package-root imports the injected config
- * resolver runs the full 4-step resolution (defaults → `~/.smplkit` file →
- * environment variables → constructor options). Via the `@smplkit/sdk/audit`
- * edge entry the same resolution applies minus the file step: defaults →
- * `SMPLKIT_API_KEY` / `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` /
- * `SMPLKIT_ENVIRONMENT` environment variables → constructor options.
+ * Delegates to the shared {@link resolveSubclientConfig}: when everything is
+ * supplied explicitly it is used directly (the path a top-level client takes
+ * after it has already resolved them); on package-root imports the injected
+ * config resolver runs the full 4-step resolution (defaults → `~/.smplkit`
+ * file → environment variables → constructor options); via the
+ * `@smplkit/sdk/audit` edge entry the same resolution applies minus the file
+ * step.
  * @internal
  */
 function resolveAuditConfig(options: AuditClientOptions): {
@@ -1201,34 +1179,6 @@ function resolveAuditConfig(options: AuditClientOptions): {
   baseUrl: string;
   environment: string | undefined;
 } {
-  if (
-    options.apiKey !== undefined &&
-    options.baseUrl !== undefined &&
-    options.environment !== undefined
-  ) {
-    return { apiKey: options.apiKey, baseUrl: options.baseUrl, environment: options.environment };
-  }
-  if (_configResolver !== null) {
-    const cfg = _configResolver(options);
-    return {
-      apiKey: options.apiKey ?? cfg.apiKey,
-      baseUrl: options.baseUrl ?? serviceUrl(cfg.scheme, "audit", cfg.baseDomain) ?? BASE_URL,
-      environment: options.environment ?? cfg.environment ?? undefined,
-    };
-  }
-  const apiKey = options.apiKey ?? envConfigValue("SMPLKIT_API_KEY");
-  if (apiKey === undefined) {
-    throw new SmplError(
-      "No API key provided. Pass apiKey to the constructor, set the SMPLKIT_API_KEY environment " +
-        'variable, or import AuditClient from the package root ("@smplkit/sdk") to also resolve ' +
-        "it from ~/.smplkit.",
-    );
-  }
-  const scheme = options.scheme ?? envConfigValue("SMPLKIT_SCHEME") ?? "https";
-  const baseDomain = options.baseDomain ?? envConfigValue("SMPLKIT_BASE_DOMAIN") ?? "smplkit.com";
-  return {
-    apiKey,
-    baseUrl: options.baseUrl ?? serviceUrl(scheme, "audit", baseDomain),
-    environment: options.environment ?? envConfigValue("SMPLKIT_ENVIRONMENT"),
-  };
+  const cfg = resolveSubclientConfig("audit", options);
+  return { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, environment: cfg.environment };
 }

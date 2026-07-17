@@ -37,20 +37,6 @@ export interface ResolvedConfig {
 }
 
 /**
- * Resolved configuration for a product client.
- *
- * CRUD operations against the platform are not tied to an environment or
- * service, so those fields are not part of the resolved config and are not
- * required at construction time.
- */
-export interface ResolvedClientConfig {
-  apiKey: string;
-  baseDomain: string;
-  scheme: string;
-  debug: boolean;
-}
-
-/**
  * Parse an INI-style config file, merging [common] with the selected profile.
  *
  * Returns a flat key-value map where the profile section overlays [common].
@@ -210,32 +196,7 @@ export function resolveConfig(options: ConstructorOptions): ResolvedConfig {
   };
 }
 
-/**
- * Resolve a {@link ResolvedClientConfig} — the subset a product client needs.
- * No `environment` or `service` required, since CRUD operations are not tied
- * to either.
- */
-export function resolveClientConfig(options: {
-  apiKey?: string;
-  profile?: string;
-  baseDomain?: string;
-  scheme?: string;
-  debug?: boolean;
-}): ResolvedClientConfig {
-  const profile = options.profile ?? process.env.SMPLKIT_PROFILE ?? "default";
-  const merged = readMergedConfig(profile);
-
-  if (options.apiKey !== undefined) merged.api_key = options.apiKey;
-  if (options.baseDomain !== undefined) merged.base_domain = options.baseDomain;
-  if (options.scheme !== undefined) merged.scheme = options.scheme;
-  if (options.debug !== undefined) merged.debug = String(options.debug);
-
-  if (!merged.api_key) throw new SmplkitError(NO_API_KEY_MESSAGE);
-
-  return {
-    apiKey: merged.api_key,
-    baseDomain: merged.base_domain!,
-    scheme: merged.scheme!,
-    debug: parseBool(merged.debug!, "debug"),
-  };
-}
+// resolveClientConfig (the environment-less subset resolver) was retired
+// when every standalone sub-client moved to the shared, injectable
+// `resolveSubclientConfig` in subclient_config.ts — resolveConfig above is
+// what the package-root entry injects there.

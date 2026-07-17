@@ -39,13 +39,14 @@ import {
   SmplkitValidationError,
   throwForStatus,
 } from "../errors.js";
-import { resolveClientConfig, serviceUrl } from "../config.js";
+import { resolveSubclientConfig } from "../subclient_config.js";
+import { serviceUrl } from "../service_url.js";
 import { resolveChain } from "./resolve.js";
 import { Config, ConfigEnvironment, environmentsToWire } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
 import { keyToDisplayName } from "../helpers.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { SharedWebSocket } from "../ws.js";
+import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
 import { debug } from "../_debug.js";
 
 type ConfigHttp = ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
@@ -55,10 +56,8 @@ export interface ConfigParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): SharedWebSocket;
+  _ensureWs(): LiveSocket;
 }
-
-const BASE_URL = "https://config.smplkit.com";
 
 /** Flush the discovery buffer once it reaches this many pending configs. */
 const CONFIG_BATCH_FLUSH_SIZE = 50;
@@ -402,6 +401,23 @@ export interface ConfigClientOptions {
   /** Request timeout in milliseconds (default 30000). */
   timeout?: number;
   /**
+   * Service name attached to discovery declarations. When omitted, resolved
+   * from `SMPLKIT_SERVICE` or `~/.smplkit`. Optional.
+   */
+  service?: string;
+  /**
+   * Live updates over WebSocket (default `true`): the first live call opens
+   * a shared socket and config changes stream in. Set `false` for the
+   * stateless read-through surface: the first live call fetches and
+   * resolves every config once with `await`, reads stay local, `refresh()`
+   * re-fetches on demand, and NO socket, timers, or background state are
+   * created — the right shape for serverless and edge runtimes (for example
+   * Cloudflare Workers), whose isolates cannot host socket-driven state.
+   * `onChange` listeners fire only from explicit `refresh()` deltas in this
+   * mode (there is no stream to drive them).
+   */
+  streaming?: boolean;
+  /**
    * Internal — the owning {@link SmplClient}. Not for direct use.
    * @internal
    */
@@ -461,8 +477,10 @@ export class ConfigClient {
   // Standalone-only WebSocket state.
   private readonly _appBaseUrl: string | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: SharedWebSocket | null = null;
+  private _wsManager: LiveSocket | null = null;
   private _ownsWs = false;
+  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no socket. */
+  private readonly _streaming: boolean;
 
   // Live-surface state.
   private _configCache: Record<string, Record<string, unknown>> = {};
@@ -476,19 +494,24 @@ export class ConfigClient {
   constructor(options: ConfigClientOptions = {}) {
     this._parent = options.parent ?? null;
     this._metrics = options.metrics ?? null;
-    this._environment = options.parent?._environment ?? options.environment ?? "";
-    this._service = options.parent?._service ?? null;
+    this._streaming = options.streaming ?? true;
 
     if (options.transport !== undefined) {
       this._http = options.transport;
+      this._environment = options.parent?._environment ?? options.environment ?? "";
+      this._service = options.parent?._service ?? options.service ?? null;
       this._appBaseUrl = null;
       this._standaloneApiKey = null;
     } else {
-      const cfg = resolveClientConfig(options);
-      const configUrl =
-        options.baseUrl ?? serviceUrl(cfg.scheme, "config", cfg.baseDomain) ?? BASE_URL;
+      // Standalone: resolve like SmplClient — defaults → ~/.smplkit (root
+      // imports) → SMPLKIT_* env vars → options — environment and service
+      // included.
+      const cfg = resolveSubclientConfig("config", options);
+      this._environment = options.parent?._environment ?? cfg.environment ?? "";
+      this._service = options.parent?._service ?? cfg.service ?? null;
+      const configUrl = cfg.baseUrl;
       this._appBaseUrl = serviceUrl(cfg.scheme, "app", cfg.baseDomain);
-      this._standaloneApiKey = options.apiKey ?? cfg.apiKey;
+      this._standaloneApiKey = cfg.apiKey;
       const ms = options.timeout ?? 30_000;
       this._http = createClient<import("../generated/config.d.ts").paths>({
         baseUrl: configUrl.replace(/\/+$/, ""),
@@ -782,17 +805,18 @@ export class ConfigClient {
   // Live surface: lazy connect + transport / WebSocket helpers
   // ------------------------------------------------------------------
 
-  /** Return the shared WebSocket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): SharedWebSocket {
+  /** Return the shared live socket — the parent's when wired, else our own. @internal */
+  private _ensureWs(): LiveSocket {
     if (this._parent !== null) {
       return this._parent._ensureWs();
     }
     if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(
-        this._appBaseUrl!,
-        this._standaloneApiKey!,
-        this._metrics,
-      );
+      const factory = _liveSocketFactory();
+      if (factory === null) {
+        // The `@smplkit/sdk/config` edge entry has no socket implementation.
+        throw new SmplkitError(noLiveSocketMessage("config"));
+      }
+      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
       this._wsManager.start();
       this._ownsWs = true;
     }
@@ -817,6 +841,13 @@ export class ConfigClient {
     }
     if (this._connected) return;
 
+    // Resolve the socket up front — an unavailable live transport (an edge
+    // entry with `streaming` left on) must fail before any fetch or state
+    // mutation so every live call fails the same way. In stateless mode
+    // (`streaming: false`) no socket is ever created and refresh()
+    // re-fetches on demand.
+    const ws = this._streaming ? this._ensureWs() : null;
+
     // Flush any buffered discovery declarations BEFORE the initial fetch, so
     // newly-discovered configs appear in the cache on first read.
     try {
@@ -831,10 +862,11 @@ export class ConfigClient {
     await this._doRefresh("initial");
     this._connected = true;
 
-    const ws = this._ensureWs();
-    ws.on("config_changed", this._handleConfigChanged);
-    ws.on("config_deleted", this._handleConfigDeleted);
-    ws.on("configs_changed", this._handleConfigsChanged);
+    if (ws !== null) {
+      ws.on("config_changed", this._handleConfigChanged);
+      ws.on("config_deleted", this._handleConfigDeleted);
+      ws.on("configs_changed", this._handleConfigsChanged);
+    }
   }
 
   /** List all configs directly from the API for the runtime cache. @internal */
