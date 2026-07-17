@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Transport } from "../../src/transport.js";
+import { SDK_USER_AGENT } from "../../src/user_agent.js";
 import {
   SmplConnectionError,
   SmplConflictError,
@@ -47,7 +48,7 @@ describe("Transport", () => {
       expect(url).toBe("https://config.smplkit.com/api/v1/configs");
       expect(options.method).toBe("GET");
       expect(options.headers.Authorization).toBe("Bearer sk_api_test");
-      expect(options.headers["User-Agent"]).toMatch(/smplkit-typescript-sdk/);
+      expect(options.headers["User-Agent"]).toBe(SDK_USER_AGENT);
     });
 
     it("should append query parameters", async () => {

@@ -35,6 +35,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import { Color, EnvironmentClassification, coerceColor } from "./types.js";
 import { Environment, ContextType, Service } from "./models.js";
 import { Context } from "../flags/types.js";
@@ -920,11 +921,11 @@ export class PlatformClient {
       const cfg = resolveSubclientConfig("app", options);
       this._appHttp = createClient<import("../generated/app.d.ts").paths>({
         baseUrl: cfg.baseUrl.replace(/\/+$/, ""),
-        headers: {
+        headers: withDefaultUserAgent({
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${cfg.apiKey}`,
           Accept: "application/json",
-        },
+        }),
       });
     }
 

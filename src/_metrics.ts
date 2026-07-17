@@ -10,6 +10,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { withDefaultUserAgent } from "./user_agent.js";
+
 const APP_BASE_URL = "https://app.smplkit.com";
 
 interface Counter {
@@ -171,11 +173,11 @@ export class MetricsReporter {
     try {
       fetch(`${this._appBaseUrl}/api/v1/metrics/bulk`, {
         method: "POST",
-        headers: {
+        headers: withDefaultUserAgent({
           Authorization: `Bearer ${this._apiKey}`,
           "Content-Type": "application/vnd.api+json",
           Accept: "application/json",
-        },
+        }),
         body: JSON.stringify(payload),
       }).catch(() => {
         // silently discard

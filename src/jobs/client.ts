@@ -27,6 +27,7 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "../generated/jobs.d.ts";
 import { SmplError, SmplConnectionError, throwForStatus } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import {
   Backoff,
   HttpConfig,
@@ -712,12 +713,12 @@ export class JobsClient {
       const cfg = resolveSubclientConfig("jobs", options);
       this._http = createClient<paths>({
         baseUrl: cfg.baseUrl.replace(/\/+$/, ""),
-        headers: {
+        headers: withDefaultUserAgent({
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${cfg.apiKey}`,
           Accept: JSONAPI_CONTENT_TYPE,
           "Content-Type": JSONAPI_CONTENT_TYPE,
-        },
+        }),
       });
       this._ownsTransport = true;
       this._environment = cfg.environment;

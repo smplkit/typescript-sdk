@@ -6,8 +6,8 @@
 
 import { buildAuthHeader } from "./auth.js";
 import { SmplConnectionError, SmplError, SmplTimeoutError, throwForStatus } from "./errors.js";
+import { SDK_USER_AGENT } from "./user_agent.js";
 
-const SDK_VERSION = "0.0.0";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** Options for constructing a {@link Transport} instance. */
@@ -96,7 +96,7 @@ export class Transport {
 
     const headers: Record<string, string> = {
       Authorization: buildAuthHeader(this.apiKey),
-      "User-Agent": `smplkit-typescript-sdk/${SDK_VERSION}`,
+      "User-Agent": SDK_USER_AGENT,
       Accept: "application/vnd.api+json",
     };
 

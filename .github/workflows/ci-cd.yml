@@ -122,13 +122,17 @@ jobs:
         if: steps.prep.outputs.released == 'true'
         run: npm ci
 
-      - name: Build
-        if: steps.prep.outputs.released == 'true'
-        run: npm run build
-
+      # Stamp BEFORE building: tsup inlines package.json's version into the
+      # bundles as the `smplkit-sdk-ts/<version>` User-Agent (see
+      # tsup.config.ts), so the version must be in package.json when the
+      # build runs — not just when `npm publish` reads it.
       - name: Stamp version
         if: steps.prep.outputs.released == 'true'
         run: npm version "${{ steps.prep.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build
+        if: steps.prep.outputs.released == 'true'
+        run: npm run build
 
       - name: Publish to npm
         if: steps.prep.outputs.released == 'true'

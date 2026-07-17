@@ -43,6 +43,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import { AuditEventBuffer, type PostOutcome } from "./buffer.js";
 import {
   Forwarder,
@@ -1094,8 +1095,8 @@ export class AuditClient {
     // Environment scoping no longer rides on the transport (ADR-055): the
     // configured environment travels on the event request body when
     // recording and as the default `filter[environment]` on the read
-    // surfaces, so the transport carries only auth plus any caller-supplied
-    // `extraHeaders`.
+    // surfaces, so the transport carries only auth, the default User-Agent
+    // (unless the caller set one), plus any caller-supplied `extraHeaders`.
     const headers: Record<string, string> = { ...(options.extraHeaders ?? {}) };
 
     const customFetch = options.fetch;
@@ -1103,12 +1104,12 @@ export class AuditClient {
     // GET/POST/PUT/DELETE methods keyed off the OpenAPI paths interface.
     this._http = createClient<paths>({
       baseUrl: baseUrl.replace(/\/+$/, ""),
-      headers: {
+      headers: withDefaultUserAgent({
         ...headers,
         Authorization: `Bearer ${apiKey}`,
         Accept: JSONAPI_CONTENT_TYPE,
         "Content-Type": JSONAPI_CONTENT_TYPE,
-      },
+      }),
       fetch: async (request: Request): Promise<Response> => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), ms);

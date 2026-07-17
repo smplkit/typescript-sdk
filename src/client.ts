@@ -21,6 +21,7 @@ import { MetricsReporter } from "./_metrics.js";
 import { ContextScope, setContext as setRequestContext } from "./context.js";
 import type { Context } from "./flags/types.js";
 import { debug, enableDebug } from "./_debug.js";
+import { withDefaultUserAgent } from "./user_agent.js";
 
 type AppHttp = ReturnType<typeof createClient<import("./generated/app.d.ts").paths>>;
 
@@ -102,6 +103,9 @@ export interface SmplClientOptions {
    *
    * SDK-owned headers (`Authorization`, `Accept`) take precedence over any
    * key supplied here — callers cannot override them.
+   *
+   * The SDK sends a default `User-Agent` of `smplkit-sdk-ts/<version>`;
+   * supplying a `User-Agent` here (any casing) replaces it.
    */
   extraHeaders?: Record<string, string>;
 }
@@ -201,19 +205,21 @@ export class SmplClient {
 
     const extraHeaders = options.extraHeaders ?? {};
 
-    // Shared HTTP transports — single connection pool per service.
-    const headers = {
+    // Shared HTTP transports — single connection pool per service. A default
+    // User-Agent rides on every request unless the caller set one (any
+    // casing) through `extraHeaders`.
+    const headers = withDefaultUserAgent({
       ...extraHeaders,
       Authorization: `Bearer ${cfg.apiKey}`,
       Accept: "application/json",
-    };
+    });
     // JSON:API services (jobs) negotiate the vendor media type.
-    const jsonApiHeaders = {
+    const jsonApiHeaders = withDefaultUserAgent({
       ...extraHeaders,
       Authorization: `Bearer ${cfg.apiKey}`,
       Accept: "application/vnd.api+json",
       "Content-Type": "application/vnd.api+json",
-    };
+    });
 
     this._appHttp = createClient<import("./generated/app.d.ts").paths>({
       baseUrl: appBaseUrl,

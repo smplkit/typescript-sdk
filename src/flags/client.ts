@@ -43,6 +43,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import { serviceUrl } from "../service_url.js";
 import {
   Flag,
@@ -669,21 +670,21 @@ export class FlagsClient {
       };
       this._http = createClient<import("../generated/flags.d.ts").paths>({
         baseUrl: flagsUrl.replace(/\/+$/, ""),
-        headers: {
+        headers: withDefaultUserAgent({
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${this._standaloneApiKey}`,
           Accept: "application/json",
-        },
+        }),
         fetch: fetchWithTimeout,
       });
       // Standalone: build our own contexts client (and own its app transport).
       this._appHttpStandalone = createClient<import("../generated/app.d.ts").paths>({
         baseUrl: this._appBaseUrl.replace(/\/+$/, ""),
-        headers: {
+        headers: withDefaultUserAgent({
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${this._standaloneApiKey}`,
           Accept: "application/json",
-        },
+        }),
         fetch: fetchWithTimeout,
       });
       this._contexts = new ContextsClient(this._appHttpStandalone, new ContextRegistrationBuffer());

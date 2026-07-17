@@ -40,6 +40,7 @@ import {
   throwForStatus,
 } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import { serviceUrl } from "../service_url.js";
 import { resolveChain } from "./resolve.js";
 import { Config, ConfigEnvironment, environmentsToWire } from "./types.js";
@@ -515,11 +516,11 @@ export class ConfigClient {
       const ms = options.timeout ?? 30_000;
       this._http = createClient<import("../generated/config.d.ts").paths>({
         baseUrl: configUrl.replace(/\/+$/, ""),
-        headers: {
+        headers: withDefaultUserAgent({
           ...(options.extraHeaders ?? {}),
           Authorization: `Bearer ${this._standaloneApiKey}`,
           Accept: "application/json",
-        },
+        }),
         fetch: async (request: Request): Promise<Response> => {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), ms);

@@ -189,7 +189,11 @@ describe("AccountClient", () => {
     await client.settings.get();
     const [, init] = mockFetch.mock.calls[0];
     // Only the SDK-owned headers are present.
-    expect(Object.keys(init.headers).sort()).toEqual(["Authorization", "Content-Type"]);
+    expect(Object.keys(init.headers).sort()).toEqual([
+      "Authorization",
+      "Content-Type",
+      "User-Agent",
+    ]);
   });
 
   it("close() is a no-op that does not throw", () => {

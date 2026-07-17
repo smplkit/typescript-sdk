@@ -24,6 +24,7 @@
 
 import { SmplkitConnectionError, throwForStatus } from "../errors.js";
 import { resolveSubclientConfig } from "../subclient_config.js";
+import { withDefaultUserAgent } from "../user_agent.js";
 import { AccountSettings } from "./models.js";
 
 /**
@@ -61,11 +62,11 @@ export class SettingsClient {
     apiKey: string,
     extraHeaders?: Record<string, string>,
   ) {
-    this._headers = {
+    this._headers = withDefaultUserAgent({
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       ...(extraHeaders ?? {}),
-    };
+    });
   }
 
   /**
