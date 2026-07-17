@@ -157,6 +157,7 @@ function _eventBodyFromInput(
   if (input.actorLabel !== undefined) attrs.actor_label = input.actorLabel;
   if (input.category !== undefined) attrs.category = input.category;
   if (input.severity !== undefined) attrs.severity = input.severity;
+  if (input.description !== undefined) attrs.description = input.description;
   if (input.data !== undefined) {
     attrs.data = input.data as { [key: string]: unknown };
   }
@@ -180,6 +181,7 @@ function _eventFromResource(resource: {
     resourceId: String(attrs.resource_id ?? ""),
     occurredAt: String(attrs.occurred_at ?? ""),
     createdAt: String(attrs.created_at ?? ""),
+    description: (attrs.description as string | null) ?? null,
     actorType: (attrs.actor_type as string | null) ?? null,
     actorId: (attrs.actor_id as string | null) ?? null,
     actorLabel: (attrs.actor_label as string | null) ?? null,

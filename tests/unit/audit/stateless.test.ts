@@ -73,6 +73,7 @@ describe("stateless mode (buffered: false)", () => {
       eventType: "benchmark.published",
       resourceType: "benchmark",
       resourceId: "bm-1",
+      description: "Benchmark v3 published.",
       idempotencyKey: "idem-1",
     });
 
@@ -88,6 +89,7 @@ describe("stateless mode (buffered: false)", () => {
     expect(body.data.attributes.event_type).toBe("benchmark.published");
     expect(body.data.attributes.resource_type).toBe("benchmark");
     expect(body.data.attributes.resource_id).toBe("bm-1");
+    expect(body.data.attributes.description).toBe("Benchmark v3 published.");
   });
 
   test("record() throws typed errors on failure instead of buffering a retry", async () => {
@@ -129,9 +131,24 @@ describe("stateless mode (buffered: false)", () => {
 });
 
 describe("list category filter", () => {
-  test("category travels as the indexed filter[category] param", async () => {
+  test("category travels as the indexed filter[category] param and events round-trip description", async () => {
     const { requests, fetchFn } = captureFetch(() =>
-      jsonResponse({ data: [], links: { next: null } }),
+      jsonResponse({
+        data: [
+          {
+            id: "e1",
+            type: "event",
+            attributes: {
+              event_type: "benchmark.edited",
+              resource_type: "benchmark",
+              resource_id: "bm-1",
+              occurred_at: "2026-07-16T12:00:00Z",
+              description: "Edited the schema.",
+            },
+          },
+        ],
+        links: { next: null },
+      }),
     );
     const client = new AuditClient({
       apiKey: "sk_api_test",
@@ -139,10 +156,11 @@ describe("list category filter", () => {
       buffered: false,
       fetch: fetchFn,
     });
-    await client.events.list({ category: "benchmark:bm-1", pageSize: 200 });
+    const page = await client.events.list({ category: "benchmark:bm-1", pageSize: 200 });
     const url = new URL(requests[0]!.url);
     expect(url.searchParams.get("filter[category]")).toBe("benchmark:bm-1");
     expect(url.searchParams.get("page[size]")).toBe("200");
+    expect(page.events[0]!.description).toBe("Edited the schema.");
   });
 });
 

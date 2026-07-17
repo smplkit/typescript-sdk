@@ -43,6 +43,8 @@ export interface AuditEvent {
   resourceType: string;
   /** Identifier of the specific resource the event is about. */
   resourceId: string;
+  /** Human-readable, free-text description of the event. `null` when not supplied. */
+  description: string | null;
   /** When the event actually happened, as reported by the source. */
   occurredAt: string;
   /** When the audit service first ingested this event. */
@@ -133,6 +135,12 @@ export interface CreateEventInput {
    * service default the event to `"INFO"`.
    */
   severity?: Severity;
+  /**
+   * Optional human-readable, free-text description of the event. Stored
+   * verbatim and included in the audit log's `search` free-text filter
+   * alongside `resourceId`. Omit it to record the event without one.
+   */
+  description?: string;
   /**
    * Free-form contextual JSON. To record a resource snapshot, place it
    * inside `data` — smplkit's internal convention nests it at
