@@ -1132,7 +1132,8 @@ export class AuditClient {
             post: async (item): Promise<PostOutcome> => {
               try {
                 const headerInit: Record<string, string> = {};
-                if (item.idempotencyKey !== null) headerInit["Idempotency-Key"] = item.idempotencyKey;
+                if (item.idempotencyKey !== null)
+                  headerInit["Idempotency-Key"] = item.idempotencyKey;
                 const result = await this._http.POST("/api/v1/events", {
                   body: item.body as GenEventResponse,
                   headers: headerInit,

@@ -14,10 +14,7 @@
  */
 
 import { afterEach, describe, expect, test, vi } from "vitest";
-import {
-  _setSubclientConfigResolver,
-  resolveSubclientConfig,
-} from "../../src/subclient_config.js";
+import { _setSubclientConfigResolver, resolveSubclientConfig } from "../../src/subclient_config.js";
 import { SmplError } from "../../src/errors.js";
 
 afterEach(() => {
