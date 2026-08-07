@@ -181,6 +181,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/run_stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Stats
+         * @description Report aggregated statistics over this account's runs.
+         *
+         *     One request answers the common monitoring questions: how many runs matched
+         *     the filters (`total`), how they broke down by lifecycle state (`tally`),
+         *     how they were distributed over time (`buckets`, when the `bucket`
+         *     directive is given), which runs failed most recently (`recent_failures`,
+         *     at most 3, newest first), and what fires next (`next_scheduled`).
+         *
+         *     Filters compose with AND:
+         *
+         *     - `filter[created_at]` — a half-open `[start,end)` date range (see the
+         *       parameter for the interval syntax).
+         *     - `filter[environment]` — one environment key or a comma-separated list
+         *       (any-of); omitted covers every environment you can access.
+         *
+         *     `next_scheduled` honors only the environment filter: it reports the
+         *     soonest `PENDING` run with a fire time at or after the request, no matter
+         *     when that run was created.
+         *
+         *     The resource id is always `current` — statistics are computed at read
+         *     time, not stored.
+         */
+        get: operations["get_run_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -1070,6 +1110,199 @@ export interface components {
             attempt: number;
         };
         /**
+         * RunStat
+         * @description Aggregated run statistics for the requested scope.
+         *
+         *     Computed on demand from the account's runs; `total`, `tally`, `buckets`,
+         *     and `recent_failures` honor the request's filters, while `next_scheduled`
+         *     honors only the environment filter (it is forward-looking by definition).
+         */
+        RunStat: {
+            /**
+             * Total
+             * @description Runs matching the filters.
+             */
+            total: number;
+            /** @description Those runs counted by lifecycle state. */
+            tally: components["schemas"]["RunStatTally"];
+            /**
+             * Buckets
+             * @description Run counts over time at the requested `bucket` granularity, ordered by bucket start. Only buckets containing at least one run are listed — treat missing buckets as zero. `null` when the request did not include the `bucket` directive.
+             */
+            buckets?: components["schemas"]["RunStatBucket"][] | null;
+            /**
+             * Recent Failures
+             * @description The most recently created `FAILED` runs matching the filters, newest first — at most 3.
+             */
+            recent_failures: components["schemas"]["RunStatFailure"][];
+            /** @description The soonest `PENDING` run with a fire time at or after the request, or `null` when nothing upcoming is scheduled. The `filter[created_at]` range does not apply here — a run scheduled long ago for a future fire time is still next. */
+            next_scheduled?: components["schemas"]["RunStatNextScheduled"] | null;
+        };
+        /**
+         * RunStatBucket
+         * @description Run count for one time bucket.
+         */
+        RunStatBucket: {
+            /**
+             * Bucket
+             * Format: date-time
+             * @description Start of the bucket (UTC). Buckets are aligned to the epoch — e.g. `1h` buckets start on the hour.
+             */
+            bucket: string;
+            /**
+             * Count
+             * @description Runs created within this bucket.
+             */
+            count: number;
+        };
+        /**
+         * RunStatFailure
+         * @description One recently failed run.
+         */
+        RunStatFailure: {
+            /**
+             * Job
+             * @description Key of the job the failed run belongs to.
+             */
+            job: string;
+            /**
+             * Job Name
+             * @description Display name of that job, resolved at read time; `null` when the job no longer exists.
+             */
+            job_name?: string | null;
+            /**
+             * Failure Reason
+             * @description Why the run failed; `null` when unrecorded.
+             */
+            failure_reason?: ("TIMEOUT" | "CONNECTION_ERROR" | "NON_SUCCESS_STATUS" | "SSRF_BLOCKED" | "QUOTA_EXCEEDED" | "WORKER_LOST") | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the failed run was created.
+             */
+            created_at: string;
+        };
+        /**
+         * RunStatNextScheduled
+         * @description The soonest upcoming scheduled run.
+         */
+        RunStatNextScheduled: {
+            /**
+             * Job
+             * @description Key of the job the run belongs to.
+             */
+            job: string;
+            /**
+             * Job Name
+             * @description Display name of that job, resolved at read time; `null` when the job no longer exists.
+             */
+            job_name?: string | null;
+            /**
+             * Scheduled For
+             * Format: date-time
+             * @description The intended fire time.
+             */
+            scheduled_for: string;
+            /**
+             * Environment
+             * @description Environment the run will execute in.
+             */
+            environment: string;
+        };
+        /**
+         * RunStatResource
+         * @description JSON:API resource envelope for run statistics.
+         * @example {
+         *       "attributes": {
+         *         "buckets": [
+         *           {
+         *             "bucket": "2026-06-05T00:00:00Z",
+         *             "count": 17
+         *           },
+         *           {
+         *             "bucket": "2026-06-05T01:00:00Z",
+         *             "count": 25
+         *           }
+         *         ],
+         *         "next_scheduled": {
+         *           "environment": "production",
+         *           "job": "nightly_backup",
+         *           "job_name": "Nightly database backup",
+         *           "scheduled_for": "2026-06-06T02:00:00Z"
+         *         },
+         *         "recent_failures": [
+         *           {
+         *             "created_at": "2026-06-05T01:12:00Z",
+         *             "failure_reason": "NON_SUCCESS_STATUS",
+         *             "job": "nightly_backup",
+         *             "job_name": "Nightly database backup"
+         *           }
+         *         ],
+         *         "tally": {
+         *           "canceled": 0,
+         *           "failed": 2,
+         *           "pending": 1,
+         *           "running": 0,
+         *           "succeeded": 39
+         *         },
+         *         "total": 42
+         *       },
+         *       "id": "current",
+         *       "type": "run_stat"
+         *     }
+         */
+        RunStatResource: {
+            /**
+             * Id
+             * @default current
+             */
+            id: string;
+            /**
+             * Type
+             * @default run_stat
+             */
+            type: string;
+            attributes: components["schemas"]["RunStat"];
+        };
+        /**
+         * RunStatTally
+         * @description Run counts by lifecycle state within the requested scope.
+         */
+        RunStatTally: {
+            /**
+             * Pending
+             * @description Runs in status `PENDING`.
+             */
+            pending: number;
+            /**
+             * Running
+             * @description Runs in status `RUNNING`.
+             */
+            running: number;
+            /**
+             * Succeeded
+             * @description Runs in status `SUCCEEDED`.
+             */
+            succeeded: number;
+            /**
+             * Failed
+             * @description Runs in status `FAILED`.
+             */
+            failed: number;
+            /**
+             * Canceled
+             * @description Runs in status `CANCELED`.
+             */
+            canceled: number;
+        };
+        /**
+         * RunStatsResponse
+         * @description JSON:API single-resource response for run statistics.
+         */
+        RunStatsResponse: {
+            data: components["schemas"]["RunStatResource"];
+        };
+        /**
          * Usage
          * @description Current-period usage against the account's plan allotments.
          */
@@ -1417,6 +1650,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_run_stats: {
+        parameters: {
+            query?: {
+                /** @description Restrict the statistics to runs whose `created_at` falls in a half-open `[start,end)` interval. Bounds are ISO-8601 timestamps; `*` leaves a bound open. The leading bracket is `[` (inclusive) or `(` (exclusive) and the trailing bracket is `]` (inclusive) or `)` (exclusive). Example: `[2026-06-01T00:00:00Z,*)` covers everything from June 1 onward. Does not apply to `next_scheduled`. */
+                "filter[created_at]"?: string | null;
+                /** @description Comma-separated list of environment keys to scope the statistics to (e.g. `production,staging`). When omitted, statistics cover every environment you can access. */
+                "filter[environment]"?: string | null;
+                /** @description Also return run counts over time, grouped into buckets of this size (a directive, not a filter). One of `1m`, `5m`, `15m`, `1h`, `6h`, or `1d`. Omit to skip the time series. */
+                bucket?: ("1m" | "5m" | "15m" | "1h" | "6h" | "1d") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.api+json": components["schemas"]["RunStatsResponse"];
+                };
             };
         };
     };
