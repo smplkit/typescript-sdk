@@ -41,7 +41,7 @@ methods are stateless HTTP calls.
 
 **Runtime showcases** demonstrate the developer experience: code-first
 declarations (`client.config.bind` / the `client.flags.*Flag` handles /
-`client.logging.install()`), local evaluation, live updates via WebSocket, and
+`client.logging.install()`), local evaluation, live server-pushed updates, and
 change listeners. Config and Flags auto-connect lazily on first runtime use;
 Logging keeps an explicit `await client.logging.install()`. Each runtime
 showcase imports its setup helper to create server-side state, then cleans up
