@@ -1617,6 +1617,7 @@ export interface components {
          *       "created_by": "d290f1ee-6c54-4b01-90e6-d701748f0851",
          *       "expires_at": "2027-03-20T11:02:16.616Z",
          *       "key": "sk_api_a1b2c3d4e5f6g7h8i9j0",
+         *       "kind": "PRIVATE",
          *       "last_used_at": "2026-03-19T08:45:00.000Z",
          *       "name": "Production API Key",
          *       "scopes": {},
@@ -1630,6 +1631,13 @@ export interface components {
              * @description Human-readable name for the key.
              */
             name: string;
+            /**
+             * Kind
+             * @description Credential class of the key, set at creation and immutable. `PRIVATE` (the default) keys carry full API access and must be kept secret — never expose one in a browser or client application. `PUBLIC` keys are browser-safe, read-only credentials for reading feature flags and configuration from client-side code; they must be scoped to exactly one environment with `permissions: ["read"]`. Accepted case-insensitively.
+             * @default PRIVATE
+             * @enum {string}
+             */
+            kind: "PUBLIC" | "PRIVATE";
             /**
              * Status
              * @description Lifecycle state of the key. `ACTIVE` keys may be used to authenticate; `REVOKED` keys are rejected.
@@ -1709,6 +1717,7 @@ export interface components {
          *         "created_by": "d290f1ee-6c54-4b01-90e6-d701748f0851",
          *         "expires_at": "2027-03-20T11:02:16.616Z",
          *         "key": "sk_api_a1b2c3d4e5f6g7h8i9j0",
+         *         "kind": "PRIVATE",
          *         "last_used_at": "2026-03-19T08:45:00.000Z",
          *         "name": "Production API Key",
          *         "scopes": {},
