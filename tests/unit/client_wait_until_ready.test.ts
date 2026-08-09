@@ -3,8 +3,8 @@
  *
  * Validates:
  *   - flags._ensureConnected() and config._ensureConnected() are awaited.
- *   - Returns once the WebSocket reaches "connected".
- *   - Throws SmplTimeoutError if the WebSocket never connects.
+ *   - Returns once the live stream reaches "connected".
+ *   - Throws SmplTimeoutError if the live stream never connects.
  *
  * Also covers the shared-buffer wiring between platform.contexts and the
  * runtime flags client.
@@ -40,7 +40,7 @@ describe("SmplClient.waitUntilReady", () => {
     else process.env.SMPLKIT_TELEMETRY = originalTelemetry;
   });
 
-  it("awaits flags + config connect and resolves when the WS reports connected", async () => {
+  it("awaits flags + config connect and resolves when the stream reports connected", async () => {
     const client = new SmplClient();
     const flagsConnect = vi.fn().mockResolvedValue(undefined);
     const configConnect = vi.fn().mockResolvedValue(undefined);
@@ -48,8 +48,8 @@ describe("SmplClient.waitUntilReady", () => {
       flagsConnect;
     (client.config as unknown as { _ensureConnected: typeof configConnect })._ensureConnected =
       configConnect;
-    // Pretend the WS is already connected so the loop exits immediately.
-    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
+    // Pretend the stream is already connected so the loop exits immediately.
+    (client as unknown as { _ensureStream: () => unknown })._ensureStream = () => ({
       connectionStatus: "connected",
     });
 
@@ -65,7 +65,7 @@ describe("SmplClient.waitUntilReady", () => {
       Promise.resolve();
     (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
-    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
+    (client as unknown as { _ensureStream: () => unknown })._ensureStream = () => ({
       connectionStatus: "connected",
     });
 
@@ -73,13 +73,13 @@ describe("SmplClient.waitUntilReady", () => {
     client.close();
   });
 
-  it("throws SmplTimeoutError when the WS never connects", async () => {
+  it("throws SmplTimeoutError when the stream never connects", async () => {
     const client = new SmplClient();
     (client.flags as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
     (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
-    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
+    (client as unknown as { _ensureStream: () => unknown })._ensureStream = () => ({
       connectionStatus: "connecting",
     });
 
@@ -87,14 +87,14 @@ describe("SmplClient.waitUntilReady", () => {
     client.close();
   });
 
-  it("polls until the WS reports connected on a later tick", async () => {
+  it("polls until the stream reports connected on a later tick", async () => {
     const client = new SmplClient();
     (client.flags as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
     (client.config as unknown as { _ensureConnected: () => Promise<void> })._ensureConnected = () =>
       Promise.resolve();
     let calls = 0;
-    (client as unknown as { _ensureWs: () => unknown })._ensureWs = () => ({
+    (client as unknown as { _ensureStream: () => unknown })._ensureStream = () => ({
       get connectionStatus() {
         calls++;
         return calls < 2 ? "connecting" : "connected";

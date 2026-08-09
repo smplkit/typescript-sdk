@@ -20,20 +20,20 @@
  *   is a PRE-install configuration call (allowed before
  *   {@link LoggingClient.install}). {@link LoggingClient.install} opens the live
  *   connection (monkey-patches the app's logging framework, discovers loggers,
- *   fetches + applies levels, opens the shared WebSocket). `onChange` /
+ *   fetches + applies levels, opens the shared live event stream). `onChange` /
  *   `refresh` require {@link LoggingClient.install} first; calling them earlier
  *   throws {@link SmplNotInstalledError}.
  *
  * The client supports two construction shapes:
  *
  * - **Wired** into {@link SmplClient} — borrows the parent's logging transport
- *   for both runtime fetch and CRUD and the parent's shared WebSocket for the
- *   live channel. This is the common path.
+ *   for both runtime fetch and CRUD and the parent's shared live event
+ *   stream for the live channel. This is the common path.
  * - **Standalone** — `new LoggingClient({ apiKey, baseUrl, ... })` builds and
- *   owns its own logging transport (the WebSocket gateway lives on the app
+ *   owns its own logging transport (the live-events gateway lives on the app
  *   service), and on {@link LoggingClient.install} opens and owns its own
- *   WebSocket. `close()` tears down only the owned transport and owned
- *   WebSocket.
+ *   live stream. `close()` tears down only the owned transport and owned
+ *   stream.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -58,7 +58,7 @@ import { LogLevel, LoggerChangeEvent, LoggerSource, loggerEnvironmentsToWire } f
 import { resolveLevel, type GroupCacheEntry, type LoggerCacheEntry } from "./_resolution.js";
 import type { LoggingAdapter } from "./adapters/base.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
+import { EventStream } from "../event_stream.js";
 import { debug } from "../_debug.js";
 import { keyToDisplayName } from "../helpers.js";
 
@@ -69,7 +69,7 @@ export interface LoggingParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): LiveSocket;
+  _ensureStream(): EventStream;
 }
 
 const DEFAULT_LOGGING_BASE_URL = "https://logging.smplkit.com";
@@ -685,14 +685,15 @@ export interface LoggingClientOptions {
    */
   service?: string;
   /**
-   * Live updates over WebSocket (default `true`): {@link LoggingClient.install}
-   * opens a shared socket and server-side level changes stream in, plus a
-   * periodic timer re-flushes post-startup logger discovery. Set `false` for
-   * the stateless apply-once surface: `install()` still loads adapters,
-   * flushes discovery, and applies the server's levels — all with `await` —
-   * but NO socket, timers, or background state are created; `refresh()`
-   * re-fetches and re-applies on demand. The right shape for serverless
-   * runtimes; note that live level changes then arrive only via `refresh()`.
+   * Live updates (default `true`): {@link LoggingClient.install} opens a
+   * shared live-updates stream and server-side level changes are pushed in,
+   * plus a periodic timer re-flushes post-startup logger discovery. Set
+   * `false` for the stateless apply-once surface: `install()` still loads
+   * adapters, flushes discovery, and applies the server's levels — all with
+   * `await` — but NO connection, timers, or background state are created;
+   * `refresh()` re-fetches and re-applies on demand. The right shape for
+   * serverless runtimes; note that live level changes then arrive only via
+   * `refresh()`.
    */
   streaming?: boolean;
   /**
@@ -754,12 +755,12 @@ export class LoggingClient {
   /** @internal — owned discovery buffer (no management delegation). */
   readonly _buffer = new LoggerRegistrationBuffer();
 
-  // Standalone-only WebSocket state.
+  // Standalone-only live-stream state.
   private readonly _appBaseUrl: string | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: LiveSocket | null = null;
-  private _ownsWs = false;
-  /** @internal `false` = stateless mode: apply once on install, poll with refresh(), no socket. */
+  private _stream: EventStream | null = null;
+  private _ownsStream = false;
+  /** @internal `false` = stateless mode: apply once on install, poll with refresh(), no stream. */
   private readonly _streaming: boolean;
 
   // Live-surface state.
@@ -770,7 +771,7 @@ export class LoggingClient {
   private _loggerFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   // Caches consulted by the resolution algorithm. The runtime client mutates
-  // these from install(), refresh(), and the WebSocket handlers; resolveLevel
+  // these from install(), refresh(), and the live-event handlers; resolveLevel
   // reads them on every apply.
   private _loggersCache: Record<string, LoggerCacheEntry> = {};
   private _groupsCache: Record<string, GroupCacheEntry> = {};
@@ -860,7 +861,7 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Live surface: install (gate) + transport / WebSocket helpers
+  // Live surface: install (gate) + transport / live-stream helpers
   // ------------------------------------------------------------------
 
   /** @internal */
@@ -870,29 +871,24 @@ export class LoggingClient {
     }
   }
 
-  /** Return the shared live socket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): LiveSocket {
+  /** Return the shared live stream — the parent's when wired, else our own. @internal */
+  private _ensureStream(): EventStream {
     if (this._parent !== null) {
-      return this._parent._ensureWs();
+      return this._parent._ensureStream();
     }
-    if (this._wsManager === null) {
-      const factory = _liveSocketFactory();
-      if (factory === null) {
-        // The `@smplkit/sdk/logging` edge entry has no socket implementation.
-        throw new SmplkitError(noLiveSocketMessage("logging"));
-      }
-      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
-      this._wsManager.start();
-      this._ownsWs = true;
+    if (this._stream === null) {
+      this._stream = new EventStream(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
+      this._stream.start();
+      this._ownsStream = true;
     }
-    return this._wsManager;
+    return this._stream;
   }
 
   /**
    * Hook smplkit into the application's logging machinery.
    *
    * Loads adapters, scans existing loggers, applies levels from the smplkit
-   * server, and wires WebSocket handlers for live updates. This IS the
+   * server, and wires live-event handlers for live updates. This IS the
    * explicit consent gate — {@link onChange} / {@link refresh} require it
    * first.
    *
@@ -905,12 +901,11 @@ export class LoggingClient {
     }
     if (this._connected) return;
 
-    // Resolve the socket up front — an unavailable live transport (an edge
-    // entry with `streaming` left on) must fail before adapters are hooked
-    // or state mutated so every install() fails the same way. In stateless
-    // mode (`streaming: false`) no socket is ever created; refresh()
+    // Resolve the stream up front so a failure to construct it happens
+    // before adapters are hooked or state mutated. In stateless mode
+    // (`streaming: false`) no stream is ever created; refresh()
     // re-applies on demand.
-    const ws = this._streaming ? this._ensureWs() : null;
+    const stream = this._streaming ? this._ensureStream() : null;
 
     // 0. Load adapters
     if (this._adapters.length === 0) {
@@ -968,17 +963,20 @@ export class LoggingClient {
       this._groupsCache = this._buildGroupsCache(serverGroups);
       this._applyLevels();
     } catch {
-      // Server may be unreachable — continue with WebSocket wiring
+      // Server may be unreachable — continue with live-event wiring
     }
 
-    if (ws !== null) {
-      // 7. Register WebSocket event handlers for real-time level updates
-      this._wsManager = ws;
-      ws.on("logger_changed", this._handleLoggerChanged);
-      ws.on("logger_deleted", this._handleLoggerDeleted);
-      ws.on("group_changed", this._handleGroupChanged);
-      ws.on("group_deleted", this._handleGroupDeleted);
-      ws.on("loggers_changed", this._handleLoggersChanged);
+    if (stream !== null) {
+      // 7. Register live-event handlers for real-time level updates
+      this._stream = stream;
+      stream.on("logger_changed", this._handleLoggerChanged);
+      stream.on("logger_deleted", this._handleLoggerDeleted);
+      stream.on("group_changed", this._handleGroupChanged);
+      stream.on("group_deleted", this._handleGroupDeleted);
+      stream.on("loggers_changed", this._handleLoggersChanged);
+      // On every successful reconnect the stream re-runs the full refetch,
+      // so changes missed while disconnected are picked up and diffed.
+      stream.onReconnect(this._refetchOnReconnect);
 
       // 8. Start periodic flush timer for post-startup logger discovery
       //    (unref so it doesn't pin the event loop).
@@ -1213,11 +1211,17 @@ export class LoggingClient {
   }
 
   // ------------------------------------------------------------------
-  // Internal: WebSocket handlers (called by SharedWebSocket)
+  // Internal: event handlers (called by the shared EventStream)
   // ------------------------------------------------------------------
 
+  /** Full refetch after a stream reconnect — the same bulk-refresh path the
+   *  `loggers_changed` handler runs, so listeners fire only on real deltas. */
+  private _refetchOnReconnect = (): void => {
+    this._handleLoggersChanged({});
+  };
+
   private _handleLoggerChanged = (data: Record<string, any>): void => {
-    debug("websocket", `logger_changed event received: ${JSON.stringify(data)}`);
+    debug("events", `logger_changed event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
     // Scoped fetch: GET /loggers/{key}
@@ -1230,18 +1234,18 @@ export class LoggingClient {
           delete this._loggersCache[id];
         }
         this._applyLevels();
-        this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket");
+        this._fireDeltas(preResolved, this._resolvedLevelStore, "push");
       })
       .catch((err: unknown) => {
         debug(
-          "websocket",
+          "events",
           `logger_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
   };
 
   private _handleLoggerDeleted = (data: Record<string, any>): void => {
-    debug("websocket", `logger_deleted event received: ${JSON.stringify(data)}`);
+    debug("events", `logger_deleted event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
     delete this._loggersCache[id];
@@ -1251,11 +1255,11 @@ export class LoggingClient {
     // re-resolve fire through the normal apply path. The deleted id
     // itself fires nothing, even if it was adapter-known and its
     // resolved level moved (e.g. fell back to INFO).
-    this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket", new Set([id]));
+    this._fireDeltas(preResolved, this._resolvedLevelStore, "push", new Set([id]));
   };
 
   private _handleGroupChanged = (data: Record<string, any>): void => {
-    debug("websocket", `group_changed event received: ${JSON.stringify(data)}`);
+    debug("events", `group_changed event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
     // Scoped fetch: GET /log_groups/{key}
@@ -1270,18 +1274,18 @@ export class LoggingClient {
         // Re-resolve every adapter-known logger; some may now inherit from
         // this group via direct membership or through a parent group chain.
         this._applyLevels();
-        this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket");
+        this._fireDeltas(preResolved, this._resolvedLevelStore, "push");
       })
       .catch((err: unknown) => {
         debug(
-          "websocket",
+          "events",
           `group_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
   };
 
   private _handleGroupDeleted = (data: Record<string, any>): void => {
-    debug("websocket", `group_deleted event received: ${JSON.stringify(data)}`);
+    debug("events", `group_deleted event received: ${JSON.stringify(data)}`);
     const id = data.id as string | undefined;
     if (!id) return;
     delete this._groupsCache[id];
@@ -1290,13 +1294,13 @@ export class LoggingClient {
     // Pure cache eviction for the group id; dependent loggers that
     // re-resolve to a different effective level fire through the normal
     // apply path. The deleted id itself fires nothing.
-    this._fireDeltas(preResolved, this._resolvedLevelStore, "websocket", new Set([id]));
+    this._fireDeltas(preResolved, this._resolvedLevelStore, "push", new Set([id]));
   };
 
   private _handleLoggersChanged = (_data: Record<string, any>): void => {
-    debug("websocket", `loggers_changed event received`);
-    void this._resolveAndFire("websocket").catch(() => {
-      // ignore refresh errors from WebSocket events
+    debug("events", `loggers_changed event received`);
+    void this._resolveAndFire("push").catch(() => {
+      // ignore refresh errors from live events
     });
   };
 
@@ -1322,7 +1326,7 @@ export class LoggingClient {
   private _fireDeltas(
     pre: Record<string, string>,
     post: Record<string, string>,
-    source: "websocket" | "manual",
+    source: "push" | "manual",
     suppressIds?: Set<string>,
   ): void {
     for (const id of Object.keys(post)) {
@@ -1353,11 +1357,11 @@ export class LoggingClient {
   /**
    * Full refetch of loggers + log_groups, rebuild the caches, re-resolve
    * every adapter-known logger, and fire change listeners on resolved-level
-   * deltas. Shared between the `loggers_changed` WS handler and the
+   * deltas. Shared between the `loggers_changed` event handler and the
    * public `refresh()` method.
    * @internal
    */
-  private async _resolveAndFire(source: "websocket" | "manual"): Promise<void> {
+  private async _resolveAndFire(source: "push" | "manual"): Promise<void> {
     const [serverLoggers, serverGroups] = await Promise.all([
       this._listLoggers(),
       this._listLogGroups(),
@@ -1414,13 +1418,14 @@ export class LoggingClient {
   /**
    * Release resources — only those this client owns.
    *
-   * Uninstalls the adapter hooks, unsubscribes from the WebSocket, and tears
-   * down the owned WebSocket (opened by a standalone client on install).
+   * Uninstalls the adapter hooks, unsubscribes from the live event stream,
+   * and tears down the owned stream (opened by a standalone client on
+   * install).
    *
    * @remarks
    * A wired client (reached via `client.logging`) borrows the parent's
-   * transport and WebSocket and closes neither; only a standalone client
-   * tears down the WebSocket it opened itself.
+   * transport and live stream and closes neither; only a standalone client
+   * tears down the stream it opened itself.
    */
   close(): void {
     debug("lifecycle", "LoggingClient.close() called");
@@ -1440,17 +1445,18 @@ export class LoggingClient {
       }
     }
 
-    if (this._wsManager !== null) {
-      this._wsManager.off("logger_changed", this._handleLoggerChanged);
-      this._wsManager.off("logger_deleted", this._handleLoggerDeleted);
-      this._wsManager.off("group_changed", this._handleGroupChanged);
-      this._wsManager.off("group_deleted", this._handleGroupDeleted);
-      this._wsManager.off("loggers_changed", this._handleLoggersChanged);
-      if (this._ownsWs) {
-        this._wsManager.stop();
-        this._ownsWs = false;
+    if (this._stream !== null) {
+      this._stream.off("logger_changed", this._handleLoggerChanged);
+      this._stream.off("logger_deleted", this._handleLoggerDeleted);
+      this._stream.off("group_changed", this._handleGroupChanged);
+      this._stream.off("group_deleted", this._handleGroupDeleted);
+      this._stream.off("loggers_changed", this._handleLoggersChanged);
+      this._stream.offReconnect(this._refetchOnReconnect);
+      if (this._ownsStream) {
+        this._stream.stop();
+        this._ownsStream = false;
       }
-      this._wsManager = null;
+      this._stream = null;
     }
     this._connected = false;
   }

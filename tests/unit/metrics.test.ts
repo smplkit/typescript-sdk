@@ -132,20 +132,20 @@ describe("MetricsReporter — gauge", () => {
   });
 
   it("should replace gauge value", () => {
-    reporter.recordGauge("platform.websocket_connections", 1, "connections");
-    reporter.recordGauge("platform.websocket_connections", 0, "connections");
+    reporter.recordGauge("platform.event_connections", 1, "connections");
+    reporter.recordGauge("platform.event_connections", 0, "connections");
 
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
     expect(body.data).toHaveLength(1);
-    expect(body.data[0].attributes.name).toBe("platform.websocket_connections");
+    expect(body.data[0].attributes.name).toBe("platform.event_connections");
     expect(body.data[0].attributes.value).toBe(0);
   });
 
   it("should use first-write-wins for gauge unit", () => {
-    reporter.recordGauge("platform.websocket_connections", 1, "connections");
-    reporter.recordGauge("platform.websocket_connections", 0, "other");
+    reporter.recordGauge("platform.event_connections", 1, "connections");
+    reporter.recordGauge("platform.event_connections", 0, "other");
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -153,8 +153,8 @@ describe("MetricsReporter — gauge", () => {
   });
 
   it("should set gauge unit from later call if first was null", () => {
-    reporter.recordGauge("platform.websocket_connections", 1);
-    reporter.recordGauge("platform.websocket_connections", 0, "connections");
+    reporter.recordGauge("platform.event_connections", 1);
+    reporter.recordGauge("platform.event_connections", 0, "connections");
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -224,7 +224,7 @@ describe("MetricsReporter — flush", () => {
 
   it("should include both counters and gauges in payload", () => {
     reporter.record("flags.evaluations", 1, "evaluations");
-    reporter.recordGauge("platform.websocket_connections", 1, "connections");
+    reporter.recordGauge("platform.event_connections", 1, "connections");
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -491,7 +491,12 @@ describe("FlagsClient — metrics instrumentation", () => {
 
   it("should record cache_hits and evaluations on cache hit", async () => {
     const { FlagsClient } = await import("../../src/flags/client.js");
-    const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" };
+    const mockWs = {
+      on: vi.fn(),
+      off: vi.fn(),
+      onReconnect: vi.fn(),
+      connectionStatus: "disconnected",
+    };
 
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
@@ -500,13 +505,13 @@ describe("FlagsClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    // The fused client borrows the parent's environment/service/WebSocket and
+    // The fused client borrows the parent's environment/service/stream and
     // its metrics reporter through constructor options.
     const parent = {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => mockWs as any,
+      _ensureStream: () => mockWs as any,
     };
     const client = new FlagsClient({ apiKey: "sk_test", parent, metrics });
 
@@ -559,13 +564,18 @@ describe("FlagsClient — metrics instrumentation", () => {
 
   it("should not throw when metrics is null", async () => {
     const { FlagsClient } = await import("../../src/flags/client.js");
-    const mockWs = { on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" };
+    const mockWs = {
+      on: vi.fn(),
+      off: vi.fn(),
+      onReconnect: vi.fn(),
+      connectionStatus: "disconnected",
+    };
 
     const parent = {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => mockWs as any,
+      _ensureStream: () => mockWs as any,
     };
     // No metrics reporter wired (null) — evaluation must not throw.
     const client = new FlagsClient({ apiKey: "sk_test", parent, metrics: null });
@@ -624,13 +634,19 @@ describe("ConfigClient — metrics instrumentation", () => {
     });
     const recordSpy = vi.spyOn(metrics, "record");
 
-    // The fused client borrows the parent's environment/service/WebSocket and
+    // The fused client borrows the parent's environment/service/stream and
     // its metrics reporter through constructor options.
     const parent = {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => ({ on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" }) as any,
+      _ensureStream: () =>
+        ({
+          on: vi.fn(),
+          off: vi.fn(),
+          onReconnect: vi.fn(),
+          connectionStatus: "disconnected",
+        }) as any,
     };
     const client = new ConfigClient({ apiKey: "sk_test", parent, metrics });
 
@@ -672,12 +688,12 @@ describe("ConfigClient — metrics instrumentation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WebSocket instrumentation
+// Live event-stream instrumentation
 // ---------------------------------------------------------------------------
 
-describe("SharedWebSocket — metrics instrumentation", () => {
+describe("EventStream — metrics instrumentation", () => {
   it("should accept metrics parameter", async () => {
-    const { SharedWebSocket } = await import("../../src/ws.js");
+    const { EventStream } = await import("../../src/event_stream.js");
     const metrics = new MetricsReporter({
       apiKey: "sk_test",
       environment: "test",
@@ -685,20 +701,20 @@ describe("SharedWebSocket — metrics instrumentation", () => {
     });
 
     // Should not throw
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test", metrics);
+    const ws = new EventStream("https://app.smplkit.com", "sk_test", metrics);
     expect(ws).toBeDefined();
     metrics.close();
   });
 
   it("should accept null metrics parameter", async () => {
-    const { SharedWebSocket } = await import("../../src/ws.js");
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test", null);
+    const { EventStream } = await import("../../src/event_stream.js");
+    const ws = new EventStream("https://app.smplkit.com", "sk_test", null);
     expect(ws).toBeDefined();
   });
 
   it("should accept omitted metrics parameter", async () => {
-    const { SharedWebSocket } = await import("../../src/ws.js");
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
+    const { EventStream } = await import("../../src/event_stream.js");
+    const ws = new EventStream("https://app.smplkit.com", "sk_test");
     expect(ws).toBeDefined();
   });
 });
@@ -726,6 +742,8 @@ describe("LoggingClient — metrics instrumentation", () => {
     const mockWs = {
       on: vi.fn(),
       off: vi.fn(),
+      onReconnect: vi.fn(),
+      offReconnect: vi.fn(),
       connectionStatus: "disconnected",
     };
 
@@ -740,7 +758,7 @@ describe("LoggingClient — metrics instrumentation", () => {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => mockWs as any,
+      _ensureStream: () => mockWs as any,
     };
     const client = new LoggingClient({ apiKey: "sk_test", parent, metrics });
 
@@ -772,6 +790,8 @@ describe("LoggingClient — metrics instrumentation", () => {
     const mockWs = {
       on: vi.fn(),
       off: vi.fn(),
+      onReconnect: vi.fn(),
+      offReconnect: vi.fn(),
       connectionStatus: "disconnected",
     };
 
@@ -786,7 +806,7 @@ describe("LoggingClient — metrics instrumentation", () => {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => mockWs as any,
+      _ensureStream: () => mockWs as any,
     };
     const client = new LoggingClient({ apiKey: "sk_test", parent, metrics });
 
@@ -868,7 +888,13 @@ describe("ConfigClient — config.changes instrumentation", () => {
       _environment: "test",
       _service: "test-svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => ({ on: vi.fn(), off: vi.fn(), connectionStatus: "disconnected" }) as any,
+      _ensureStream: () =>
+        ({
+          on: vi.fn(),
+          off: vi.fn(),
+          onReconnect: vi.fn(),
+          connectionStatus: "disconnected",
+        }) as any,
     };
     const client = new ConfigClient({ apiKey: "sk_test", parent, metrics });
 
@@ -953,7 +979,7 @@ describe("MetricsReporter — payload format (JSON:API)", () => {
     const reporter = makeReporter();
 
     reporter.record("flags.evaluations", 3, "evaluations", { flag: "checkout-v2" });
-    reporter.recordGauge("platform.websocket_connections", 1, "connections");
+    reporter.recordGauge("platform.event_connections", 1, "connections");
     reporter.flush();
 
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);

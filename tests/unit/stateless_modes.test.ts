@@ -3,11 +3,9 @@
  * resolution across the config / flags / logging / jobs sub-clients:
  *
  * - `streaming: false` — the first live call fetches with `await` and no
- *   socket, timers, or background state are created. This file never wires
- *   a live-socket factory, so merely completing a live call IS the proof
- *   that no socket path ran (it would throw otherwise).
- * - With `streaming` left on and no factory wired (the edge-entry state), a
- *   live call throws a clear typed error naming the way out.
+ *   stream, timers, or background state are created (`_stream` stays null).
+ * - With `streaming` left on, the first live call opens an owned live
+ *   stream (stubbed here so no connection is attempted).
  * - `environment` / `service` resolve from `SMPLKIT_*` env vars on every
  *   standalone sub-client, exactly like SmplClient.
  */
@@ -19,7 +17,7 @@ import { FlagsClient } from "../../src/flags/client.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { LoggingClient } from "../../src/logging/client.js";
 import { JobsClient } from "../../src/jobs/client.js";
-import { SmplkitError } from "../../src/errors.js";
+import { EventStream } from "../../src/event_stream.js";
 import type { LoggingAdapter } from "../../src/logging/adapters/base.js";
 
 const mockFetch = vi.fn();
@@ -98,8 +96,8 @@ describe("FlagsClient streaming: false (stateless)", () => {
 
     const beta = await client.booleanFlag("beta", false);
     expect(beta.get()).toBe(true);
-    expect((client as any)._wsManager).toBeNull();
-    expect((client as any)._ownsWs).toBe(false);
+    expect((client as any)._stream).toBeNull();
+    expect((client as any)._ownsStream).toBe(false);
 
     // close() has nothing to tear down.
     expect(() => client.close()).not.toThrow();
@@ -121,15 +119,19 @@ describe("FlagsClient streaming: false (stateless)", () => {
     expect(beta.get()).toBe(true);
   });
 
-  it("with streaming left on and no factory wired, the live call throws the edge error", async () => {
+  it("with streaming left on, the first live call opens an owned live stream", async () => {
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
     mockFetch.mockImplementation(async () => jsonResponse({ data: [] }));
     const client = new FlagsClient({
       apiKey: "sk_test",
       environment: "staging",
       baseUrl: "https://flags.example.com",
     });
-    await expect(client.refresh()).rejects.toThrow(/Live updates aren't available/);
-    await expect(client.refresh()).rejects.toThrow(SmplkitError);
+    await client.refresh();
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect((client as any)._ownsStream).toBe(true);
+    vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
+    client.close();
   });
 });
 
@@ -152,7 +154,7 @@ describe("ConfigClient streaming: false (stateless)", () => {
     const proxy = await client.subscribe("app");
     expect((proxy as Record<string, unknown>).retries).toBe(3);
     await expect(client.getValue("app", "retries")).resolves.toBe(3);
-    expect((client as any)._wsManager).toBeNull();
+    expect((client as any)._stream).toBeNull();
 
     expect(() => client.close()).not.toThrow();
   });
@@ -179,16 +181,19 @@ describe("ConfigClient streaming: false (stateless)", () => {
     expect(events.length).toBeGreaterThan(0);
   });
 
-  it("with streaming left on and no factory wired, the live call throws the edge error", async () => {
+  it("with streaming left on, the first live call opens an owned live stream", async () => {
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
     mockFetch.mockImplementation(async () => jsonResponse({ data: [] }));
     const client = new ConfigClient({
       apiKey: "sk_test",
       environment: "staging",
       baseUrl: "https://config.example.com",
     });
-    await expect(client.getValue("app", "retries")).rejects.toThrow(
-      /Live updates aren't available/,
-    );
+    await client.getValue("app", "retries", null);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect((client as any)._ownsStream).toBe(true);
+    vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
+    client.close();
   });
 });
 
@@ -210,7 +215,7 @@ describe("LoggingClient streaming: false (stateless)", () => {
 
     await client.install();
     expect(adapter.discover).toHaveBeenCalled();
-    expect((client as any)._wsManager).toBeNull();
+    expect((client as any)._stream).toBeNull();
     expect((client as any)._loggerFlushTimer).toBeNull();
 
     // The live surface works post-install; refresh() polls on demand.
@@ -218,7 +223,8 @@ describe("LoggingClient streaming: false (stateless)", () => {
     expect(() => client.close()).not.toThrow();
   });
 
-  it("with streaming left on and no factory wired, install() throws the edge error", async () => {
+  it("with streaming left on, install() opens an owned live stream", async () => {
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
     mockFetch.mockImplementation(async () => jsonResponse({ data: [] }));
     const client = new LoggingClient({
       apiKey: "sk_test",
@@ -226,7 +232,11 @@ describe("LoggingClient streaming: false (stateless)", () => {
       baseUrl: "https://logging.example.com",
     });
     client.registerAdapter(makeAdapter());
-    await expect(client.install()).rejects.toThrow(/Live updates aren't available/);
+    await client.install();
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect((client as any)._ownsStream).toBe(true);
+    vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
+    client.close();
   });
 });
 

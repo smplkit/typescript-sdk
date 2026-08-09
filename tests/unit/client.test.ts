@@ -10,6 +10,7 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: vi.fn(actual.homedir) };
 });
 import { SmplClient } from "../../src/client.js";
+import { EventStream } from "../../src/event_stream.js";
 import * as _debugMod from "../../src/_debug.js";
 import { SmplError } from "../../src/errors.js";
 import { ConfigClient } from "../../src/config/client.js";
@@ -29,6 +30,10 @@ beforeEach(() => {
   mockFetch.mockImplementation(() =>
     Promise.resolve(new Response(JSON.stringify({ registered: 1, data: [] }), { status: 200 })),
   );
+  // Keep the shared live stream inert — its connection behavior is covered
+  // in event-stream.test.ts.
+  vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+  vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -289,7 +294,7 @@ describe("SmplClient", () => {
     mockFetch.mockClear();
     const client = new SmplClient(DEFAULT_OPTS);
     expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBeNull();
-    expect((client as unknown as { _wsManager: unknown })._wsManager).toBeNull();
+    expect((client as unknown as { _stream: unknown })._stream).toBeNull();
     expect((client as unknown as { _started: boolean })._started).toBe(false);
     expect(mockFetch).not.toHaveBeenCalled();
     client.close();
@@ -384,16 +389,16 @@ describe("SmplClient", () => {
     const configClose = vi.spyOn(client.config, "close");
     const auditClose = vi.spyOn(client.audit, "_close").mockResolvedValue(undefined);
 
-    // Start machinery + a fake WS so close() exercises every branch.
+    // Start machinery + a fake stream so close() exercises every branch.
     client._ensureStarted();
     const fakeWs = { stop: vi.fn(), connectionStatus: "connected" };
-    (client as unknown as { _wsManager: unknown })._wsManager = fakeWs;
+    (client as unknown as { _stream: unknown })._stream = fakeWs;
     expect((client as unknown as { _flushTimer: unknown })._flushTimer).not.toBeNull();
 
     client.close();
 
     expect((client as unknown as { _flushTimer: unknown })._flushTimer).toBeNull();
-    expect((client as unknown as { _wsManager: unknown })._wsManager).toBeNull();
+    expect((client as unknown as { _stream: unknown })._stream).toBeNull();
     expect(fakeWs.stop).toHaveBeenCalledTimes(1);
     expect(loggingClose).toHaveBeenCalledTimes(1);
     expect(flagsClose).toHaveBeenCalledTimes(1);
@@ -416,13 +421,13 @@ describe("SmplClient", () => {
     client.close();
   });
 
-  it("_ensureWs() starts the deferred machinery and returns a shared WS", () => {
+  it("_ensureStream() starts the deferred machinery and returns a shared stream", () => {
     const client = new SmplClient(DEFAULT_OPTS);
-    const ws = client._ensureWs();
-    expect(ws).toBeDefined();
+    const stream = client._ensureStream();
+    expect(stream).toBeDefined();
     expect((client as unknown as { _started: boolean })._started).toBe(true);
     // Same instance on a second call.
-    expect(client._ensureWs()).toBe(ws);
+    expect(client._ensureStream()).toBe(stream);
     client.close();
   });
 

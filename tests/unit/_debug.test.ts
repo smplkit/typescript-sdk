@@ -137,7 +137,7 @@ describe("debug() — no-op when disabled", () => {
 
   it("writes nothing to stderr when disabled", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    debugMod.debug("websocket", "this should not appear");
+    debugMod.debug("events", "this should not appear");
     expect(write).not.toHaveBeenCalled();
     write.mockRestore();
   });
@@ -170,7 +170,7 @@ describe("debug() — output format when enabled", () => {
 
   it("writes to stderr", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    debugMod.debug("websocket", "connected to wss://example.com");
+    debugMod.debug("events", "connected to https://example.com");
     expect(write).toHaveBeenCalled();
     write.mockRestore();
   });
@@ -181,8 +181,8 @@ describe("debug() — output format when enabled", () => {
       output += typeof chunk === "string" ? chunk : chunk.toString();
       return true;
     });
-    debugMod.debug("websocket", "some message");
-    expect(output).toMatch(/^\[smplkit:websocket\]/);
+    debugMod.debug("events", "some message");
+    expect(output).toMatch(/^\[smplkit:events\]/);
     vi.restoreAllMocks();
   });
 
@@ -252,7 +252,7 @@ describe("debug() — output format when enabled", () => {
     vi.restoreAllMocks();
   });
 
-  it.each(["lifecycle", "websocket", "api", "discovery", "resolution", "adapter", "registration"])(
+  it.each(["lifecycle", "events", "api", "discovery", "resolution", "adapter", "registration"])(
     "all subsystems render correctly: %s",
     (subsystem) => {
       let output = "";

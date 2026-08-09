@@ -3,10 +3,10 @@
  *
  * - Management CRUD: get / list / delete / _createFlag / _updateFlag.
  * - Lazy connect: _ensureConnected flushes discovery, paginates the flag
- *   fetch, clears the cache, and subscribes to the shared WebSocket once.
+ *   fetch, clears the cache, and subscribes to the shared live stream once.
  * - Live surface: refresh / stats / onChange / setContextProvider.
  * - Evaluation metrics + context registration.
- * - Standalone construction (owns its transport + WebSocket) and close().
+ * - Standalone construction (owns its transport + live stream) and close().
  * - Error wrapping (network, not-found, validation, timeout).
  */
 
@@ -24,14 +24,8 @@ import {
   SmplConnectionError,
   SmplTimeoutError,
 } from "../../../src/errors.js";
-import {
-  makeWiredClient,
-  jsonResponse,
-  textResponse,
-  flagListResponse,
-  createMockSharedWs,
-} from "./_helpers.js";
-import { _setLiveSocketFactory } from "../../../src/live_socket.js";
+import { makeWiredClient, jsonResponse, textResponse, flagListResponse } from "./_helpers.js";
+import { EventStream } from "../../../src/event_stream.js";
 
 const mockFetch = vi.fn();
 
@@ -583,12 +577,11 @@ describe("_evaluateHandle metrics + context registration", () => {
 // ---------------------------------------------------------------------------
 
 describe("standalone construction", () => {
-  it("builds its own transport, owns a WebSocket on first live use, and close() tears it down", async () => {
-    // Standalone clients get their socket from the injected factory (the
-    // package-root wiring); wire a mock factory the same way.
-    const mockWs = createMockSharedWs();
-    const factory = vi.fn(() => mockWs as any);
-    _setLiveSocketFactory(factory);
+  it("builds its own transport, owns a live stream on first live use, and close() tears it down", async () => {
+    // Standalone clients construct their own EventStream directly; stub the
+    // prototype so no network connection is attempted.
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+    const stopSpy = vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
 
     const client = new FlagsClient({
       apiKey: "sk_test",
@@ -600,13 +593,12 @@ describe("standalone construction", () => {
     mockFetch.mockImplementation(async () => flagListResponse([{ id: "f" }]));
     await client.refresh();
 
-    expect(factory).toHaveBeenCalled();
-    expect(mockWs.start).toHaveBeenCalled();
-    expect((client as any)._ownsWs).toBe(true);
+    expect(startSpy).toHaveBeenCalled();
+    expect((client as any)._ownsStream).toBe(true);
 
     client.close();
-    expect(mockWs.stop).toHaveBeenCalled();
-    expect((client as any)._ownsWs).toBe(false);
+    expect(stopSpy).toHaveBeenCalled();
+    expect((client as any)._ownsStream).toBe(false);
 
     // Second close is a no-op.
     expect(() => client.close()).not.toThrow();

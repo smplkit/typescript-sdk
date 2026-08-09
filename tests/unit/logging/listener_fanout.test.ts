@@ -21,7 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import createClient from "openapi-fetch";
 import { LoggingClient } from "../../../src/logging/client.js";
 import type { LoggingParent } from "../../../src/logging/client.js";
-import type { SharedWebSocket } from "../../../src/ws.js";
+import type { EventStream } from "../../../src/event_stream.js";
 
 const mockFetch = vi.fn();
 
@@ -35,14 +35,16 @@ afterEach(() => {
 
 type WsCallback = (data: Record<string, unknown>) => void;
 
-interface MockSharedWs {
+interface MockEventStream {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  onReconnect: ReturnType<typeof vi.fn>;
+  offReconnect: ReturnType<typeof vi.fn>;
   connectionStatus: string;
   _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
-function createMockSharedWs(): MockSharedWs {
+function createMockEventStream(): MockEventStream {
   const listeners: Record<string, WsCallback[]> = {};
   return {
     on: vi.fn((event: string, cb: WsCallback) => {
@@ -50,6 +52,8 @@ function createMockSharedWs(): MockSharedWs {
       listeners[event].push(cb);
     }),
     off: vi.fn(),
+    onReconnect: vi.fn(),
+    offReconnect: vi.fn(),
     connectionStatus: "connected",
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
@@ -65,15 +69,15 @@ function makeTransport(): any {
   });
 }
 
-let lastMockWs: MockSharedWs;
+let lastMockWs: MockEventStream;
 
 function makeParent(): LoggingParent {
-  lastMockWs = createMockSharedWs();
+  lastMockWs = createMockEventStream();
   return {
     _environment: "production",
     _service: "svc",
     _ensureStarted: vi.fn(),
-    _ensureWs: () => lastMockWs as unknown as SharedWebSocket,
+    _ensureStream: () => lastMockWs as unknown as EventStream,
   };
 }
 
@@ -208,7 +212,7 @@ describe("fanout — group cascade via group_changed", () => {
     const ids = globalCb.mock.calls.map((c) => c[0].id).sort();
     expect(ids).toEqual(members.slice().sort());
     for (const call of globalCb.mock.calls) {
-      expect(call[0]).toEqual(expect.objectContaining({ level: "ERROR", source: "websocket" }));
+      expect(call[0]).toEqual(expect.objectContaining({ level: "ERROR", source: "push" }));
       expect(call[0]).not.toHaveProperty("deleted");
     }
   });
@@ -248,7 +252,7 @@ describe("fanout — deletion via group_deleted", () => {
     // 3 dependents re-resolve WARN → INFO.
     expect(globalCb).toHaveBeenCalledTimes(3);
     for (const call of globalCb.mock.calls) {
-      expect(call[0]).toEqual(expect.objectContaining({ level: "INFO", source: "websocket" }));
+      expect(call[0]).toEqual(expect.objectContaining({ level: "INFO", source: "push" }));
       expect(call[0]).not.toHaveProperty("deleted");
       expect(members).toContain(call[0].id);
       // The deleted group id never appears as an event id.

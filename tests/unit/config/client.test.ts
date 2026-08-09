@@ -24,7 +24,7 @@ import {
   SmplkitError,
 } from "../../../src/errors.js";
 import type { ConfigParent } from "../../../src/config/client.js";
-import type { SharedWebSocket } from "../../../src/ws.js";
+import type { EventStream } from "../../../src/event_stream.js";
 
 const mockFetch = vi.fn();
 
@@ -138,7 +138,7 @@ describe("ConfigClient construction", () => {
       _environment: "staging",
       _service: "svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: vi.fn(),
+      _ensureStream: vi.fn(),
     };
     const transport = {
       GET: vi.fn().mockResolvedValue({ response: { ok: true }, data: { data: [] } }),
@@ -737,24 +737,24 @@ describe("ConfigChangeEvent", () => {
 // ---------------------------------------------------------------------------
 
 describe("close()", () => {
-  it("is a no-op for a standalone client that never opened a WebSocket", () => {
+  it("is a no-op for a standalone client that never opened a live stream", () => {
     const client = makeStandalone();
     expect(() => client.close()).not.toThrow();
   });
 
-  it("stops and clears an owned WebSocket opened on first live use", async () => {
+  it("stops and clears an owned live stream opened on first live use", async () => {
     const stop = vi.fn();
     const ws = {
       start: vi.fn(),
       stop,
       on: vi.fn(),
-    } as unknown as SharedWebSocket;
+    } as unknown as EventStream;
 
     const client = makeStandalone();
-    // Inject a fake owned WebSocket through the private fields the standalone
+    // Inject a fake owned live stream through the private fields the standalone
     // path manages, then ensure close() tears it down.
-    (client as unknown as { _wsManager: SharedWebSocket; _ownsWs: boolean })._wsManager = ws;
-    (client as unknown as { _ownsWs: boolean })._ownsWs = true;
+    (client as unknown as { _stream: EventStream; _ownsStream: boolean })._stream = ws;
+    (client as unknown as { _ownsStream: boolean })._ownsStream = true;
 
     client.close();
     expect(stop).toHaveBeenCalledTimes(1);

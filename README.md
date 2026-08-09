@@ -27,13 +27,13 @@ const client = new SmplClient({
   service: "my-service",
 });
 
-// Block until cache is warm and the live-updates WebSocket is connected.
+// Block until cache is warm and the live-updates connection is established.
 // Optional but recommended at process start so the first reads hit cache.
 await client.waitUntilReady();
 
 // ... do work ...
 
-client.close(); // releases the WebSocket and stops background timers
+client.close(); // releases the live-updates connection and stops background timers
 ```
 
 If `SMPLKIT_API_KEY` / `SMPLKIT_ENVIRONMENT` / `SMPLKIT_SERVICE` are set (or a `~/.smplkit` profile supplies them), `new SmplClient()` works with no arguments.
@@ -250,7 +250,7 @@ await client.manage.contexts.flush(); // or pass `{ flush: true }` to register
 
 ### Runtime — live log level management
 
-`install()` auto-discovers winston and pino loggers, hooks new-logger creation, applies server-managed levels, and subscribes to live updates over the shared WebSocket.
+`install()` auto-discovers winston and pino loggers, hooks new-logger creation, applies server-managed levels, and subscribes to live updates so level changes are pushed in real time.
 
 ```typescript
 import { SmplClient, LogLevel } from "@smplkit/sdk";
@@ -259,7 +259,7 @@ const client = new SmplClient({ environment: "production", service: "my-service"
 await client.logging.install();
 
 client.logging.onChange((event) => {
-  console.log(`${event.id}: ${event.level} (source=${event.source})`);
+  console.log(`${event.id}: ${event.level} (source=${event.source})`); // source: "push" for live server-pushed changes, "manual" for refresh()
 });
 
 // Force a manual re-sync (e.g. after suspecting drift)
@@ -302,7 +302,7 @@ await client.manage.logGroups.delete("sql");
 
 ## Standalone management client
 
-For setup scripts, CI tooling, and admin utilities you don't need the runtime plane (no WebSocket, no metrics thread, no logger discovery). Construct `SmplManagementClient` directly:
+For setup scripts, CI tooling, and admin utilities you don't need the runtime plane (no live-updates connection, no metrics thread, no logger discovery). Construct `SmplManagementClient` directly:
 
 ```typescript
 import { SmplManagementClient } from "@smplkit/sdk";
@@ -345,7 +345,7 @@ try {
 
 ## Debug Logging
 
-Set `SMPLKIT_DEBUG` to enable verbose diagnostic output to stderr — useful when troubleshooting WebSocket connectivity, level resolution, or initialization.
+Set `SMPLKIT_DEBUG` to enable verbose diagnostic output to stderr — useful when troubleshooting live-update connectivity, level resolution, or initialization.
 
 ```bash
 SMPLKIT_DEBUG=1 node my-app.js

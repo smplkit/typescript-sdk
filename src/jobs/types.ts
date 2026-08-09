@@ -2,7 +2,7 @@
  * Smpl Jobs resource types.
  *
  * Unlike Config/Flags/Logging, Jobs has no live "phone-home" agent — no
- * environment registration, no WebSocket — so it has no runtime/management
+ * environment registration, no live updates — so it has no runtime/management
  * split: a single {@link JobsClient} exposes the full surface. A {@link Job}
  * is an active record: build it with `client.jobs.newRecurringJob(...)` (or
  * `newManualJob(...)` / `schedule(...)`), set fields, and

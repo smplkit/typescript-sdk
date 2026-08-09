@@ -13,17 +13,17 @@
  *   ad-hoc resolved read), `bind` (a live object binding), `onChange`, and
  *   `refresh`. The first live call transparently flushes discovery, fetches
  *   and resolves every config into the local cache, and opens the
- *   live-updates WebSocket — no explicit install step.
+ *   live-updates stream — no explicit install step.
  *
  * The client supports two construction shapes:
  *
  * - **Wired** into {@link SmplClient} — borrows the parent's config transport
- *   for both runtime fetch and CRUD and the parent's shared WebSocket for the
- *   live channel. This is the common path.
+ *   for both runtime fetch and CRUD and the parent's shared live event
+ *   stream for the live channel. This is the common path.
  * - **Standalone** — `new ConfigClient({ apiKey, baseUrl, ... })` builds and
  *   owns its own config transport, and on first live use opens and owns its
- *   own WebSocket. `close()` tears down only the owned transport and owned
- *   WebSocket.
+ *   own live stream. `close()` tears down only the owned transport and owned
+ *   stream.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -47,7 +47,7 @@ import { Config, ConfigEnvironment, environmentsToWire } from "./types.js";
 import { LiveConfigProxy } from "./proxy.js";
 import { keyToDisplayName } from "../helpers.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
+import { EventStream } from "../event_stream.js";
 import { debug } from "../_debug.js";
 
 type ConfigHttp = ReturnType<typeof createClient<import("../generated/config.d.ts").paths>>;
@@ -57,7 +57,7 @@ export interface ConfigParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): LiveSocket;
+  _ensureStream(): EventStream;
 }
 
 /** Flush the discovery buffer once it reaches this many pending configs. */
@@ -81,15 +81,15 @@ export class ConfigChangeEvent {
   readonly oldValue: unknown;
   /** The updated value. */
   readonly newValue: unknown;
-  /** How the change was delivered (`"websocket"`, `"manual"`, or `"initial"`). */
-  readonly source: "websocket" | "manual" | "initial";
+  /** How the change was delivered (`"push"`, `"manual"`, or `"initial"`). */
+  readonly source: "push" | "manual" | "initial";
 
   constructor(fields: {
     configId: string;
     itemKey: string;
     oldValue: unknown;
     newValue: unknown;
-    source: "websocket" | "manual" | "initial";
+    source: "push" | "manual" | "initial";
   }) {
     this.configId = fields.configId;
     this.itemKey = fields.itemKey;
@@ -407,13 +407,13 @@ export interface ConfigClientOptions {
    */
   service?: string;
   /**
-   * Live updates over WebSocket (default `true`): the first live call opens
-   * a shared socket and config changes stream in. Set `false` for the
-   * stateless read-through surface: the first live call fetches and
+   * Live updates (default `true`): the first live call opens a shared
+   * live-updates stream and config changes are pushed in. Set `false` for
+   * the stateless read-through surface: the first live call fetches and
    * resolves every config once with `await`, reads stay local, `refresh()`
-   * re-fetches on demand, and NO socket, timers, or background state are
-   * created — the right shape for serverless and edge runtimes (for example
-   * Cloudflare Workers), whose isolates cannot host socket-driven state.
+   * re-fetches on demand, and NO connection, timers, or background state
+   * are created — the right shape for short-lived serverless invocations
+   * that cannot host long-lived connection state.
    * `onChange` listeners fire only from explicit `refresh()` deltas in this
    * mode (there is no stream to drive them).
    */
@@ -458,7 +458,7 @@ export interface ConfigClientOptions {
  * pure CRUD. The live surface (`subscribe` / `getValue` / `bind` / `onChange`
  * / `refresh`) connects lazily on first use — the first call flushes
  * discovery, fetches and resolves all configs into the local cache, and opens
- * the live-updates WebSocket. No explicit install step is required.
+ * the live-updates stream. No explicit install step is required.
  */
 export class ConfigClient {
   /** @internal */
@@ -475,12 +475,12 @@ export class ConfigClient {
   /** @internal — owned discovery buffer (no management delegation). */
   readonly _buffer = new ConfigRegistrationBuffer();
 
-  // Standalone-only WebSocket state.
+  // Standalone-only live-stream state.
   private readonly _appBaseUrl: string | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: LiveSocket | null = null;
-  private _ownsWs = false;
-  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no socket. */
+  private _stream: EventStream | null = null;
+  private _ownsStream = false;
+  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no stream. */
   private readonly _streaming: boolean;
 
   // Live-surface state.
@@ -803,25 +803,20 @@ export class ConfigClient {
   }
 
   // ------------------------------------------------------------------
-  // Live surface: lazy connect + transport / WebSocket helpers
+  // Live surface: lazy connect + transport / live-stream helpers
   // ------------------------------------------------------------------
 
-  /** Return the shared live socket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): LiveSocket {
+  /** Return the shared live stream — the parent's when wired, else our own. @internal */
+  private _ensureStream(): EventStream {
     if (this._parent !== null) {
-      return this._parent._ensureWs();
+      return this._parent._ensureStream();
     }
-    if (this._wsManager === null) {
-      const factory = _liveSocketFactory();
-      if (factory === null) {
-        // The `@smplkit/sdk/config` edge entry has no socket implementation.
-        throw new SmplkitError(noLiveSocketMessage("config"));
-      }
-      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
-      this._wsManager.start();
-      this._ownsWs = true;
+    if (this._stream === null) {
+      this._stream = new EventStream(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
+      this._stream.start();
+      this._ownsStream = true;
     }
-    return this._wsManager;
+    return this._stream;
   }
 
   /**
@@ -829,8 +824,8 @@ export class ConfigClient {
    *
    * Flushes any buffered discovery declarations, fetches and resolves every
    * config for the configured environment into the local cache, opens the
-   * shared WebSocket, and subscribes to `config_changed` / `config_deleted` /
-   * `configs_changed` events.
+   * shared live event stream, and subscribes to `config_changed` /
+   * `config_deleted` / `configs_changed` events.
    *
    * Idempotent and internal — every live method calls it on first use, so the
    * live surface auto-connects with no explicit step.
@@ -842,12 +837,11 @@ export class ConfigClient {
     }
     if (this._connected) return;
 
-    // Resolve the socket up front — an unavailable live transport (an edge
-    // entry with `streaming` left on) must fail before any fetch or state
-    // mutation so every live call fails the same way. In stateless mode
-    // (`streaming: false`) no socket is ever created and refresh()
+    // Resolve the stream up front so a failure to construct it happens
+    // before any fetch or state mutation. In stateless mode
+    // (`streaming: false`) no stream is ever created and refresh()
     // re-fetches on demand.
-    const ws = this._streaming ? this._ensureWs() : null;
+    const stream = this._streaming ? this._ensureStream() : null;
 
     // Flush any buffered discovery declarations BEFORE the initial fetch, so
     // newly-discovered configs appear in the cache on first read.
@@ -863,10 +857,13 @@ export class ConfigClient {
     await this._doRefresh("initial");
     this._connected = true;
 
-    if (ws !== null) {
-      ws.on("config_changed", this._handleConfigChanged);
-      ws.on("config_deleted", this._handleConfigDeleted);
-      ws.on("configs_changed", this._handleConfigsChanged);
+    if (stream !== null) {
+      stream.on("config_changed", this._handleConfigChanged);
+      stream.on("config_deleted", this._handleConfigDeleted);
+      stream.on("configs_changed", this._handleConfigsChanged);
+      // On every successful reconnect the stream re-runs the full refetch,
+      // so changes missed while disconnected are picked up and diffed.
+      stream.onReconnect(this._refetchOnReconnect);
     }
   }
 
@@ -932,7 +929,7 @@ export class ConfigClient {
    * its values are authoritative and synced onto the bound object; if it is
    * brand-new, the cache entry is seeded in-memory from the bound object's
    * values resolved through its bound parent chain (no network round-trip). On
-   * every WebSocket-delivered change thereafter the bound object is mutated in
+   * every pushed change thereafter the bound object is mutated in
    * place. Readers always see the current resolved value with no proxy
    * indirection.
    *
@@ -974,7 +971,7 @@ export class ConfigClient {
 
     const parentId = this._registerBindingDeclaration(id, config, options.parent ?? null);
 
-    // Register the binding BEFORE seeding so WebSocket dispatch finds it.
+    // Register the binding BEFORE seeding so live-event dispatch finds it.
     this._bindings.set(id, config);
     this._boundParents.set(id, parentId);
     this._seedOrSyncBinding(id, config);
@@ -1262,7 +1259,7 @@ export class ConfigClient {
   }
 
   /** @internal */
-  private async _doRefresh(source: "websocket" | "manual" | "initial"): Promise<void> {
+  private async _doRefresh(source: "push" | "manual" | "initial"): Promise<void> {
     const configs = await this._fetchAllConfigs();
     const newCache: Record<string, Record<string, unknown>> = {};
     for (const cfg of configs) {
@@ -1280,7 +1277,7 @@ export class ConfigClient {
   /** @internal — re-resolve every config in `rawCache` and fire change listeners. */
   private async _rebuildResolvedCache(
     rawCache: Record<string, Config>,
-    source: "websocket" | "manual",
+    source: "push" | "manual",
   ): Promise<void> {
     const rawList = Object.values(rawCache);
     const newCache: Record<string, Record<string, unknown>> = {};
@@ -1299,7 +1296,7 @@ export class ConfigClient {
   private _fireChangeListeners(
     oldCache: Record<string, Record<string, unknown>>,
     newCache: Record<string, Record<string, unknown>>,
-    source: "websocket" | "manual" | "initial",
+    source: "push" | "manual" | "initial",
   ): void {
     const allConfigKeys = new Set([...Object.keys(oldCache), ...Object.keys(newCache)]);
     for (const cfgKey of allConfigKeys) {
@@ -1342,11 +1339,17 @@ export class ConfigClient {
   }
 
   // ------------------------------------------------------------------
-  // Internal: event handlers (called by SharedWebSocket)
+  // Internal: event handlers (called by the shared EventStream)
   // ------------------------------------------------------------------
 
+  /** Full refetch after a stream reconnect — the same bulk-refresh path the
+   *  `configs_changed` handler runs, so listeners fire only on real deltas. */
+  private _refetchOnReconnect = (): void => {
+    this._handleConfigsChanged({});
+  };
+
   private _handleConfigChanged = (data: Record<string, any>): void => {
-    debug("websocket", `config_changed event received: ${JSON.stringify(data)}`);
+    debug("events", `config_changed event received: ${JSON.stringify(data)}`);
     const key = data.id as string | undefined;
     if (!key) {
       this._handleConfigsChanged(data);
@@ -1357,18 +1360,18 @@ export class ConfigClient {
       .then((cfg) => {
         if (cfg === null) return;
         rawCache[key] = cfg;
-        return this._rebuildResolvedCache(rawCache, "websocket");
+        return this._rebuildResolvedCache(rawCache, "push");
       })
       .catch((err: unknown) => {
         debug(
-          "websocket",
+          "events",
           `config_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
   };
 
   private _handleConfigDeleted = (data: Record<string, any>): void => {
-    debug("websocket", `config_deleted event received: ${JSON.stringify(data)}`);
+    debug("events", `config_deleted event received: ${JSON.stringify(data)}`);
     const key = data.id as string | undefined;
     if (!key) {
       this._handleConfigsChanged(data);
@@ -1377,18 +1380,18 @@ export class ConfigClient {
     if (!(key in this._rawConfigCache)) return;
     const rawCache = { ...this._rawConfigCache };
     delete rawCache[key];
-    void this._rebuildResolvedCache(rawCache, "websocket").catch((err: unknown) => {
+    void this._rebuildResolvedCache(rawCache, "push").catch((err: unknown) => {
       debug(
-        "websocket",
+        "events",
         `config_deleted handler error: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
   };
 
   private _handleConfigsChanged = (_data: Record<string, any>): void => {
-    debug("websocket", `configs_changed event received`);
-    void this._doRefresh("websocket").catch(() => {
-      // ignore refresh errors from WebSocket events
+    debug("events", `configs_changed event received`);
+    void this._doRefresh("push").catch(() => {
+      // ignore refresh errors from live events
     });
   };
 
@@ -1399,15 +1402,15 @@ export class ConfigClient {
   /**
    * Release resources — only those this client owns.
    *
-   * Tears down the owned WebSocket (opened by a standalone client on first
-   * live use). A wired client borrows the parent's transport and WebSocket and
-   * closes neither.
+   * Tears down the owned live stream (opened by a standalone client on
+   * first live use). A wired client borrows the parent's transport and live
+   * stream and closes neither.
    */
   close(): void {
-    if (this._ownsWs && this._wsManager !== null) {
-      this._wsManager.stop();
-      this._wsManager = null;
-      this._ownsWs = false;
+    if (this._ownsStream && this._stream !== null) {
+      this._stream.stop();
+      this._stream = null;
+      this._ownsStream = false;
     }
   }
 }

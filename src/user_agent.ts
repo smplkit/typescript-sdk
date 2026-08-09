@@ -4,7 +4,7 @@
  * Some edges in front of the platform (e.g. CloudFront's managed WAF rules)
  * reject requests that carry no User-Agent header, and several runtimes —
  * Cloudflare Workers most notably — send none by default. So every HTTP
- * request and WebSocket handshake the wrapper initiates carries
+ * request — the live event stream included — the wrapper initiates carries
  * `smplkit-sdk-ts/<version>` unless the caller supplied a User-Agent of
  * their own (matched case-insensitively), in which case the caller's value
  * always wins.
@@ -17,7 +17,7 @@
  * placeholder version.
  *
  * This module has no imports so the `@smplkit/sdk/*` edge subpath entries
- * stay free of Node built-ins and of `ws`.
+ * stay free of Node built-ins.
  *
  * @internal This module is not part of the public API.
  */

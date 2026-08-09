@@ -2,11 +2,11 @@
  * Tests for the fused LoggingClient — the management sub-clients
  * (LoggersClient / LogGroupsClient), the logger-discovery buffer, and the
  * live surface (install / registerAdapter / onChange / refresh / close /
- * WebSocket handlers).
+ * live-event handlers).
  *
  * HTTP is mocked by stubbing the global `fetch`; the wired clients borrow a
  * transport built from `openapi-fetch` driven by that stub. The shared
- * WebSocket is a hand-rolled mock that records handler registrations and can
+ * live stream is a hand-rolled mock that records handler registrations and can
  * replay events.
  */
 
@@ -30,8 +30,7 @@ import {
   SmplNotInstalledError,
 } from "../../../src/errors.js";
 import type { LoggingAdapter } from "../../../src/logging/adapters/base.js";
-import { _setLiveSocketFactory } from "../../../src/live_socket.js";
-import type { SharedWebSocket } from "../../../src/ws.js";
+import { EventStream } from "../../../src/event_stream.js";
 
 const mockFetch = vi.fn();
 
@@ -67,16 +66,18 @@ function makeTransport(): any {
 
 type WsCallback = (data: Record<string, unknown>) => void;
 
-interface MockSharedWs {
+interface MockEventStream {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  onReconnect: ReturnType<typeof vi.fn>;
+  offReconnect: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   connectionStatus: string;
   _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
-function createMockSharedWs(): MockSharedWs {
+function createMockEventStream(): MockEventStream {
   const listeners: Record<string, WsCallback[]> = {};
   return {
     on: vi.fn((event: string, cb: WsCallback) => {
@@ -92,6 +93,8 @@ function createMockSharedWs(): MockSharedWs {
     }),
     stop: vi.fn(),
     start: vi.fn(),
+    onReconnect: vi.fn(),
+    offReconnect: vi.fn(),
     connectionStatus: "connected",
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
@@ -99,24 +102,24 @@ function createMockSharedWs(): MockSharedWs {
   };
 }
 
-let lastMockWs: MockSharedWs;
+let lastMockWs: MockEventStream;
 let lastEnsureStarted: ReturnType<typeof vi.fn>;
-let lastEnsureWs: ReturnType<typeof vi.fn>;
+let lastEnsureStream: ReturnType<typeof vi.fn>;
 
 function makeParent(overrides: Partial<LoggingParent> = {}): LoggingParent {
-  lastMockWs = createMockSharedWs();
+  lastMockWs = createMockEventStream();
   lastEnsureStarted = vi.fn();
-  lastEnsureWs = vi.fn(() => lastMockWs as unknown as SharedWebSocket);
+  lastEnsureStream = vi.fn(() => lastMockWs as unknown as EventStream);
   return {
     _environment: "production",
     _service: "svc",
     _ensureStarted: lastEnsureStarted,
-    _ensureWs: lastEnsureWs,
+    _ensureStream: lastEnsureStream,
     ...overrides,
   };
 }
 
-/** Wired client (borrows a parent transport + parent WebSocket). */
+/** Wired client (borrows a parent transport + parent live stream). */
 function makeWiredClient(parentOverrides: Partial<LoggingParent> = {}): LoggingClient {
   return new LoggingClient({
     parent: makeParent(parentOverrides),
@@ -989,10 +992,10 @@ describe("LoggingClient — onChange() / refresh()", () => {
 });
 
 // ===========================================================================
-// WebSocket handlers
+// Live-event handlers
 // ===========================================================================
 
-describe("LoggingClient — WebSocket handlers", () => {
+describe("LoggingClient — live-event handlers", () => {
   async function installedWithLoggers(names: string[]): Promise<LoggingClient> {
     const client = makeWiredClient();
     client.registerAdapter({
@@ -1110,6 +1113,25 @@ describe("LoggingClient — WebSocket handlers", () => {
     expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "sql", level: "WARN" }));
   });
 
+  it("stream reconnect: runs the full re-resolution and fires deltas with the push source", async () => {
+    const client = await installedWithLoggers(["sql"]);
+    expect(lastMockWs.onReconnect).toHaveBeenCalledTimes(1);
+    const cb = vi.fn();
+    client.onChange(cb);
+    mockFetch.mockImplementation((req: Request) => {
+      if (req.url.includes("/loggers") && !req.url.endsWith("/log_groups")) {
+        return Promise.resolve(jsonResponse({ data: [loggerResource("sql", { level: "WARN" })] }));
+      }
+      return Promise.resolve(jsonResponse({ data: [] }));
+    });
+    const refetch = lastMockWs.onReconnect.mock.calls[0][0] as () => void;
+    refetch();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cb).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sql", level: "WARN", source: "push" }),
+    );
+  });
+
   it("loggers_changed: swallows fetch errors", async () => {
     const client = await installedWithLoggers(["sql"]);
     const cb = vi.fn();
@@ -1204,7 +1226,7 @@ describe("LoggingClient — close()", () => {
     }
   });
 
-  it("does not stop the parent's WebSocket (wired client borrows it)", async () => {
+  it("does not stop the parent's live stream (wired client borrows it)", async () => {
     const client = makeWiredClient();
     client.registerAdapter(makeAdapter());
     mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
@@ -1243,7 +1265,7 @@ describe("LoggingClient — close()", () => {
 });
 
 // ===========================================================================
-// Standalone construction (owns its transport + WebSocket)
+// Standalone construction (owns its transport + live stream)
 // ===========================================================================
 
 describe("LoggingClient — standalone construction", () => {
@@ -1287,14 +1309,11 @@ describe("LoggingClient — standalone construction", () => {
     await expect(client.loggers.list()).rejects.toThrow(SmplConnectionError);
   });
 
-  it("opens and owns its own WebSocket on install, and stops it on close", async () => {
-    // Standalone clients get their socket from the injected factory (the
-    // package-root wiring); wire a mock factory the same way.
-    const fakeWs = createMockSharedWs();
-    const startSpy = fakeWs.start;
-    const stopSpy = fakeWs.stop;
-    const factory = vi.fn(() => fakeWs as unknown as SharedWebSocket);
-    _setLiveSocketFactory(factory);
+  it("opens and owns its own live stream on install, and stops it on close", async () => {
+    // Standalone clients construct their own EventStream directly; stub the
+    // prototype so no network connection is attempted.
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+    const stopSpy = vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
 
     const client = new LoggingClient({
       apiKey: "sk_standalone",
@@ -1304,8 +1323,9 @@ describe("LoggingClient — standalone construction", () => {
     client.registerAdapter(makeAdapter());
     mockFetch.mockResolvedValue(jsonResponse({ data: [] }));
     await client.install();
-    expect(factory).toHaveBeenCalledTimes(1);
     expect(startSpy).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._ownsStream).toBe(true);
 
     client.close();
     expect(stopSpy).toHaveBeenCalledTimes(1);

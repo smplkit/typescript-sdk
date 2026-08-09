@@ -15,7 +15,7 @@ import { JobsClient } from "./jobs/client.js";
 import { PlatformClient } from "./platform/client.js";
 import { AccountClient } from "./account/client.js";
 import { SmplTimeoutError } from "./errors.js";
-import { SharedWebSocket } from "./ws.js";
+import { EventStream } from "./event_stream.js";
 import { resolveConfig, serviceUrl } from "./config.js";
 import { MetricsReporter } from "./_metrics.js";
 import { ContextScope, setContext as setRequestContext } from "./context.js";
@@ -151,7 +151,7 @@ export class SmplClient {
   /** Client for scheduled jobs — CRUD, runs, and usage. */
   readonly jobs: JobsClient;
 
-  private _wsManager: SharedWebSocket | null = null;
+  private _stream: EventStream | null = null;
   private readonly _apiKey: string;
 
   // Read by wired sub-clients through the `*Parent` interfaces, so these stay
@@ -259,10 +259,10 @@ export class SmplClient {
     // Account-level settings; built from the app url + api key.
     this.account = new AccountClient({ apiKey: cfg.apiKey, baseUrl: appBaseUrl, extraHeaders });
     // Config's full surface on one client; wired into this parent so it borrows
-    // the shared config transport and WebSocket.
+    // the shared config transport and live event stream.
     this.config = new ConfigClient({ parent: this, transport: configHttp, metrics: this._metrics });
     // Flags' full surface on one client; wired into this parent so it borrows
-    // the shared flags transport and WebSocket. `contexts` is the injection
+    // the shared flags transport and live event stream. `contexts` is the injection
     // seam for evaluation-context registration, wired to
     // `client.platform.contexts`.
     this.flags = new FlagsClient({
@@ -272,7 +272,7 @@ export class SmplClient {
       metrics: this._metrics,
     });
     // Logging's full surface on one client; wired into this parent so it
-    // borrows the shared logging transport and WebSocket. The two management
+    // borrows the shared logging transport and live event stream. The two management
     // sub-clients live at client.logging.loggers / client.logging.logGroups.
     this.logging = new LoggingClient({
       parent: this,
@@ -297,7 +297,7 @@ export class SmplClient {
     // Construction is side-effect-free: no background timers, no phone-home.
     // The periodic registration-buffer flush and the service-context
     // registration are deferred until the first config/flags/logging operation
-    // or WebSocket open via `_ensureStarted` — so an audit-only or jobs-only
+    // or live-stream open via `_ensureStarted` — so an audit-only or jobs-only
     // customer pays zero timers and zero network at construction.
   }
 
@@ -305,7 +305,7 @@ export class SmplClient {
    * Start the deferred background machinery exactly once.
    *
    * Idempotent; a no-op after `close()`. Triggered by the first
-   * config/flags/logging operation or WebSocket open — never at construction.
+   * config/flags/logging operation or live-stream open — never at construction.
    * @internal
    */
   _ensureStarted(): void {
@@ -357,46 +357,46 @@ export class SmplClient {
     }
   }
 
-  /** Lazily create and start the shared WebSocket. @internal */
-  _ensureWs(): SharedWebSocket {
+  /** Lazily create and start the shared live event stream. @internal */
+  _ensureStream(): EventStream {
     this._ensureStarted();
-    if (this._wsManager === null) {
-      this._wsManager = new SharedWebSocket(this._appBaseUrl, this._apiKey, this._metrics);
-      this._wsManager.start();
+    if (this._stream === null) {
+      this._stream = new EventStream(this._appBaseUrl, this._apiKey, this._metrics);
+      this._stream.start();
     }
-    return this._wsManager;
+    return this._stream;
   }
 
   /**
-   * Optionally pre-warm the SDK and block until the live socket is up.
+   * Optionally pre-warm the SDK and block until the live stream is up.
    *
    * Eagerly connects config and flags — flushing discovery, pre-fetching all
    * flags and configs into the local cache, opening the live-updates
-   * WebSocket — and waits for the handshake to complete. After this returns,
-   * `flag.get()` / `client.config.subscribe()` hit cache (no first-request
-   * connect tax) and any `onChange` listeners receive every server event from
-   * this point forward.
+   * stream — and waits for the connection to be established. After this
+   * returns, `flag.get()` / `client.config.subscribe()` hit cache (no
+   * first-request connect tax) and any `onChange` listeners receive every
+   * server event from this point forward.
    *
    * Optional: config and flags connect lazily on first live use, so this is
-   * purely a pre-warm / WebSocket-ready barrier. Logging integration is *not*
+   * purely a pre-warm / stream-ready barrier. Logging integration is *not*
    * connected here — call `await client.logging.install()` separately if you
    * want it (it installs adapters and hooks into your application's logger,
    * which should be opt-in).
    *
-   * @throws SmplTimeoutError If the WebSocket fails to connect within
+   * @throws SmplTimeoutError If the live stream fails to connect within
    *   `timeoutMs` milliseconds.
    */
   async waitUntilReady(options: { timeoutMs?: number } = {}): Promise<void> {
     const timeoutMs = options.timeoutMs ?? 10_000;
     await this.flags._ensureConnected();
     await this.config._ensureConnected();
-    const ws = this._ensureWs();
+    const stream = this._ensureStream();
     const deadline = Date.now() + timeoutMs;
-    while (ws.connectionStatus !== "connected") {
+    while (stream.connectionStatus !== "connected") {
       if (Date.now() >= deadline) {
         throw new SmplTimeoutError(
-          `Live-updates websocket did not connect within ${timeoutMs}ms ` +
-            `(status: ${JSON.stringify(ws.connectionStatus)})`,
+          `Live-updates stream did not connect within ${timeoutMs}ms ` +
+            `(status: ${JSON.stringify(stream.connectionStatus)})`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -462,9 +462,9 @@ export class SmplClient {
     this.flags.close();
     this.config.close();
     void this.audit._close();
-    if (this._wsManager !== null) {
-      this._wsManager.stop();
-      this._wsManager = null;
+    if (this._stream !== null) {
+      this._stream.stop();
+      this._stream = null;
     }
   }
 }

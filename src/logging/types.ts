@@ -25,8 +25,9 @@ export enum LogLevel {
  * - `level`: the newly-applied effective smplkit level string (e.g.
  *   `"INFO"`, `"DEBUG"`) — the same value the resolution algorithm returns
  *   and that the SDK passes to each registered adapter's `applyLevel()`.
- * - `source`: short string identifying the trigger — typically `"websocket"`
- *   or `"manual"` (a {@link LoggingClient.refresh} call).
+ * - `source`: short string identifying the trigger — typically `"push"` (a
+ *   live server-pushed change) or `"manual"` (a
+ *   {@link LoggingClient.refresh} call).
  */
 export class LoggerChangeEvent {
   readonly id: string;

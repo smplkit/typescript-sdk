@@ -4,7 +4,7 @@
  * Some edges in front of the platform (CloudFront's managed WAF rules)
  * reject requests that carry no User-Agent header, and edge runtimes such
  * as Cloudflare Workers send none by default. Every outbound request from
- * every subsystem client — and the WebSocket handshake — must therefore
+ * every subsystem client — and the live event stream — must therefore
  * carry the SDK default, unless the caller supplied a User-Agent of their
  * own (any casing), which always wins.
  */
@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SDK_USER_AGENT, SDK_VERSION, withDefaultUserAgent } from "../../src/user_agent.js";
 import { SmplClient } from "../../src/client.js";
-import { SharedWebSocket } from "../../src/ws.js";
+import { EventStream } from "../../src/event_stream.js";
 import { ConfigClient } from "../../src/config/client.js";
 import { FlagsClient } from "../../src/flags/client.js";
 import { LoggingClient } from "../../src/logging/client.js";
@@ -24,22 +24,6 @@ import { PlatformClient } from "../../src/platform/client.js";
 import { AccountClient } from "../../src/account/client.js";
 import { AuditClient } from "../../src/audit/client.js";
 import { MetricsReporter } from "../../src/_metrics.js";
-
-// Mock the ws module, recording handshake constructor arguments.
-const wsCalls = vi.hoisted(
-  () => [] as Array<{ url: string; options?: { headers?: Record<string, string> } }>,
-);
-vi.mock("ws", () => {
-  class MockWebSocket {
-    on = vi.fn();
-    send = vi.fn();
-    close = vi.fn();
-    constructor(url: string, options?: { headers?: Record<string, string> }) {
-      wsCalls.push({ url, options });
-    }
-  }
-  return { default: MockWebSocket };
-});
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(here, "..", "..", "package.json"), "utf-8")) as {
@@ -56,9 +40,13 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 beforeEach(() => {
-  wsCalls.length = 0;
   vi.stubGlobal("fetch", mockFetch);
   mockFetch.mockImplementation(async () => jsonResponse({ data: [] }));
+  // Keep the shared live stream inert for the client-level tests — the
+  // stream's own request headers are asserted in a dedicated test below,
+  // which restores these spies first.
+  vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+  vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -230,12 +218,22 @@ describe("default User-Agent on outbound requests", () => {
     reporter.close();
   });
 
-  it("the WebSocket handshake sends it", () => {
-    const ws = new SharedWebSocket("https://app.test", "sk_key", null);
-    ws.start();
-    expect(wsCalls).toHaveLength(1);
-    expect(wsCalls[0].options?.headers?.["User-Agent"]).toBe(SDK_USER_AGENT);
-    ws.stop();
+  it("the live event-stream request sends it", async () => {
+    vi.restoreAllMocks();
+    vi.stubGlobal("fetch", mockFetch);
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      seen.push({ url: String(url), headers: (init?.headers ?? {}) as Record<string, string> });
+      // A non-stream response: the connect attempt fails cleanly and the
+      // reconnect is scheduled (cancelled below by stop()).
+      return new Response("{}", { status: 503 });
+    });
+    const stream = new EventStream("https://app.test", "sk_key", null);
+    stream.start();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    stream.stop();
+    expect(seen[0].url).toBe("https://app.test/api/v1/events");
+    expect(seen[0].headers["User-Agent"]).toBe(SDK_USER_AGENT);
   });
 });
 

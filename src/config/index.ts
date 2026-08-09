@@ -7,9 +7,9 @@
  * {@link SmplClient} or constructed directly.
  *
  * This module is also the package's `@smplkit/sdk/config` subpath — the
- * edge/serverless entry. Its import graph is free of Node built-ins and of
- * the `ws` transport, so it bundles for edge runtimes (e.g. Cloudflare
- * Workers). Differences from the package root there:
+ * edge/serverless entry. Its import graph is free of Node built-ins, so it
+ * bundles for edge runtimes (e.g. Cloudflare Workers). Differences from the
+ * package root there:
  *
  * - Configuration resolves from defaults → the `SMPLKIT_API_KEY` /
  *   `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` / `SMPLKIT_ENVIRONMENT` /
@@ -18,9 +18,10 @@
  *   `node:fs`, and an isolate has no home directory anyway).
  * - Pass `streaming: false` for the stateless read-through surface: the
  *   first live call fetches and resolves every config once with `await`,
- *   reads stay local, `refresh()` re-fetches on demand, and no socket,
- *   timers, or background state are created. With `streaming` left on, a
- *   live call throws — WebSocket-driven updates need the package root.
+ *   reads stay local, `refresh()` re-fetches on demand, and no connection,
+ *   timers, or background state are created — the right shape for
+ *   short-lived isolates that cannot host a long-lived live-updates
+ *   connection.
  */
 
 export { ConfigClient } from "./client.js";

@@ -5,10 +5,10 @@
  *
  * - **Wired** — `new FlagsClient({ parent, transport, contexts, metrics })`.
  *   The parent must implement the full {@link FlagsParent} interface
- *   (`_environment`, `_service`, `_ensureStarted()`, `_ensureWs()`).
+ *   (`_environment`, `_service`, `_ensureStarted()`, `_ensureStream()`).
  * - **Standalone** — `new FlagsClient({ apiKey, environment, baseUrl, ... })`.
  *   It builds its own flags transport, its own contexts seam, and (on first
- *   live use) opens and owns its own WebSocket.
+ *   live use) opens and owns its own live event stream.
  *
  * These helpers cover both shapes. HTTP is stubbed by overriding
  * `globalThis.fetch`; the wired transport is a real `openapi-fetch` client
@@ -21,23 +21,28 @@
 import { vi } from "vitest";
 import createClient from "openapi-fetch";
 import { FlagsClient, type FlagsParent } from "../../../src/flags/client.js";
-import type { SharedWebSocket } from "../../../src/ws.js";
+import type { EventStream } from "../../../src/event_stream.js";
 
 export type WsCallback = (data: Record<string, unknown>) => void;
 
-/** A stand-in for {@link SharedWebSocket} that records `on`/`off` and replays. */
-export interface MockSharedWs {
+/** A stand-in for {@link EventStream} that records `on`/`off` and replays. */
+export interface MockEventStream {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  onReconnect: ReturnType<typeof vi.fn>;
+  offReconnect: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   connectionStatus: string;
   _listeners: Record<string, WsCallback[]>;
   _emit: (event: string, data: Record<string, unknown>) => void;
+  /** Invoke every registered reconnect-refetch callback (simulates a successful reconnect). */
+  _fireReconnect: () => void;
 }
 
-export function createMockSharedWs(): MockSharedWs {
+export function createMockEventStream(): MockEventStream {
   const listeners: Record<string, WsCallback[]> = {};
+  const reconnectCallbacks: Array<() => void> = [];
   return {
     on: vi.fn((event: string, cb: WsCallback) => {
       if (!listeners[event]) listeners[event] = [];
@@ -50,10 +55,20 @@ export function createMockSharedWs(): MockSharedWs {
     }),
     start: vi.fn(),
     stop: vi.fn(),
+    onReconnect: vi.fn((cb: () => void) => {
+      reconnectCallbacks.push(cb);
+    }),
+    offReconnect: vi.fn((cb: () => void) => {
+      const idx = reconnectCallbacks.indexOf(cb);
+      if (idx !== -1) reconnectCallbacks.splice(idx, 1);
+    }),
     connectionStatus: "connected",
     _listeners: listeners,
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
+    },
+    _fireReconnect: () => {
+      for (const cb of [...reconnectCallbacks]) cb();
     },
   };
 }
@@ -83,16 +98,16 @@ export function makeFlagsTransport(): any {
 
 export interface WiredHarness {
   client: FlagsClient;
-  ws: MockSharedWs;
+  ws: MockEventStream;
   contexts: MockContexts;
   ensureStarted: ReturnType<typeof vi.fn>;
-  ensureWs: ReturnType<typeof vi.fn>;
+  ensureStream: ReturnType<typeof vi.fn>;
   parent: FlagsParent;
 }
 
 /**
  * Build a wired {@link FlagsClient} with a full {@link FlagsParent} mock,
- * a mock WebSocket, and a mock contexts seam.
+ * a mock live event stream, and a mock contexts seam.
  */
 export function makeWiredClient(
   options: {
@@ -102,15 +117,15 @@ export function makeWiredClient(
     contexts?: MockContexts | null;
   } = {},
 ): WiredHarness {
-  const ws = createMockSharedWs();
+  const ws = createMockEventStream();
   const contexts = options.contexts === null ? null : (options.contexts ?? createMockContexts());
   const ensureStarted = vi.fn();
-  const ensureWs = vi.fn(() => ws as unknown as SharedWebSocket);
+  const ensureStream = vi.fn(() => ws as unknown as EventStream);
   const parent: FlagsParent = {
     _environment: options.environment ?? "staging",
     _service: options.service ?? null,
     _ensureStarted: ensureStarted,
-    _ensureWs: ensureWs,
+    _ensureStream: ensureStream,
   };
   const client = new FlagsClient({
     parent,
@@ -118,7 +133,7 @@ export function makeWiredClient(
     contexts: contexts as any,
     metrics: options.metrics ?? null,
   });
-  return { client, ws, contexts: contexts as MockContexts, ensureStarted, ensureWs, parent };
+  return { client, ws, contexts: contexts as MockContexts, ensureStarted, ensureStream, parent };
 }
 
 /** JSON:API-shaped 200 response. */

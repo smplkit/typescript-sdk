@@ -2,7 +2,7 @@
  * Smpl Jobs SDK client (`client.jobs` on SmplClient, or standalone `JobsClient`).
  *
  * Unlike Config/Flags/Logging, Jobs installs no in-process machinery — no
- * environment registration, no WebSocket, no logger monkey-patching. It is a
+ * environment registration, no live updates, no logger monkey-patching. It is a
  * product you *use*, not infrastructure you *install*, so it has no
  * runtime/management split: a single {@link JobsClient} exposes the full
  * surface, reachable two ways:

@@ -3,7 +3,7 @@
  * (`_ensureConnected` → flush discovery → fetch + resolve all configs →
  * subscribe WS), `subscribe`, `getValue` (both forms), `bind` (plain object /
  * class instance / nested / parent-chain / seed-vs-sync), `refresh`,
- * `onChange` (three forms), the WebSocket event handlers
+ * `onChange` (three forms), the live-event handlers
  * (`config_changed` / `config_deleted` / `configs_changed`), the standalone
  * (owns-its-own-WS) and wired (borrows parent WS) connection paths, and the
  * LiveConfigProxy. CRUD + discovery coverage lives in client.test.ts.
@@ -13,8 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigClient } from "../../../src/config/client.js";
 import type { ConfigChangeEvent, ConfigParent } from "../../../src/config/client.js";
 import { SmplkitNotFoundError } from "../../../src/errors.js";
-import { _setLiveSocketFactory } from "../../../src/live_socket.js";
-import type { SharedWebSocket } from "../../../src/ws.js";
+import { EventStream } from "../../../src/event_stream.js";
 
 const mockFetch = vi.fn();
 
@@ -30,16 +29,18 @@ const API_KEY = "sk_api_test";
 
 type WsCallback = (data: Record<string, unknown>) => void;
 
-interface MockSharedWs {
+interface MockEventStream {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  onReconnect: ReturnType<typeof vi.fn>;
+  offReconnect: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   connectionStatus: string;
   _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
-function createMockSharedWs(): MockSharedWs {
+function createMockEventStream(): MockEventStream {
   const listeners: Record<string, WsCallback[]> = {};
   return {
     on: vi.fn((event: string, cb: WsCallback) => {
@@ -48,6 +49,8 @@ function createMockSharedWs(): MockSharedWs {
     off: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
+    onReconnect: vi.fn(),
+    offReconnect: vi.fn(),
     connectionStatus: "connected",
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
@@ -55,24 +58,24 @@ function createMockSharedWs(): MockSharedWs {
   };
 }
 
-/** Build a wired client with a fully-mocked parent + shared WebSocket. */
+/** Build a wired client with a fully-mocked parent + shared live stream. */
 function makeWired(opts: { environment?: string; service?: string | null } = {}): {
   client: ConfigClient;
   parent: ConfigParent;
-  ws: MockSharedWs;
+  ws: MockEventStream;
   ensureStarted: ReturnType<typeof vi.fn>;
 } {
-  const ws = createMockSharedWs();
+  const ws = createMockEventStream();
   const ensureStarted = vi.fn();
   const parent: ConfigParent = {
     _environment: opts.environment ?? "staging",
     _service: opts.service ?? "test-svc",
     _ensureStarted: ensureStarted,
-    _ensureWs: () => ws as unknown as SharedWebSocket,
+    _ensureStream: () => ws as unknown as EventStream,
   };
   // Pass an explicit apiKey so construction never depends on a `~/.smplkit`
   // file (absent in CI). The parent still supplies environment/service and the
-  // shared WebSocket; HTTP is driven through the mocked global fetch.
+  // shared live stream; HTTP is driven through the mocked global fetch.
   const client = new ConfigClient({ parent, apiKey: API_KEY });
   return { client, parent, ws, ensureStarted };
 }
@@ -177,13 +180,13 @@ describe("subscribe()", () => {
   });
 
   it("records a resolution metric when a metrics reporter is wired", async () => {
-    const ws = createMockSharedWs();
+    const ws = createMockEventStream();
     const record = vi.fn();
     const parent: ConfigParent = {
       _environment: "staging",
       _service: "svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => ws as unknown as SharedWebSocket,
+      _ensureStream: () => ws as unknown as EventStream,
     };
     const client = new ConfigClient({
       parent,
@@ -217,39 +220,41 @@ describe("subscribe()", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Standalone WebSocket path (owns its own SharedWebSocket)
+// Standalone live-stream path (owns its own EventStream)
 // ---------------------------------------------------------------------------
 
 describe("standalone live connection", () => {
-  // Standalone clients get their socket from the injected factory (the
-  // package-root wiring); tests wire a mock factory the same way.
-  it("opens and owns its own live socket via the injected factory, torn down on close()", async () => {
-    const fakeWs = createMockSharedWs();
-    const factory = vi.fn(() => fakeWs as any);
-    _setLiveSocketFactory(factory);
+  // Standalone clients construct their own EventStream directly; stub the
+  // prototype so no network connection is attempted.
+  it("opens and owns its own live stream on first live use, torn down on close()", async () => {
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+    const stopSpy = vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
+    const onSpy = vi.spyOn(EventStream.prototype, "on");
 
     const client = makeStandalone();
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
 
     await client.subscribe("app");
-    expect(factory).toHaveBeenCalledTimes(1);
-    expect(fakeWs.start).toHaveBeenCalledTimes(1);
-    expect(fakeWs.on).toHaveBeenCalledWith("config_changed", expect.any(Function));
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any)._ownsStream).toBe(true);
+    expect(onSpy).toHaveBeenCalledWith("config_changed", expect.any(Function));
 
     client.close();
-    expect(fakeWs.stop).toHaveBeenCalledTimes(1);
+    expect(stopSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("reuses the same owned WebSocket across live calls", async () => {
-    const fakeWs = createMockSharedWs();
-    _setLiveSocketFactory(() => fakeWs as any);
+  it("reuses the same owned stream across live calls", async () => {
+    const startSpy = vi.spyOn(EventStream.prototype, "start").mockImplementation(() => {});
+    vi.spyOn(EventStream.prototype, "stop").mockImplementation(() => {});
 
     const client = makeStandalone();
     mockListOnce([configResource({ id: "app", items: { retries: 3 } })]);
     await client.subscribe("app");
-    // A second live call must not open a second socket.
+    // A second live call must not open a second stream.
     await client.getValue("app", "retries");
-    expect(fakeWs.start).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    client.close();
   });
 });
 
@@ -509,7 +514,7 @@ describe("onChange()", () => {
     // Register the listener BEFORE the first live call. The first live call
     // (`subscribe`) lazily connects, and the initial resolve diffs against an
     // empty cache — so the pre-registered listener sees every resolved value
-    // as an "initial" change (distinct from "manual"/"websocket").
+    // as an "initial" change (distinct from "manual"/"push").
     const events: ConfigChangeEvent[] = [];
     client.onChange((e) => events.push(e));
 
@@ -642,13 +647,13 @@ describe("onChange()", () => {
   });
 
   it("records a change metric when a metrics reporter is wired", async () => {
-    const ws = createMockSharedWs();
+    const ws = createMockEventStream();
     const record = vi.fn();
     const parent: ConfigParent = {
       _environment: "staging",
       _service: "svc",
       _ensureStarted: vi.fn(),
-      _ensureWs: () => ws as unknown as SharedWebSocket,
+      _ensureStream: () => ws as unknown as EventStream,
     };
     const client = new ConfigClient({
       parent,
@@ -666,7 +671,7 @@ describe("onChange()", () => {
 });
 
 // ---------------------------------------------------------------------------
-// bind() — WebSocket-driven mutation of bound objects
+// bind() — push-driven mutation of bound objects
 // ---------------------------------------------------------------------------
 
 describe("bound-object mutation via refresh", () => {
@@ -712,10 +717,10 @@ describe("bound-object mutation via refresh", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WebSocket event handlers
+// Live-event handlers
 // ---------------------------------------------------------------------------
 
-describe("WebSocket handlers", () => {
+describe("live-event handlers", () => {
   it("config_changed: refetches the single config and fires change events", async () => {
     const { client, ws } = makeWired();
     mockListOnce([configResource({ id: "app", items: { timeout: 30 } })]);
@@ -735,7 +740,7 @@ describe("WebSocket handlers", () => {
     expect(events[0].configId).toBe("app");
     expect(events[0].itemKey).toBe("timeout");
     expect(events[0].newValue).toBe(60);
-    expect(events[0].source).toBe("websocket");
+    expect(events[0].source).toBe("push");
   });
 
   it("config_changed with no id falls through to a full configs_changed refresh", async () => {
@@ -860,6 +865,27 @@ describe("WebSocket handlers", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].newValue).toBe(99);
+  });
+
+  it("stream reconnect: runs the full bulk refresh and fires deltas with the push source", async () => {
+    const { client, ws } = makeWired();
+    mockListOnce([configResource({ id: "app", items: { timeout: 30 } })]);
+    await client.subscribe("app");
+    expect(ws.onReconnect).toHaveBeenCalledTimes(1);
+
+    const events: ConfigChangeEvent[] = [];
+    client.onChange((e) => events.push(e));
+
+    // While disconnected the value changed server-side; the reconnect
+    // refetch picks it up through the configs_changed bulk-refresh path.
+    mockListOnce([configResource({ id: "app", items: { timeout: 99 } })]);
+    const refetch = ws.onReconnect.mock.calls[0][0] as () => void;
+    refetch();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].newValue).toBe(99);
+    expect(events[0].source).toBe("push");
   });
 
   it("configs_changed: a failing refresh is swallowed", async () => {

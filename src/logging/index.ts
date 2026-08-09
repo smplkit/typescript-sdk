@@ -7,9 +7,9 @@
  * {@link SmplClient} or constructed directly.
  *
  * This module is also the package's `@smplkit/sdk/logging` subpath — the
- * edge/serverless entry. Its import graph is free of Node built-ins and of
- * the `ws` transport, so it bundles for edge runtimes (e.g. Cloudflare
- * Workers). Differences from the package root there:
+ * edge/serverless entry. Its import graph is free of Node built-ins, so it
+ * bundles for edge runtimes (e.g. Cloudflare Workers). Differences from the
+ * package root there:
  *
  * - Configuration resolves from defaults → the `SMPLKIT_API_KEY` /
  *   `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` / `SMPLKIT_ENVIRONMENT` /
@@ -18,10 +18,10 @@
  *   `node:fs`, and an isolate has no home directory anyway).
  * - Pass `streaming: false` for the stateless apply-once surface:
  *   `install()` loads adapters, flushes discovery, and applies the
- *   server's levels — all with `await` — and no socket, timers, or
- *   background state are created; `refresh()` re-applies on demand. With
- *   `streaming` left on, `install()` throws — WebSocket-driven updates
- *   need the package root.
+ *   server's levels — all with `await` — and no connection, timers, or
+ *   background state are created; `refresh()` re-applies on demand — the
+ *   right shape for short-lived isolates that cannot host a long-lived
+ *   live-updates connection.
  * - The built-in framework adapters (`WinstonAdapter`, `PinoAdapter`) are
  *   package-root exports: they wrap Node logging frameworks, which edge
  *   isolates don't host. Register a custom {@link LoggingAdapter} for an

@@ -27,7 +27,7 @@ const FORBIDDEN = [
   "@internal",
   "MetricsReporter",
   "ModelClient",
-  "SharedWebSocket",
+  "EventStream",
   "AuditEventBuffer",
   "ContextRegistrationBuffer",
 ] as const;

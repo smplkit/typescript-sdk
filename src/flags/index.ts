@@ -8,9 +8,9 @@
  * directly.
  *
  * This module is also the package's `@smplkit/sdk/flags` subpath — the
- * edge/serverless entry. Its import graph is free of Node built-ins and of
- * the `ws` transport, so it bundles for edge runtimes (e.g. Cloudflare
- * Workers). Differences from the package root there:
+ * edge/serverless entry. Its import graph is free of Node built-ins, so it
+ * bundles for edge runtimes (e.g. Cloudflare Workers). Differences from the
+ * package root there:
  *
  * - Configuration resolves from defaults → the `SMPLKIT_API_KEY` /
  *   `SMPLKIT_BASE_DOMAIN` / `SMPLKIT_SCHEME` / `SMPLKIT_ENVIRONMENT` /
@@ -20,9 +20,9 @@
  * - Pass `streaming: false` for the stateless read-through surface: the
  *   first live call fetches all flag definitions once with `await`,
  *   evaluation stays local, `refresh()` re-fetches on demand, and no
- *   socket, timers, or background state are created. With `streaming` left
- *   on, a live call throws — WebSocket-driven updates need the package
- *   root.
+ *   connection, timers, or background state are created — the right shape
+ *   for short-lived isolates that cannot host a long-lived live-updates
+ *   connection.
  * - There is no ambient per-request context (`client.setContext` is a
  *   {@link SmplClient} affordance backed by `AsyncLocalStorage`); pass
  *   evaluation contexts explicitly per call or via `setContextProvider`.

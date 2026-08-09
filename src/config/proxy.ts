@@ -3,7 +3,7 @@
  *
  * Returned by {@link ConfigClient.subscribe}. For typed access via an object
  * literal or class instance, use {@link ConfigClient.bind} instead — bound
- * objects stay live on the same WebSocket-driven cache, with no proxy
+ * objects stay live on the same push-updated cache, with no proxy
  * indirection.
  */
 

@@ -124,7 +124,6 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.1.0",
-    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vitest/coverage-v8": "^1.0.0",
@@ -141,7 +140,6 @@
   },
   "dependencies": {
     "json-logic-js": "^2.0.5",
-    "openapi-fetch": "^0.17.0",
-    "ws": "^8.20.0"
+    "openapi-fetch": "^0.17.0"
   }
 }

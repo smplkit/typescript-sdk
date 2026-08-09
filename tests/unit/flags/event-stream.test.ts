@@ -1,307 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ---------------------------------------------------------------------------
-// Part 1: SharedWebSocket tests (shared transport infra — src/ws.ts)
-// ---------------------------------------------------------------------------
-
-let wsInstances: MockWsInstance[] = [];
-
-interface MockWsInstance {
-  on: ReturnType<typeof vi.fn>;
-  send: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  _listeners: Record<string, ((...args: unknown[]) => void)[]>;
-  _emit: (event: string, ...args: unknown[]) => void;
-}
-
-function createMockWs(): MockWsInstance {
-  const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
-  const instance: MockWsInstance = {
-    on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
-      if (!listeners[event]) listeners[event] = [];
-      listeners[event].push(cb);
-    }),
-    send: vi.fn(),
-    close: vi.fn(),
-    _listeners: listeners,
-    _emit: (event: string, ...args: unknown[]) => {
-      for (const cb of listeners[event] ?? []) cb(...args);
-    },
-  };
-  wsInstances.push(instance);
-  return instance;
-}
-
-vi.mock("ws", () => {
-  const MockWebSocket = vi.fn().mockImplementation(() => createMockWs());
-  return { default: MockWebSocket };
-});
-
-const { SharedWebSocket } = await import("../../../src/ws.js");
-const WsMock = (await import("ws")).default as unknown as ReturnType<typeof vi.fn>;
-
-function getLastWsInstance(): MockWsInstance {
-  return wsInstances[wsInstances.length - 1];
-}
-
-beforeEach(() => {
-  vi.useFakeTimers();
-  wsInstances = [];
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe("SharedWebSocket", () => {
-  it("should start and create a WebSocket connection", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    expect(wsInstances).toHaveLength(1);
-    ws.stop();
-  });
-
-  it("should dispatch events by the event field", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    const events: Record<string, unknown>[] = [];
-    ws.on("flag_changed", (data) => events.push(data));
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", JSON.stringify({ type: "connected" }));
-    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "my-flag" }));
-
-    expect(events).toHaveLength(1);
-    expect(events[0].id).toBe("my-flag");
-
-    ws.stop();
-  });
-
-  it("should route config_changed to config listeners", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    const configEvents: Record<string, unknown>[] = [];
-    const flagEvents: Record<string, unknown>[] = [];
-    ws.on("config_changed", (data) => configEvents.push(data));
-    ws.on("flag_changed", (data) => flagEvents.push(data));
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", JSON.stringify({ type: "connected" }));
-    mock._emit("message", JSON.stringify({ event: "config_changed", config_id: "c-1" }));
-
-    expect(configEvents).toHaveLength(1);
-    expect(flagEvents).toHaveLength(0);
-
-    ws.stop();
-  });
-
-  it("should respond to ping with pong", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", "ping");
-
-    expect(mock.send).toHaveBeenCalledWith("pong");
-    ws.stop();
-  });
-
-  it("should unregister listeners with off", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    const events: unknown[] = [];
-    const cb = (data: Record<string, unknown>) => events.push(data);
-    ws.on("flag_changed", cb);
-    ws.off("flag_changed", cb);
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", JSON.stringify({ type: "connected" }));
-    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "x" }));
-
-    expect(events).toHaveLength(0);
-    ws.stop();
-  });
-
-  it("should set connection status to connected after confirmation", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("open");
-    expect(ws.connectionStatus).toBe("connecting");
-
-    mock._emit("message", JSON.stringify({ type: "connected" }));
-    expect(ws.connectionStatus).toBe("connected");
-
-    ws.stop();
-  });
-
-  it("should schedule reconnect on close event", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("close");
-
-    expect(ws.connectionStatus).toBe("connecting");
-
-    vi.advanceTimersByTime(1100);
-    expect(wsInstances).toHaveLength(2);
-
-    ws.stop();
-  });
-
-  it("should not reconnect after stop", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-    ws.stop();
-
-    const initialCount = wsInstances.length;
-    vi.advanceTimersByTime(120_000);
-    expect(wsInstances.length).toBe(initialCount);
-  });
-
-  it("should report disconnected after stop", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-    ws.stop();
-    expect(ws.connectionStatus).toBe("disconnected");
-  });
-
-  it("should ignore unparseable JSON messages", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", "not-json{{{");
-
-    ws.stop();
-  });
-
-  it("should ignore error events (close handles reconnect)", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("error", new Error("connection reset"));
-
-    ws.stop();
-  });
-
-  it("should ignore error-type messages from server", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    const events: unknown[] = [];
-    ws.on("error", (data) => events.push(data));
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", JSON.stringify({ type: "error", message: "bad request" }));
-
-    expect(events).toHaveLength(0);
-    ws.stop();
-  });
-
-  it("should handle URL without protocol prefix", () => {
-    const ws = new SharedWebSocket("app.smplkit.com", "sk_test");
-    ws.start();
-    expect(wsInstances).toHaveLength(1);
-    ws.stop();
-  });
-
-  it("should close WS if open event fires after stop", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    ws.stop();
-
-    mock._emit("open");
-    expect(mock.close).toHaveBeenCalled();
-  });
-
-  it("should cancel pending reconnect timer on stop", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("close");
-    expect(ws.connectionStatus).toBe("connecting");
-
-    ws.stop();
-    expect(ws.connectionStatus).toBe("disconnected");
-
-    vi.advanceTimersByTime(120_000);
-    expect(wsInstances).toHaveLength(1);
-  });
-
-  it("should handle http:// URL by converting to ws://", () => {
-    const ws = new SharedWebSocket("http://localhost:3000", "sk_test");
-    ws.start();
-    expect(wsInstances).toHaveLength(1);
-    ws.stop();
-  });
-
-  it("should handle WS error followed by close for reconnect", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("error", new Error("ECONNREFUSED"));
-    mock._emit("close");
-
-    expect(ws.connectionStatus).toBe("connecting");
-
-    vi.advanceTimersByTime(1100);
-    expect(wsInstances).toHaveLength(2);
-
-    ws.stop();
-  });
-
-  it("should schedule reconnect when WebSocket constructor throws", () => {
-    WsMock.mockImplementationOnce(() => {
-      throw new Error("connection refused");
-    });
-
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-
-    expect(ws.connectionStatus).toBe("connecting");
-
-    WsMock.mockImplementation(() => createMockWs());
-
-    vi.advanceTimersByTime(1100);
-    expect(wsInstances).toHaveLength(1);
-
-    ws.stop();
-  });
-
-  it("should not schedule reconnect when constructor throws after stop", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.start();
-    ws.stop();
-
-    expect(ws.connectionStatus).toBe("disconnected");
-  });
-
-  it("should swallow errors thrown by event listeners", () => {
-    const ws = new SharedWebSocket("https://app.smplkit.com", "sk_test");
-    ws.on("flag_changed", () => {
-      throw new Error("listener error");
-    });
-    ws.start();
-
-    const mock = getLastWsInstance();
-    mock._emit("message", JSON.stringify({ type: "connected" }));
-    mock._emit("message", JSON.stringify({ event: "flag_changed", id: "x" }));
-
-    ws.stop();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Part 2: FlagsClient WebSocket event handlers + change listeners
-// ---------------------------------------------------------------------------
+// FlagsClient live-event handlers + change listeners, driven through a mock
+// shared live stream (the EventStream transport itself is covered in
+// tests/unit/event-stream.test.ts).
 
 import { FlagsClient, FlagChangeEvent } from "../../../src/flags/client.js";
 import { SmplError } from "../../../src/errors.js";
@@ -315,8 +16,9 @@ async function connected(
 ): Promise<ReturnType<typeof makeWiredClient>> {
   const harness = makeWiredClient();
   mockFetch.mockResolvedValueOnce(flagListResponse(initial));
-  // _ensureConnected fetches definitions once and registers the WS handlers,
-  // without the second fetch + listener fan-out that refresh() performs.
+  // _ensureConnected fetches definitions once and registers the event
+  // handlers, without the second fetch + listener fan-out that refresh()
+  // performs.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (harness.client as any)._ensureConnected();
   return harness;
@@ -408,7 +110,7 @@ describe("FlagsClient change listeners", () => {
       });
     });
 
-    it("includes source 'websocket'", async () => {
+    it("includes source 'push'", async () => {
       const { client, ws } = await connected([{ id: "my-flag", default: false }]);
       const sources: string[] = [];
       await client.onChange((e) => sources.push(e.source));
@@ -416,7 +118,7 @@ describe("FlagsClient change listeners", () => {
       mockFetch.mockResolvedValueOnce(flagSingleResponse({ id: "my-flag", default: true }));
       ws._emit("flag_changed", { id: "my-flag" });
 
-      await vi.waitFor(() => expect(sources).toContain("websocket"));
+      await vi.waitFor(() => expect(sources).toContain("push"));
     });
 
     it("does NOT fire listeners when content is unchanged", async () => {
@@ -610,6 +312,43 @@ describe("FlagsClient change listeners", () => {
     });
   });
 
+  describe("reconnect refetch", () => {
+    it("registers a refetch callback with the shared stream on connect", async () => {
+      const { ws } = await connected([{ id: "flag-a" }]);
+      expect(ws.onReconnect).toHaveBeenCalledTimes(1);
+      expect(ws.onReconnect).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    it("performs the full bulk refresh when the stream reconnects", async () => {
+      const { client, ws } = await connected([{ id: "flag-a", default: false }]);
+      const events: FlagChangeEvent[] = [];
+      await client.onChange((e) => events.push(e));
+
+      // While "disconnected", flag-a changed server-side; on reconnect the
+      // refetch picks it up and fires listeners with the push source.
+      mockFetch.mockResolvedValueOnce(flagListResponse([{ id: "flag-a", default: true }]));
+      ws._fireReconnect();
+
+      await vi.waitFor(() => {
+        expect(events).toHaveLength(1);
+        expect(events[0].id).toBe("flag-a");
+        expect(events[0].source).toBe("push");
+      });
+    });
+
+    it("does not fire listeners when the reconnect refetch finds no changes", async () => {
+      const { client, ws } = await connected([{ id: "flag-a", default: false }]);
+      const events: string[] = [];
+      await client.onChange((e) => events.push(e.id));
+
+      mockFetch.mockResolvedValueOnce(flagListResponse([{ id: "flag-a", default: false }]));
+      ws._fireReconnect();
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(events).toHaveLength(0);
+    });
+  });
+
   describe("manual-refresh listener error handling", () => {
     it("swallows errors from global listeners on refresh", async () => {
       const { client } = await connected([{ id: "my-flag" }]);
@@ -646,9 +385,9 @@ describe("FlagsClient change listeners", () => {
 
   describe("FlagChangeEvent", () => {
     it("exposes id, source, and deleted", () => {
-      const event = new FlagChangeEvent({ id: "my-flag", source: "websocket", deleted: true });
+      const event = new FlagChangeEvent({ id: "my-flag", source: "push", deleted: true });
       expect(event.id).toBe("my-flag");
-      expect(event.source).toBe("websocket");
+      expect(event.source).toBe("push");
       expect(event.deleted).toBe(true);
     });
   });

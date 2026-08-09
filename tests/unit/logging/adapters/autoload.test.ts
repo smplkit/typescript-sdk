@@ -1,7 +1,7 @@
 /**
  * Adapter auto-loading and the remaining live-surface edge paths of the
  * fused LoggingClient: the periodic flush timer, the level-change metric in
- * `_applyLevels`, the WebSocket-handler `.catch` branches, the single-resource
+ * `_applyLevels`, the live-event-handler `.catch` branches, the single-resource
  * fetcher fallbacks, and the standalone URL-derivation path.
  */
 
@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import createClient from "openapi-fetch";
 import { LoggingClient, type LoggingParent } from "../../../../src/logging/client.js";
 import type { LoggingAdapter } from "../../../../src/logging/adapters/base.js";
-import type { SharedWebSocket } from "../../../../src/ws.js";
+import type { EventStream } from "../../../../src/event_stream.js";
 import { SmplConnectionError } from "../../../../src/errors.js";
 
 const mockFetch = vi.fn();
@@ -41,14 +41,16 @@ function makeTransport(): any {
 
 type WsCallback = (data: Record<string, unknown>) => void;
 
-interface MockSharedWs {
+interface MockEventStream {
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
+  onReconnect: ReturnType<typeof vi.fn>;
+  offReconnect: ReturnType<typeof vi.fn>;
   connectionStatus: string;
   _emit: (event: string, data: Record<string, unknown>) => void;
 }
 
-function createMockSharedWs(): MockSharedWs {
+function createMockEventStream(): MockEventStream {
   const listeners: Record<string, WsCallback[]> = {};
   return {
     on: vi.fn((event: string, cb: WsCallback) => {
@@ -56,6 +58,8 @@ function createMockSharedWs(): MockSharedWs {
       listeners[event].push(cb);
     }),
     off: vi.fn(),
+    onReconnect: vi.fn(),
+    offReconnect: vi.fn(),
     connectionStatus: "connected",
     _emit: (event: string, data: Record<string, unknown>) => {
       for (const cb of listeners[event] ?? []) cb(data);
@@ -63,15 +67,15 @@ function createMockSharedWs(): MockSharedWs {
   };
 }
 
-let lastMockWs: MockSharedWs;
+let lastMockWs: MockEventStream;
 
 function makeParent(): LoggingParent {
-  lastMockWs = createMockSharedWs();
+  lastMockWs = createMockEventStream();
   return {
     _environment: "production",
     _service: "svc",
     _ensureStarted: vi.fn(),
-    _ensureWs: () => lastMockWs as unknown as SharedWebSocket,
+    _ensureStream: () => lastMockWs as unknown as EventStream,
   };
 }
 
@@ -186,7 +190,7 @@ describe("LoggingClient — _applyLevels metric", () => {
 });
 
 // ===========================================================================
-// WebSocket-handler .catch branches
+// Live-event-handler .catch branches
 // ===========================================================================
 
 describe("LoggingClient — WS handler error branches", () => {

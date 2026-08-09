@@ -14,19 +14,19 @@
  *   `numberFlag` / `jsonFlag`) whose `.get()` evaluates against the cached
  *   definitions, plus `refresh` / `stats` / `onChange`. The first live call
  *   transparently flushes discovery, fetches all flag definitions into the
- *   local cache, and opens the live-updates WebSocket — no explicit install
+ *   local cache, and opens the live-updates stream — no explicit install
  *   step.
  *
  * The client supports two construction shapes:
  *
  * - **Wired** into {@link SmplClient} — borrows the parent's flags transport
- *   for both runtime fetch and CRUD, the parent's shared WebSocket for the
- *   live channel, and `client.platform.contexts` for evaluation-context
- *   registration. This is the common path.
+ *   for both runtime fetch and CRUD, the parent's shared live event stream
+ *   for the live channel, and `client.platform.contexts` for
+ *   evaluation-context registration. This is the common path.
  * - **Standalone** — `new FlagsClient({ apiKey, baseUrl, ... })` builds and
  *   owns its own flags transport and a contexts client (against its own app
- *   transport), and on first live use opens and owns its own WebSocket.
- *   `close()` tears down only the owned transports and owned WebSocket.
+ *   transport), and on first live use opens and owns its own live stream.
+ *   `close()` tears down only the owned transports and owned stream.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -61,7 +61,7 @@ import { keyToDisplayName } from "../helpers.js";
 import { ContextsClient } from "../platform/client.js";
 import { ContextRegistrationBuffer } from "../buffer.js";
 import type { MetricsReporter } from "../_metrics.js";
-import { _liveSocketFactory, noLiveSocketMessage, type LiveSocket } from "../live_socket.js";
+import { EventStream } from "../event_stream.js";
 import { debug } from "../_debug.js";
 
 // Use require-style import for json-logic-js (no TS types)
@@ -77,7 +77,7 @@ export interface FlagsParent {
   readonly _environment: string;
   readonly _service: string | null;
   _ensureStarted(): void;
-  _ensureWs(): LiveSocket;
+  _ensureStream(): EventStream;
 }
 
 const CACHE_MAX_SIZE = 10_000;
@@ -373,7 +373,7 @@ function evaluateFlag(
 export class FlagChangeEvent {
   /** The flag id that changed. */
   readonly id: string;
-  /** How the change was delivered (`"websocket"` or `"manual"`). */
+  /** How the change was delivered (`"push"` or `"manual"`). */
   readonly source: string;
   /** True when the flag was deleted. */
   readonly deleted: boolean;
@@ -530,13 +530,13 @@ export interface FlagsClientOptions {
    */
   service?: string;
   /**
-   * Live updates over WebSocket (default `true`): the first live call opens
-   * a shared socket and flag changes stream in. Set `false` for the
+   * Live updates (default `true`): the first live call opens a shared
+   * live-updates stream and flag changes are pushed in. Set `false` for the
    * stateless read-through surface: the first live call fetches all flag
    * definitions once with `await`, evaluation stays local, `refresh()`
-   * re-fetches on demand, and NO socket, timers, or background state are
-   * created — the right shape for serverless and edge runtimes (for example
-   * Cloudflare Workers), whose isolates cannot host socket-driven state.
+   * re-fetches on demand, and NO connection, timers, or background state
+   * are created — the right shape for short-lived serverless invocations
+   * that cannot host long-lived connection state.
    * `onChange` listeners fire only from explicit `refresh()` calls in this
    * mode (there is no stream to drive them).
    */
@@ -588,7 +588,7 @@ export interface FlagsClientOptions {
  * is pure CRUD. The live surface (`booleanFlag` / `stringFlag` /
  * `numberFlag` / `jsonFlag` / `refresh` / `stats` / `onChange`) connects
  * lazily on first use — the first call flushes discovery, fetches all flag
- * definitions into the local cache, and opens the live-updates WebSocket. No
+ * definitions into the local cache, and opens the live-updates stream. No
  * explicit install step is required.
  */
 export class FlagsClient {
@@ -609,19 +609,19 @@ export class FlagsClient {
   /** @internal — owned discovery buffer (no management delegation). */
   readonly _buffer = new FlagRegistrationBuffer();
 
-  // Standalone-only transport / WebSocket state.
+  // Standalone-only transport / live-stream state.
   private readonly _appBaseUrl: string | null;
   private readonly _appHttpStandalone: AppHttp | null;
   private readonly _standaloneApiKey: string | null;
-  private _wsManager: LiveSocket | null = null;
-  private _ownsWs = false;
-  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no socket. */
+  private _stream: EventStream | null = null;
+  private _ownsStream = false;
+  /** @internal `false` = stateless mode: fetch on connect, poll with refresh(), no stream. */
   private readonly _streaming: boolean;
 
   // Live-surface state.
   private _flagStore: Record<string, Record<string, any>> = {};
   private _connected = false;
-  private _wsSubscribed = false;
+  private _subscribed = false;
   private _cache = new ResolutionCache();
   private _handles: Record<string, Flag> = {};
   private _contextProvider: (() => Context[]) | null = null;
@@ -1028,33 +1028,29 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Live surface: lazy connect + transport / WebSocket helpers
+  // Live surface: lazy connect + transport / live-stream helpers
   // ------------------------------------------------------------------
 
-  /** Return the shared live socket — the parent's when wired, else our own. @internal */
-  private _ensureWs(): LiveSocket {
+  /** Return the shared live stream — the parent's when wired, else our own. @internal */
+  private _ensureStream(): EventStream {
     if (this._parent !== null) {
-      return this._parent._ensureWs();
+      return this._parent._ensureStream();
     }
-    if (this._wsManager === null) {
-      const factory = _liveSocketFactory();
-      if (factory === null) {
-        // The `@smplkit/sdk/flags` edge entry has no socket implementation.
-        throw new SmplkitError(noLiveSocketMessage("flags"));
-      }
-      this._wsManager = factory(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
-      this._wsManager.start();
-      this._ownsWs = true;
+    if (this._stream === null) {
+      this._stream = new EventStream(this._appBaseUrl!, this._standaloneApiKey!, this._metrics);
+      this._stream.start();
+      this._ownsStream = true;
     }
-    return this._wsManager;
+    return this._stream;
   }
 
   /**
    * Open the live connection to the running Smpl Flags service.
    *
    * Flushes any buffered discovery declarations, fetches all flag
-   * definitions into the local cache, opens the shared WebSocket, and
-   * subscribes to `flag_changed` / `flag_deleted` / `flags_changed` events.
+   * definitions into the local cache, opens the shared live event stream,
+   * and subscribes to `flag_changed` / `flag_deleted` / `flags_changed`
+   * events.
    *
    * Idempotent and internal — every live method calls it on first use, so the
    * live surface auto-connects with no explicit step.
@@ -1066,12 +1062,11 @@ export class FlagsClient {
     }
     if (this._connected) return;
 
-    // Resolve the socket up front — an unavailable live transport (an edge
-    // entry with `streaming` left on) must fail before any fetch or state
-    // mutation so every live call fails the same way. In stateless mode
-    // (`streaming: false`) no socket is ever created and refresh()
+    // Resolve the stream up front so a failure to construct it happens
+    // before any fetch or state mutation. In stateless mode
+    // (`streaming: false`) no stream is ever created and refresh()
     // re-fetches on demand.
-    const ws = this._streaming ? this._ensureWs() : null;
+    const stream = this._streaming ? this._ensureStream() : null;
 
     // Flush discovered flags BEFORE fetching definitions so the fetch
     // reflects them. Items stay in the buffer until the POST succeeds.
@@ -1088,11 +1083,14 @@ export class FlagsClient {
     this._cache.clear();
     this._connected = true;
 
-    if (ws !== null && !this._wsSubscribed) {
-      ws.on("flag_changed", this._handleFlagChanged);
-      ws.on("flag_deleted", this._handleFlagDeleted);
-      ws.on("flags_changed", this._handleFlagsChanged);
-      this._wsSubscribed = true;
+    if (stream !== null && !this._subscribed) {
+      stream.on("flag_changed", this._handleFlagChanged);
+      stream.on("flag_deleted", this._handleFlagDeleted);
+      stream.on("flags_changed", this._handleFlagsChanged);
+      // On every successful reconnect the stream re-runs the full refetch,
+      // so changes missed while disconnected are picked up and diffed.
+      stream.onReconnect(this._refetchOnReconnect);
+      this._subscribed = true;
     }
   }
 
@@ -1379,11 +1377,17 @@ export class FlagsClient {
   }
 
   // ------------------------------------------------------------------
-  // Internal: event handlers (called by SharedWebSocket)
+  // Internal: event handlers (called by the shared EventStream)
   // ------------------------------------------------------------------
 
+  /** Full refetch after a stream reconnect — the same bulk-refresh path the
+   *  `flags_changed` handler runs, so listeners fire only on real deltas. */
+  private _refetchOnReconnect = (): void => {
+    this._handleFlagsChanged({});
+  };
+
   private _handleFlagChanged = (data: Record<string, any>): void => {
-    debug("websocket", `flag_changed event received: ${JSON.stringify(data)}`);
+    debug("events", `flag_changed event received: ${JSON.stringify(data)}`);
     const key = data.id as string | undefined;
     if (!key) return;
     const pre = this._flagStore[key];
@@ -1395,31 +1399,31 @@ export class FlagsClient {
         this._flagStore[key] = newData;
         this._cache.clear();
         if (preJson !== newJson) {
-          this._fireChangeListeners(key, "websocket");
+          this._fireChangeListeners(key, "push");
         }
       })
       .catch((err: unknown) => {
         debug(
-          "websocket",
+          "events",
           `flag_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
   };
 
   private _handleFlagDeleted = (data: Record<string, any>): void => {
-    debug("websocket", `flag_deleted event received: ${JSON.stringify(data)}`);
+    debug("events", `flag_deleted event received: ${JSON.stringify(data)}`);
     const key = data.id as string | undefined;
     if (!key) return;
     const existed = key in this._flagStore;
     delete this._flagStore[key];
     this._cache.clear();
     if (existed) {
-      this._fireChangeListeners(key, "websocket", true);
+      this._fireChangeListeners(key, "push", true);
     }
   };
 
   private _handleFlagsChanged = (_data: Record<string, any>): void => {
-    debug("websocket", `flags_changed event received`);
+    debug("events", `flags_changed event received`);
     const preStore = { ...this._flagStore };
     void this._fetchAllFlags()
       .then(() => {
@@ -1434,7 +1438,7 @@ export class FlagsClient {
         }
         if (changed.length === 0) return;
         // Global listener fires once
-        const firstEvent = new FlagChangeEvent({ id: changed[0], source: "websocket" });
+        const firstEvent = new FlagChangeEvent({ id: changed[0], source: "push" });
         for (const cb of this._globalListeners) {
           try {
             cb(firstEvent);
@@ -1445,7 +1449,7 @@ export class FlagsClient {
         // Per-key listeners fire for each changed key
         for (const key of changed) {
           const deleted = key in preStore && !(key in postStore);
-          const event = new FlagChangeEvent({ id: key, source: "websocket", deleted });
+          const event = new FlagChangeEvent({ id: key, source: "push", deleted });
           const keyCallbacks = this._keyListeners.get(key);
           if (keyCallbacks) {
             for (const cb of keyCallbacks) {
@@ -1460,7 +1464,7 @@ export class FlagsClient {
       })
       .catch((err: unknown) => {
         debug(
-          "websocket",
+          "events",
           `flags_changed handler error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
@@ -1562,15 +1566,15 @@ export class FlagsClient {
   /**
    * Release resources — only those this client owns.
    *
-   * Tears down the owned WebSocket (opened by a standalone client on first
-   * live use). A wired client borrows the parent's transport, WebSocket, and
-   * contexts client and closes none of them.
+   * Tears down the owned live stream (opened by a standalone client on
+   * first live use). A wired client borrows the parent's transport, live
+   * stream, and contexts client and closes none of them.
    */
   close(): void {
-    if (this._ownsWs && this._wsManager !== null) {
-      this._wsManager.stop();
-      this._wsManager = null;
-      this._ownsWs = false;
+    if (this._ownsStream && this._stream !== null) {
+      this._stream.stop();
+      this._stream = null;
+      this._ownsStream = false;
     }
   }
 }

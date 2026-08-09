@@ -4,14 +4,13 @@
  * - Each entry module exposes its client plus the shared typed error
  *   surface (so edge callers can catch what the client throws).
  * - The seam modules default to their edge state in a fresh module graph:
- *   no live-socket factory, empty ambient context.
+ *   empty ambient context.
  *
- * The node:/ws-free property of the built entries is enforced at build
- * time (dist verification); these tests pin the export surface.
+ * The node-built-in-free property of the built entries is enforced at
+ * build time (dist verification); these tests pin the export surface.
  */
 
 import { describe, expect, test } from "vitest";
-import { _liveSocketFactory, noLiveSocketMessage } from "../../src/live_socket.js";
 import { getAmbientContext } from "../../src/ambient_context.js";
 
 describe("edge entry export surfaces", () => {
@@ -73,16 +72,6 @@ describe("edge entry export surfaces", () => {
 });
 
 describe("seam defaults (edge state — package root not imported)", () => {
-  test("no live-socket factory is wired", () => {
-    expect(_liveSocketFactory()).toBeNull();
-  });
-
-  test("the no-socket error message names the entry and the way out", () => {
-    const msg = noLiveSocketMessage("flags");
-    expect(msg).toContain("@smplkit/sdk/flags");
-    expect(msg).toContain("streaming: false");
-  });
-
   test("the ambient context defaults to empty", () => {
     expect(getAmbientContext()).toEqual([]);
   });
